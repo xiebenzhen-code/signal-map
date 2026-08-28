@@ -2,7 +2,7 @@
 
 ## Goal
 
-Give every Signal Map filter an independent knowledge state while keeping long-lived personal identity reusable. Switching filters must never mix known information, gaps, questions, judgements, tracked entities, tracked events, or evidence history between filters.
+Give every Signal Map filter an independent knowledge state while keeping a reusable default identity that each filter may override. Switching filters must never mix known information, gaps, questions, judgements, tracked entities, tracked events, evidence history, or prior research results between filters.
 
 This change does not alter the UI, scoring, research pipeline, provider integrations, or product navigation.
 
@@ -19,15 +19,15 @@ The application currently persists one global `KnowledgeState`, while `Informati
 
 ### Personal profile
 
-`PersonalProfile` owns long-lived user information that is reusable across filters.
+`PersonalProfile` owns the reusable default identity. A filter may override it without changing other filters.
 
 ```ts
 type PersonalProfile = {
-  identity: string;
+  defaultIdentity: string;
 };
 ```
 
-`identity` is global. `industry` is not global because one person may create filters for unrelated industries.
+`defaultIdentity` is reused when a filter has no override. `industry` is not global because one person may create filters for unrelated industries.
 
 ### Filter definition
 
@@ -37,14 +37,40 @@ type PersonalProfile = {
 type InformationFilter = {
   id: string;
   filterName: string;
+  identityOverride?: string;
   industry: string;
   focusAreas: string[];
   freshnessWindow: "1d" | "3d" | "7d" | "30d";
-  sourceScope: "official" | "verified" | "all";
+  sourceScope: "domestic" | "global" | "hybrid" | "custom";
+  customSources?: string[];
   createdAt: string;
   updatedAt: string;
 };
 ```
+
+`sourceScope` controls discovery coverage, not trust. `domestic` searches domestic sources, `global` searches global sources, `hybrid` searches both, and `custom` uses `customSources`. Social sources remain eligible for discovery in every applicable scope.
+
+Source purpose and evidence status are independent source/event fields:
+
+```ts
+type SourceRole = "discovery" | "verification";
+
+type VerificationStatus =
+  | "verified"
+  | "partially_verified"
+  | "unverified"
+  | "conflicting";
+
+type EvidenceSource = {
+  sourceUrl: string;
+  publisher: string;
+  publishedAt?: string;
+  sourceRole: SourceRole;
+  verificationStatus: VerificationStatus;
+};
+```
+
+`sourceRole: "discovery"` may surface a lead but cannot by itself promote a claim to Fact. Verification remains evidence-driven.
 
 ### Filter knowledge
 
@@ -52,6 +78,8 @@ type InformationFilter = {
 
 ```ts
 type FilterKnowledgeState = {
+  revision: number;
+  updatedAt: string;
   knownInformation: string[];
   informationGaps: string[];
   currentQuestions: string[];
@@ -71,7 +99,15 @@ Research receives a derived `ActiveKnowledgeContext`. It is composed on demand a
 ```ts
 type ActiveKnowledgeContext = PersonalProfile &
   Pick<InformationFilter, "industry" | "focusAreas" | "freshnessWindow"> &
-  FilterKnowledgeState;
+  FilterKnowledgeState & {
+    identity: string;
+  };
+```
+
+Composition resolves identity as:
+
+```ts
+const identity = filter.identityOverride ?? profile.defaultIdentity;
 ```
 
 Existing provider and pipeline interfaces may continue to call this composed value `KnowledgeState` during the incremental migration, but storage and page state must not treat it as a separate source of truth.
@@ -80,11 +116,13 @@ Existing provider and pipeline interfaces may continue to call this composed val
 
 | Concept | Source of truth |
 | --- | --- |
-| Long-lived identity | `PersonalProfile` |
-| Filter name, industry, focus, freshness, source scope | `InformationFilter` |
-| Known information, gaps, questions, judgements, tracking, history | `knowledgeByFilterId[filterId]` |
+| Default identity | `PersonalProfile.defaultIdentity` |
+| Filter-specific identity | `InformationFilter.identityOverride` |
+| Filter name, industry, focus, freshness, discovery scope | `InformationFilter` |
+| Known information, gaps, questions, judgements, tracking, history, revision | `knowledgeByFilterId[filterId]` |
 | Active selection | `activeFilterId` |
 | Research input | Derived `ActiveKnowledgeContext` |
+| Last result for one filter | `lastRunByFilterId[filterId]` |
 
 No field may be writable from two of these stores.
 
@@ -104,26 +142,39 @@ type AlphaSnapshotV2 = {
   feedback: FeedbackRecord[];
   experienceFeedback: ExperienceFeedback[];
   sessionId: string | null;
-  lastRun: InformationRun | null;
+  lastRunByFilterId: Record<string, InformationRun>;
 };
 ```
 
-The legacy `knowledge` key remains readable for migration and is not deleted. New code stops writing it after migration.
+Every newly persisted run records its knowledge revision:
+
+```ts
+type InformationRun = {
+  // existing fields remain unchanged
+  filterId: string;
+  generatedFromKnowledgeRevision: number;
+};
+```
+
+The legacy `knowledge` and `lastRun` keys remain readable for recovery and are not deleted. New code stops writing them after migration.
 
 ## Migration from the global KnowledgeState
 
 Migration is pure, deterministic, and idempotent.
 
 1. If `knowledgeSchemaVersion === 2` and `knowledgeByFilterId` exists, return the V2 data unchanged.
-2. Create `profile.identity` from legacy `knowledge.identity`; fall back to the active filter's legacy identity and then an empty string.
+2. Create `profile.defaultIdentity` from legacy `knowledge.identity`; fall back to the active filter's legacy identity and then an empty string.
 3. For the active filter, merge the legacy global knowledge with the filter's legacy fields:
    - Arrays are unioned with stable deduplication.
    - Global `trackedEntities`, `trackedEvents`, `userJudgements`, and `evidenceHistory` are retained here because they belonged to the last active context.
 4. For each inactive filter, initialize its knowledge from only that filter's legacy `knownInformation`, `informationGaps`, and `currentQuestions`.
 5. Do not copy the active filter's tracking, judgement, or evidence history into inactive filters.
-6. Filters are normalized into the new query-only representation.
-7. Persist `profile`, `knowledgeByFilterId`, and `knowledgeSchemaVersion: 2` before normal application writes resume.
-8. Leave the legacy `knowledge` record untouched as a recovery fallback.
+6. Set every migrated `FilterKnowledgeState` to `revision: 1` and use the migration time for `updatedAt`.
+7. Normalize each filter into the new query-only representation. A legacy filter identity becomes `identityOverride` only when it differs from `profile.defaultIdentity`.
+8. Map legacy source scopes `official`, `verified`, and `all` to `hybrid`. Those old values mixed trust policy with discovery coverage; verification gates continue to control Fact promotion.
+9. Do not import legacy `lastRun` into `lastRunByFilterId`, because it has no trustworthy filter/revision provenance. Retain the legacy key for recovery and trigger a fresh calculation for the active filter.
+10. Persist `profile`, `knowledgeByFilterId`, empty `lastRunByFilterId`, and `knowledgeSchemaVersion: 2` before normal application writes resume.
+11. Leave the legacy `knowledge` and `lastRun` records untouched as recovery fallbacks.
 
 If there is no active filter, retain the global legacy knowledge in a reserved migration entry until a filter becomes active, rather than discarding it.
 
@@ -133,15 +184,19 @@ If there is no active filter, retain the global legacy knowledge in a reserved m
 
 The existing onboarding draft remains a UI concern. Submission splits it into:
 
-- reusable `profile.identity`;
+- reusable `profile.defaultIdentity` and an optional filter identity override;
 - an `InformationFilter` query definition;
 - a new `FilterKnowledgeState` stored under the new filter ID.
 
 ### Edit active filter
 
-- Identity edits update `profile`.
-- Industry, focus areas, freshness, and source scope edits update the active `InformationFilter`.
+- Default identity edits update `profile.defaultIdentity`; filter-specific identity edits update only `identityOverride`.
+- Industry, focus areas, freshness, and discovery scope edits update the active `InformationFilter`.
 - Known information, gaps, questions, judgements, tracked entities, tracked events, and evidence history update only `knowledgeByFilterId[activeFilterId]`.
+- Every semantic knowledge mutation creates a new object with `revision + 1` and a new `updatedAt`.
+- Any change to an input that materially changes this filter's derived research context also increments that filter's knowledge revision. This includes industry, focus areas, freshness window, source scope, custom sources, and identity override.
+- Changing `profile.defaultIdentity` increments the revision of every filter that does not define `identityOverride`; filters with an override are unaffected.
+- Hydration, read-only composition, navigation, and sorting do not increment revision.
 
 ### Switch filter
 
@@ -149,10 +204,33 @@ The existing onboarding draft remains a UI concern. Submission splits it into:
 2. Set `activeFilterId` to the target ID.
 3. Read the target filter and its `FilterKnowledgeState`.
 4. Initialize a missing entry only from that target filter's migrated/default data.
-5. Compose `ActiveKnowledgeContext` from profile, target filter, and target knowledge.
-6. Clear the previous result and recalculate Today with the composed context.
+5. Compose `ActiveKnowledgeContext` from profile, target filter, and target knowledge, resolving identity from override then default.
+6. Read only `lastRunByFilterId[targetId]`; never retain the previous filter's visible result.
+7. If the target run is missing or stale, clear the visible result and recalculate Today with the composed context.
+8. If it is current, show that filter's own cached result while an explicitly requested refresh runs.
 
 The previous filter's knowledge is never an input to this composition.
+
+## Stale-result detection
+
+A result is current only when all of the following are true:
+
+```ts
+run.filterId === activeFilter.id &&
+run.generatedFromKnowledgeRevision === activeKnowledge.revision
+```
+
+The flow is:
+
+1. A knowledge mutation increments only the active filter knowledge revision.
+2. The existing result immediately becomes stale because its recorded revision no longer matches.
+3. A stale result is not rendered as current Today information.
+4. The application triggers a new filter/research run with the new `ActiveKnowledgeContext`.
+5. On success, save the result to `lastRunByFilterId[filterId]` with the exact revision used to generate it.
+6. If a newer knowledge mutation occurs while the request is in flight, the returned older revision remains stale and cannot replace the current result.
+7. Demo fallback results follow the same filter ID and revision rules.
+
+Filter query and effective identity changes increment the affected filter knowledge revision before recalculation. The one revision therefore represents the complete effective research context, including knowledge, filter configuration, and resolved identity. `InformationFilter.updatedAt` still records the filter-definition edit time but is not a competing validity source.
 
 ## Targeted extraction from app/page.tsx
 
@@ -173,7 +251,7 @@ UI components and render functions remain in `app/page.tsx`. Only domain and dat
 ## Type ownership corrections
 
 - `PersonalProfile`, `InformationFilter`, `FilterKnowledgeState`, `KnowledgeByFilterId`, and the derived knowledge context belong to `information/types.ts`.
-- `ResearchSignal`, `Claim`, verification types, and research response types remain in `research/types.ts`.
+- `ResearchSignal`, `Claim`, `SourceRole`, verification types, and research response types remain in `research/types.ts`.
 - Provider payload and connection contracts remain in `social/providers/types.ts`.
 - `AlphaSnapshotV2` and migration-only legacy persistence shapes remain in `lib/alpha-storage.ts`.
 - `LibraryEntry` is a product/domain concept and moves out of the storage adapter into `information/types.ts`.
@@ -188,12 +266,17 @@ Implementation follows red-green-refactor. Add only high-value tests:
 ### Knowledge isolation and migration
 
 - Updating one filter's known information does not change another filter.
+- Every semantic knowledge mutation increments exactly one revision and updates its timestamp.
+- Changing a filter query input increments only that filter's revision.
+- Changing the default identity increments only filters without an identity override.
 - Switching filters composes research context only from the target filter.
 - Feedback updates only the active filter knowledge.
 - Legacy active-filter data is merged without loss.
 - Legacy inactive filters do not receive active judgements or tracking.
 - Migration is idempotent.
 - Settings changes produce the context used by the next Today recalculation.
+- A run generated from an older knowledge revision is stale and cannot replace a newer result.
+- A run from another filter is never displayed after switching.
 
 ### Provider and fallback safety
 
@@ -238,12 +321,14 @@ Qodo Skills are installed but cannot fetch organization rules until the runtime 
 
 ## Acceptance criteria
 
-- Every filter has an isolated knowledge state.
-- Identity remains reusable across filters.
+- Every filter has an isolated, revisioned knowledge state.
+- Default identity remains reusable and each filter can override it.
 - Switching filters cannot carry knowledge from the previous filter.
+- Switching filters cannot display another filter's cached run.
 - Existing local Alpha data migrates without losing the active user's knowledge.
 - Migration can run repeatedly without changing already migrated data.
 - Today recalculation consumes the newly composed active context.
+- Today results are accepted only when filter ID and knowledge revision both match.
 - Provider failures do not break the whole Today pipeline.
 - Knip and dependency-cruiser remain clean.
 - `npm run quality` and `npm run build` pass before completion is reported.
