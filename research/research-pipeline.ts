@@ -1,12 +1,13 @@
-import { socialAccessLayer, type LiveItem } from "@/social/providers";
+import { socialAccessLayer, type LiveItem } from "../social/providers/index.ts";
 import {
   earliestValidTimestamp,
   freshnessWindowHours,
   latestValidTimestamp,
   resolveFreshness,
   validateTimestamp,
-} from "@/information/freshness";
+} from "../information/freshness.ts";
 import { planQuery } from "./query-planner";
+import { classifySource } from "./source-classifier";
 import { translateSignalsForPresentation } from "./translation";
 import type {
   PipelineCounts,
@@ -133,13 +134,74 @@ async function redditSearch(query: string): Promise<LiveItem[]> {
   }));
 }
 
+const officialGithubRepos: Record<string, string[]> = {
+  openai: ["openai/codex"],
+  codex: ["openai/codex"],
+  anthropic: ["anthropics/anthropic-sdk-python", "anthropics/anthropic-sdk-typescript"],
+  "google gemini": ["google-gemini/gemini-cli"],
+  gemini: ["google-gemini/gemini-cli"],
+};
+
+async function githubLatestRelease(repo: string): Promise<LiveItem | null> {
+  const retrievedAt = new Date().toISOString();
+  const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      "User-Agent": "SignalMapResearch/0.5",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
+  const release = (await response.json()) as {
+    id: number;
+    name?: string;
+    tag_name: string;
+    html_url: string;
+    body?: string;
+    published_at?: string;
+    created_at?: string;
+  };
+  const publishedAt = release.published_at || release.created_at;
+  return {
+    id: `github-release-${release.id}`,
+    title: `${repo} ${release.name || release.tag_name}`,
+    url: release.html_url,
+    snippet: (release.body || `Official GitHub release ${release.tag_name}`).slice(0, 500),
+    source: `GitHub · ${repo}`,
+    publishedAt,
+    eventOccurredAt: publishedAt,
+    firstSeenAt: retrievedAt,
+    retrievedAt,
+    dataOrigin: "live",
+    channel: "官方",
+    authority: 94,
+    origin: "github",
+  };
+}
+
+async function discoverOfficialGithubReleases(entities: string[], failures: string[]) {
+  const repos = Array.from(
+    new Set(
+      entities.flatMap((entity) => officialGithubRepos[entity.toLowerCase()] || []),
+    ),
+  ).slice(0, 4);
+  const settled = await Promise.allSettled(repos.map(githubLatestRelease));
+  const failed = settled.filter((result) => result.status === "rejected").length;
+  if (failed) failures.push(`Official GitHub: ${failed} 个 Release 请求失败或超时。`);
+  return settled.flatMap((result) =>
+    result.status === "fulfilled" && result.value ? [result.value] : [],
+  );
+}
+
 function primaryDomains(plan: QueryPlan) {
   const need = plan.originalNeed;
   if (/IPO|上市|纳指|Nasdaq|股票|投资|证券|募资|财报/i.test(need)) {
     return "(site:sec.gov OR site:nasdaq.com OR site:nyse.com OR site:investor.* OR \"Investor Relations\")";
   }
   if (/AI|人工智能|大模型|Codex|Agent|开发|软件/i.test(need)) {
-    return "(site:openai.com OR site:anthropic.com OR site:developers.googleblog.com OR site:github.com OR site:microsoft.com)";
+    return "(site:openai.com OR site:anthropic.com OR site:blog.google OR site:ai.google.dev OR site:github.com OR site:seed.bytedance.com OR site:runwayml.com OR site:microsoft.com)";
   }
   if (/医疗|医药|健康|临床/i.test(need)) {
     return "(site:fda.gov OR site:who.int OR site:nmpa.gov.cn OR site:nhc.gov.cn)";
@@ -148,29 +210,6 @@ function primaryDomains(plan: QueryPlan) {
     return "(site:moe.gov.cn OR site:yz.chsi.com.cn OR site:edu.cn)";
   }
   return "(site:gov.cn OR site:gov OR site:org OR \"official announcement\")";
-}
-
-function classify(publisher: string, url: string): SourceType | "other" {
-  const value = `${publisher} ${url}`;
-  if (
-    /SEC(?:\.gov)?|Securities and Exchange Commission|Nasdaq|NYSE|Investor Relations|official|官网|政府|委员会|交易所|教育部|药监局|卫健委|OpenAI|Anthropic|Google Developers|Microsoft|GitHub/i.test(
-      value,
-    )
-  ) {
-    return "primary";
-  }
-  if (/Reuters|Bloomberg|Financial Times|\bFT\b|Wall Street Journal|\bWSJ\b|CNBC/i.test(value)) {
-    return "trusted_media";
-  }
-  if (
-    /TechCrunch|The Verge|Ars Technica|VentureBeat|TechNode|36Kr|36氪|机器之心|量子位|InfoQ|极客公园/i.test(
-      value,
-    )
-  ) {
-    return "industry_media";
-  }
-  if (/\bX\b|Twitter|Xiaohongshu|小红书|Reddit/i.test(value)) return "social";
-  return "other";
 }
 
 function relevant(item: LiveItem, plan: QueryPlan) {
@@ -303,7 +342,7 @@ async function searchQueries(
         const recent = result.ageHours === undefined || result.ageHours <= 30 * 24;
         return (
           recent &&
-          classify(item.source, item.url) === expected &&
+          classifySource(item.source, item.url) === expected &&
           relevant(item, plan)
         );
       })
@@ -320,11 +359,30 @@ function freshnessDays(value: string) {
 }
 
 function filterTerms(value: string) {
+  const stopwords = /^(and|the|for|with|what|after|recent|recently|change|changes|changed|latest|official|information|update|updates|什么|最近|变化|信息|官方)$/i;
   return Array.from(
     new Set(
       value
         .split(/[,，、；;：:\n\s]+/)
         .map((item) => item.trim().toLowerCase())
+        .filter((item) => item.length > 1 && !stopwords.test(item)),
+    ),
+  );
+}
+
+function entityFilterTerms(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(/[,，、；;\n]+/)
+        .flatMap((entry) => {
+          const normalized = entry.trim().toLowerCase();
+          if (!normalized) return [];
+          const slashParts = normalized.split(/\s*\/\s*/).filter(Boolean);
+          if (slashParts.length > 1) return slashParts;
+          if (normalized === "google gemini") return [normalized, "gemini"];
+          return [normalized];
+        })
         .filter((item) => item.length > 1),
     ),
   );
@@ -425,14 +483,16 @@ export async function runResearchPipeline(
   const primaryQueries = plan.searchCombinations
     .slice(0, 5)
     .map((query) => `${query} ${domains}`);
-  const primaryResult = await searchQueries(
-    primaryQueries,
-    "primary",
-    plan,
-    failures,
-    windowDays,
-  );
-  const primary = primaryResult.items;
+  const [primaryResult, githubReleases] = await Promise.all([
+    searchQueries(primaryQueries, "primary", plan, failures, windowDays),
+    discoverOfficialGithubReleases(plan.entities, failures),
+  ]);
+  const primary = unique([
+    ...githubReleases
+      .filter((item) => relevant(item, plan))
+      .map((item) => ({ ...item, sourceType: "primary" as const })),
+    ...primaryResult.items,
+  ]);
   scanned += primaryResult.scanned;
   counts = { ...counts, candidates: primary.length, primary: primary.length };
   if (!primary.length) {
@@ -572,9 +632,7 @@ export async function runResearchPipeline(
   const knownTerms = filterTerms(
     `${input.knownInformation}\n${input.evidenceHistory}`,
   );
-  const trackedEntityTerms = filterTerms(
-    `${input.trackedEntities}\n${plan.entities.join("\n")}`,
-  ).filter(
+  const trackedEntityTerms = entityFilterTerms(input.trackedEntities).filter(
     (term) =>
       !/^(ai|agent|model|research|official|update|人工智能|大模型|模型)$/i.test(
         term,
@@ -916,6 +974,9 @@ export async function runResearchPipeline(
       signal.verificationStatus !== "conflicting" &&
       signal.eventStatus !== "SIGNAL" &&
       signal.timestampStatus === "valid" &&
+      (trackedEntityTerms.length === 0 ||
+        signal.entityMatches.length > 0 ||
+        (signal.gapMatchScore >= 80 && signal.judgementImpactScore >= 80)) &&
       (signal.eventStatus !== "BACKGROUND" ||
         (signal.gapMatchScore >= 80 && signal.judgementImpactScore >= 80));
     const repeatsEntity = signal.entityMatches.some((entity) =>
@@ -926,6 +987,28 @@ export async function runResearchPipeline(
       signal.section = "must_know";
       signal.entityMatches.forEach((entity) => selectedEntities.add(entity));
       selectedCount += 1;
+    }
+  }
+  const watchedEntities = new Set<string>();
+  let worthWatchingCount = 0;
+  for (const signal of allSignals) {
+    const canWatch =
+      signal.attentionDecision !== "MUST_READ" &&
+      signal.eventStatus === "SIGNAL" &&
+      signal.timestampStatus === "valid" &&
+      signal.freshnessScore >= 80 &&
+      signal.relevanceScore >= 70 &&
+      signal.noveltyScore >= 60 &&
+      signal.knowledgeStatus !== "KNOWN" &&
+      (trackedEntityTerms.length === 0 ||
+        signal.entityMatches.length > 0 ||
+        signal.gapMatchScore >= 80);
+    const repeatsEntity = signal.entityMatches.some((entity) => watchedEntities.has(entity));
+    if (canWatch && worthWatchingCount < 3 && !repeatsEntity) {
+      signal.attentionDecision = "WORTH_WATCHING";
+      signal.section = "emerging";
+      signal.entityMatches.forEach((entity) => watchedEntities.add(entity));
+      worthWatchingCount += 1;
     }
   }
   const signals = allSignals
@@ -964,7 +1047,7 @@ export async function runResearchPipeline(
   });
   await emit({
     stage: "filtering",
-    label: `注意力决策完成 · ${selectedCount} 条 Must Read，${signals.length - selectedCount} 条进入 Library`,
+    label: `注意力决策完成 · ${selectedCount} 条 Must Read，${worthWatchingCount} 条 Worth Watching`,
     counts,
   });
   await emit({
@@ -999,6 +1082,7 @@ export async function runResearchPipeline(
       .length,
     relevant: signals.length,
     mustKnow: selectedCount,
+    worthWatching: worthWatchingCount,
     libraryOnly: signals.filter(
       (signal) => signal.attentionDecision === "LIBRARY_ONLY",
     ).length,

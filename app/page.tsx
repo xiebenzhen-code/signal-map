@@ -80,6 +80,22 @@ const navItems: Array<{ id: Page; label: string; icon: typeof Target }> = [
   { id: "settings", label: "Settings", icon: Settings },
 ];
 
+function liveResearchParams(filter: InformationFilter, knowledge: KnowledgeState) {
+  return new URLSearchParams({
+    identity: knowledge.identity || filter.identity,
+    industry: knowledge.industry || filter.industry,
+    focusAreas: knowledge.focusAreas.join("\n"),
+    currentQuestions: knowledge.currentQuestions.join("\n"),
+    knownInformation: knowledge.knownInformation.join("\n"),
+    informationGaps: knowledge.informationGaps.join("\n"),
+    trackedEntities: knowledge.trackedEntities.join("\n"),
+    trackedEvents: knowledge.trackedEvents.join("\n"),
+    userJudgements: knowledge.userJudgements.join("\n"),
+    evidenceHistory: knowledge.evidenceHistory.join("\n"),
+    freshnessWindow: knowledge.freshnessWindow || filter.freshnessWindow,
+  });
+}
+
 const feedbackLabels: Record<Feedback, string> = {
   changed_view: "Changed my view",
   added_context: "Added context",
@@ -682,11 +698,21 @@ export default function HomePage() {
     setLoading(true);
     setError("");
     try {
-      const result = await demoProvider.run({ filter, knowledge: state });
+      const request = await fetch(`/api/signals?${liveResearchParams(filter, state)}`, {
+        cache: "no-store",
+      });
+      if (!request.ok) throw new Error("Live Web 暂时不可用");
+      const result = (await request.json()) as InformationRun;
       setResponse(result);
       await setAlphaValue("lastRun", result);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "暂时无法完成信息过滤");
+      try {
+        const fallback = await demoProvider.run({ filter, knowledge: state });
+        setResponse(fallback);
+        await setAlphaValue("lastRun", fallback);
+      } catch {
+        setError(requestError instanceof Error ? requestError.message : "暂时无法完成信息过滤");
+      }
     } finally {
       setLoading(false);
     }
@@ -711,12 +737,9 @@ export default function HomePage() {
         if (!snapshot.sessionId) await setAlphaValue("sessionId", restoredSessionId);
         if (snapshot.lastRun) {
           setResponse(snapshot.lastRun);
+          if (restoredFilter && restoredKnowledge) void refreshToday(restoredKnowledge, restoredFilter);
         } else if (restoredFilter && restoredKnowledge) {
-          const result = await demoProvider.run({ filter: restoredFilter, knowledge: restoredKnowledge });
-          if (!cancelled) {
-            setResponse(result);
-            await setAlphaValue("lastRun", result);
-          }
+          void refreshToday(restoredKnowledge, restoredFilter);
         }
       })
       .catch(() => setError("本地数据暂时无法读取，请检查浏览器是否允许 IndexedDB。"))
@@ -734,7 +757,7 @@ export default function HomePage() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, []);
+  }, [refreshToday]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -770,6 +793,10 @@ export default function HomePage() {
   const signals = useMemo(() => response?.signals || [], [response]);
   const mustRead = useMemo(
     () => signals.filter((event) => event.attentionDecision === "MUST_READ").slice(0, 5),
+    [signals],
+  );
+  const worthWatching = useMemo(
+    () => signals.filter((event) => event.attentionDecision === "WORTH_WATCHING").slice(0, 3),
     [signals],
   );
   const sortedInformation = useMemo(() => {
@@ -970,7 +997,7 @@ export default function HomePage() {
           <p className="mt-1 text-xs leading-5">{error}</p>
         </section>
       )}
-      {!loading && response && mustRead.length === 0 && <EmptyToday onRefresh={() => activeFilter && void refreshToday(knowledge, activeFilter)} />}
+      {!loading && response && mustRead.length === 0 && worthWatching.length === 0 && <EmptyToday onRefresh={() => activeFilter && void refreshToday(knowledge, activeFilter)} />}
       {!loading && mustRead.length > 0 && (
         <>
           <div className="mt-10 flex items-center justify-between gap-4">
@@ -987,6 +1014,15 @@ export default function HomePage() {
           </p>
           {response && <CoverageBadge coverage={response.coverage} />}
         </>
+      )}
+      {!loading && worthWatching.length > 0 && (
+        <section className="mt-10">
+          <p className="text-xs font-black uppercase tracking-[.16em] text-[#7d8691]">Worth Watching</p>
+          <p className="mt-2 text-sm leading-6 text-[#737c88]">近期且高度相关，但证据还不足以作为事实。</p>
+          <div className="mt-5 grid gap-4">
+            {worthWatching.map((event) => <EventCard key={event.id} event={event} onOpen={() => setSelected(event)} />)}
+          </div>
+        </section>
       )}
     </main>
   );

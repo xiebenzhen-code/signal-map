@@ -23,7 +23,18 @@ export async function GET(request: Request) {
       evidenceHistory: (params.get("evidenceHistory") || "").trim(),
       freshnessWindow: (params.get("freshnessWindow") || "7d").trim(),
     });
-    return Response.json(result, {
+    const failedProviders = result.status.filter((provider) => !provider.ok && provider.state === "error").map((provider) => provider.name);
+    const notConfiguredProviders = result.status.filter((provider) => provider.state === "not_configured").map((provider) => provider.name);
+    const unavailableProviders = result.status.filter((provider) => !provider.ok && provider.state === "unavailable").map((provider) => provider.name);
+    const usedProviders = result.status.filter((provider) => provider.ok).map((provider) => provider.name);
+    const coverage = {
+      level: usedProviders.length >= 2 ? "Broad" : usedProviders.length === 1 ? "Partial" : "Limited",
+      usedProviders,
+      unavailableProviders,
+      notConfiguredProviders,
+      failedProviders,
+    } as const;
+    return Response.json({ ...result, coverage }, {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {

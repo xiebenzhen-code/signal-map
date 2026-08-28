@@ -1,4 +1,4 @@
-import type { LiveItem } from "@/social/providers";
+import type { LiveItem } from "../social/providers/index.ts";
 
 export type SourceType =
   | "primary"
@@ -33,8 +33,11 @@ export type QueryPlan = {
   synonyms: string[];
   entities: string[];
   industryKeywords: string[];
+  changeKeywords: string[];
+  knowledgeAwareQueries: string[];
   searchCombinations: string[];
   retrievalWindows: Array<"24h" | "3d" | "7d" | "30d">;
+  requestedFreshnessWindow: "24h" | "3d" | "7d" | "30d";
 };
 
 export type PipelineCounts = {
@@ -136,7 +139,11 @@ export type ResearchSignal = {
   eventStatus: "NEW" | "UPDATED" | "FOLLOW_UP" | "SIGNAL" | "BACKGROUND";
   informationType: "FACT" | "INTERPRETATION" | "SIGNAL";
   knowledgeStatus: "NOVEL" | "UPDATED" | "KNOWN";
-  attentionDecision: "MUST_READ" | "LIBRARY_ONLY" | "IGNORE";
+  attentionDecision:
+    | "MUST_READ"
+    | "WORTH_WATCHING"
+    | "LIBRARY_ONLY"
+    | "IGNORE";
 };
 
 export type ResearchOverview = {
@@ -146,6 +153,7 @@ export type ResearchOverview = {
   verified: number;
   relevant: number;
   mustKnow: number;
+  worthWatching: number;
   libraryOnly: number;
   ignored: number;
   noiseReductionRate: number;

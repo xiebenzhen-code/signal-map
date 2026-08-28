@@ -12,6 +12,8 @@ import type {
   KnowledgeState,
 } from "../information/types.ts";
 import type { DemoSource } from "../information/types.ts";
+import { planQuery } from "../research/query-planner.ts";
+import { classifySource } from "../research/source-classifier.ts";
 
 const regressionNow = new Date("2026-08-28T12:00:00.000Z");
 
@@ -224,11 +226,12 @@ test("very new low reliability social content remains SIGNAL, not FACT", () => {
       publishedAt: "2026-08-28T11:50:00.000Z",
       eventOccurredAt: "2026-08-28T11:50:00.000Z",
     }),
-  ]);
+  ], { informationGaps: ["Technology IPO update"], currentQuestions: ["Technology IPO update"] });
   assert.equal(event.eventStatus, "SIGNAL");
   assert.equal(event.informationType, "SIGNAL");
   assert.equal(event.claims.some((claim) => claim.contentType === "FACT"), false);
   assert.notEqual(event.attentionDecision, "MUST_READ");
+  assert.equal(event.attentionDecision, "WORTH_WATCHING");
 });
 
 test("fresh information already known has high Freshness but low Novelty", () => {
@@ -259,4 +262,60 @@ test("old information filling a critical gap stays BACKGROUND evidence", () => {
   assert.equal(event.eventStatus, "BACKGROUND");
   assert.notEqual(event.eventStatus, "NEW");
   assert.notEqual(event.attentionDecision, "IGNORE");
+});
+
+test("recent query planner searches windows from 24h to 30d", () => {
+  const plan = planQuery({
+    identity: "AI product manager",
+    industry: "AI creator tools",
+    focusAreas: "video generation",
+    currentQuestions: "What changed in the API?",
+    knownInformation: "Seedance 2.5 已发布",
+    informationGaps: "pricing and copyright restrictions",
+    trackedEntities: "Seedance",
+    trackedEvents: "Seedance 2.5 launch",
+    userJudgements: "",
+    evidenceHistory: "",
+    freshnessWindow: "24h",
+  });
+  assert.deepEqual(plan.retrievalWindows, ["24h", "3d", "7d", "30d"]);
+  assert.equal(plan.requestedFreshnessWindow, "24h");
+  assert.ok(plan.changeKeywords.includes("changelog"));
+  assert.ok(plan.changeKeywords.includes("new limitation"));
+});
+
+test("known release produces change-after-knowledge queries", () => {
+  const plan = planQuery({
+    identity: "creator",
+    industry: "AI video",
+    focusAreas: "Seedance",
+    currentQuestions: "API availability",
+    knownInformation: "Seedance 2.5 已发布",
+    informationGaps: "pricing copyright",
+    trackedEntities: "Seedance",
+    trackedEvents: "",
+    userJudgements: "",
+    evidenceHistory: "",
+    freshnessWindow: "7d",
+  });
+  assert.ok(plan.knowledgeAwareQueries.includes("Seedance latest update"));
+  assert.ok(plan.knowledgeAwareQueries.includes("Seedance API"));
+  assert.ok(plan.knowledgeAwareQueries.includes("Seedance new limitation"));
+  assert.equal(plan.searchCombinations.some((query) => query === "Seedance 2.5 已发布"), false);
+});
+
+test("demo runs are explicitly distinguishable from live research", () => {
+  const result = runFilterEngine({
+    filter: filter({ focusAreas: ["Codex"] }),
+    knowledge: knowledge(),
+  });
+  assert.equal(result.dataMode, "DEMO");
+  assert.ok(result.signals.every((signal) => signal.dataOrigin === "demo"));
+});
+
+test("a community GitHub result is not promoted to an official primary source", () => {
+  assert.equal(
+    classifySource("GitHub", "https://news.google.com/rss/articles/community-repository"),
+    "other",
+  );
 });

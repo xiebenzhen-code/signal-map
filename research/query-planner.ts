@@ -61,6 +61,39 @@ function tokens(value: string) {
     .filter((item) => item.length > 1);
 }
 
+const changeKeywords = [
+  "latest",
+  "today",
+  "update",
+  "new",
+  "release",
+  "announcement",
+  "release notes",
+  "changelog",
+  "GitHub",
+  "new feature",
+  "new limitation",
+  "pricing",
+  "API",
+  "policy",
+  "hiring",
+  "this week",
+];
+
+function normalizeFreshnessWindow(value: string): QueryPlan["requestedFreshnessWindow"] {
+  if (/24h|1d|24\s*小时/i.test(value)) return "24h";
+  if (/3d|3\s*天/i.test(value)) return "3d";
+  if (/30d|30\s*天|1\s*月/i.test(value)) return "30d";
+  return "7d";
+}
+
+function knownEntitySubjects(value: string, entities: string[]) {
+  return unique(
+    entities.filter((entity) => value.toLowerCase().includes(entity.toLowerCase())),
+    6,
+  );
+}
+
 export function planQuery(input: ResearchInput): QueryPlan {
   const originalNeed = [
     input.industry,
@@ -70,6 +103,8 @@ export function planQuery(input: ResearchInput): QueryPlan {
     input.informationGaps,
     input.trackedEntities,
     input.trackedEvents,
+    input.knownInformation,
+    input.freshnessWindow,
   ]
     .filter(Boolean)
     .join("；");
@@ -95,7 +130,7 @@ export function planQuery(input: ResearchInput): QueryPlan {
       (item) => item.replace(/[“”「」『』\"]/g, ""),
     ),
   ]);
-  const knownSubjects = tokens(input.knownInformation).slice(0, 4);
+  const knownSubjects = knownEntitySubjects(input.knownInformation, entities);
   const industryKeywords = unique([
     input.industry,
     ...(/IPO|上市|纳指|股票|投资|金融|证券/i.test(originalNeed)
@@ -108,17 +143,27 @@ export function planQuery(input: ResearchInput): QueryPlan {
       ? ["regulatory filing", "clinical guidance", "official announcement"]
       : []),
   ]);
-  const searchCombinations = unique([
-    ...entities.flatMap((entity) => [
-      `${entity} latest update`,
-      `${entity} today announcement`,
-      `${entity} release notes changelog`,
-      `${entity} new feature limitation policy`,
-    ]),
+  const knowledgeAwareQueries = unique([
     ...knownSubjects.flatMap((subject) => [
       `${subject} latest update`,
-      `${subject} API new feature restriction`,
+      `${subject} API`,
+      `${subject} new feature`,
+      `${subject} new limitation`,
+      `${subject} pricing`,
+      `${subject} policy update`,
+      `${subject} copyright update`,
     ]),
+  ]);
+  const searchCombinations = unique([
+    ...entities.map((entity) => `${entity} latest update`),
+    ...knownSubjects.map((subject) => `${subject} API new feature new limitation pricing policy`),
+    ...entities.flatMap((entity) => [
+      `${entity} today announcement`,
+      `${entity} release notes changelog`,
+      `${entity} GitHub release this week`,
+      `${entity} new feature new limitation pricing API policy hiring`,
+    ]),
+    ...knowledgeAwareQueries,
     ...englishKeywords.map((keyword) => `${keyword} latest update`),
     ...entities.flatMap((entity) => [
       `${entity} Investor Relations`,
@@ -141,7 +186,10 @@ export function planQuery(input: ResearchInput): QueryPlan {
     synonyms,
     entities,
     industryKeywords,
+    changeKeywords,
+    knowledgeAwareQueries,
     searchCombinations,
     retrievalWindows: ["24h", "3d", "7d", "30d"],
+    requestedFreshnessWindow: normalizeFreshnessWindow(input.freshnessWindow),
   };
 }

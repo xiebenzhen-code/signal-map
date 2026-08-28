@@ -275,8 +275,17 @@ function toSignal(
     verificationStatus !== "conflicting" &&
     scored.fresh.timestampStatus === "valid" &&
     (eventStatus !== "BACKGROUND" || criticalBackgroundEvidence);
+  const canBeWorthWatching =
+    isSignal &&
+    scored.fresh.timestampStatus === "valid" &&
+    scored.fresh.score >= 80 &&
+    scored.relevanceScore >= 70 &&
+    scored.noveltyScore >= 60 &&
+    !scored.knownMatches.length;
   const attentionDecision: ResearchSignal["attentionDecision"] = canBeMustRead
       ? "MUST_READ"
+      : canBeWorthWatching
+        ? "WORTH_WATCHING"
       : scored.overallScore >= 48 &&
           scored.noveltyScore >= 35 &&
           (eventStatus !== "BACKGROUND" ||
@@ -294,8 +303,8 @@ function toSignal(
     ? `这为你正在追踪的“${matchedNeed}”补充了${verificationStatus === "verified" ? "已验证证据" : "新的可核查线索"}。`
     : scored.knownMatches.length
       ? "这与已知信息高度重合，信息增量有限，因此不会优先占用注意力。"
-      : isSignal
-        ? "这是较早的社区线索，尚未获得独立来源支持，只进入信息库观察。"
+        : isSignal
+        ? "这是近期出现、但尚未获得独立来源支持的线索，只进入 Worth Watching。"
         : "这是一项与你的过滤条件相关、且存在可核查原始证据的新变化。";
   const bestSource = scored.primary;
 
@@ -366,7 +375,7 @@ function toSignal(
     section:
       attentionDecision === "MUST_READ"
         ? "must_know"
-        : isSignal
+        : attentionDecision === "WORTH_WATCHING" || isSignal
           ? "emerging"
           : scored.gapMatches.length || scored.questionMatches.length
             ? "gap_update"
@@ -414,11 +423,22 @@ export function runFilterEngine(
       .slice(0, 5)
       .map((signal) => signal.id),
   );
-  const normalizedSignals = allSignals.map((signal) =>
-    signal.attentionDecision === "MUST_READ" && !mustReadIds.has(signal.id)
-      ? { ...signal, attentionDecision: "LIBRARY_ONLY" as const, section: "all" as const }
-      : signal,
+  const worthWatchingIds = new Set(
+    allSignals
+      .filter((signal) => signal.attentionDecision === "WORTH_WATCHING")
+      .sort((left, right) => right.overallScore - left.overallScore)
+      .slice(0, 3)
+      .map((signal) => signal.id),
   );
+  const normalizedSignals = allSignals.map((signal) => {
+    if (signal.attentionDecision === "MUST_READ" && !mustReadIds.has(signal.id)) {
+      return { ...signal, attentionDecision: "LIBRARY_ONLY" as const, section: "all" as const };
+    }
+    if (signal.attentionDecision === "WORTH_WATCHING" && !worthWatchingIds.has(signal.id)) {
+      return { ...signal, attentionDecision: "LIBRARY_ONLY" as const, section: "emerging" as const };
+    }
+    return signal;
+  });
   const visibleSignals = normalizedSignals
     .filter((signal) => signal.attentionDecision !== "IGNORE")
     .sort((left, right) => right.overallScore - left.overallScore);
@@ -429,6 +449,7 @@ export function runFilterEngine(
     verified: normalizedSignals.filter((signal) => signal.verificationStatus === "verified").length,
     relevant: visibleSignals.length,
     mustKnow: normalizedSignals.filter((signal) => signal.attentionDecision === "MUST_READ").length,
+    worthWatching: normalizedSignals.filter((signal) => signal.attentionDecision === "WORTH_WATCHING").length,
     libraryOnly: normalizedSignals.filter((signal) => signal.attentionDecision === "LIBRARY_ONLY").length,
     ignored: normalizedSignals.filter((signal) => signal.attentionDecision === "IGNORE").length,
     noiseReductionRate: clamp(
