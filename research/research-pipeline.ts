@@ -555,6 +555,20 @@ export async function runResearchPipeline(
     industryMedia: industryMedia.length,
   };
 
+  const trustedClaims = [...trustedMedia, ...industryMedia]
+    .filter((item) => resolveFreshness(item).ageHours !== undefined)
+    .slice(0, 3);
+  const trustedReverseResult = trustedClaims.length
+    ? await searchQueries(
+        trustedClaims.map((item) => `${item.title.slice(0, 140)} ${domains}`),
+        "primary",
+        plan,
+        failures,
+        windowDays,
+      )
+    : { scanned: 0, items: [] as ResearchCandidate[] };
+  scanned += trustedReverseResult.scanned;
+
   await emit({
     stage: "social",
     label: "正在检查社交媒体线索",
@@ -588,7 +602,7 @@ export async function runResearchPipeline(
     social: social.length,
   };
 
-  let reversePrimary: ResearchCandidate[] = [];
+  let reversePrimary: ResearchCandidate[] = [...trustedReverseResult.items];
   if (social.length) {
     const reverseQueries = social
       .slice(0, 3)
@@ -600,7 +614,7 @@ export async function runResearchPipeline(
       failures,
       windowDays,
     );
-    reversePrimary = reverseResult.items;
+    reversePrimary = unique([...reversePrimary, ...reverseResult.items]);
     scanned += reverseResult.scanned;
   }
   const allPrimary = unique([...primary, ...reversePrimary]);
