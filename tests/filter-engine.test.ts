@@ -14,6 +14,7 @@ import type {
 import type { DemoSource } from "../information/types.ts";
 import { planQuery } from "../research/query-planner.ts";
 import { classifySource } from "../research/source-classifier.ts";
+import { describesRecentChange } from "../research/recent-signal.ts";
 
 const regressionNow = new Date("2026-08-28T12:00:00.000Z");
 
@@ -318,4 +319,10 @@ test("a community GitHub result is not promoted to an official primary source", 
     classifySource("GitHub", "https://news.google.com/rss/articles/community-repository"),
     "other",
   );
+});
+
+test("generic entity pages do not qualify as recent change events", () => {
+  assert.equal(describesRecentChange("ChatGPT Work and Codex", "Product documentation"), false);
+  assert.equal(describesRecentChange("Codex MCP server command deprecated"), true);
+  assert.equal(describesRecentChange("gemini-cli release v0.57.0"), true);
 });

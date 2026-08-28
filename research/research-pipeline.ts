@@ -8,6 +8,7 @@ import {
 } from "../information/freshness.ts";
 import { planQuery } from "./query-planner";
 import { classifySource } from "./source-classifier";
+import { describesRecentChange } from "./recent-signal";
 import { translateSignalsForPresentation } from "./translation";
 import type {
   PipelineCounts,
@@ -974,6 +975,7 @@ export async function runResearchPipeline(
       signal.verificationStatus !== "conflicting" &&
       signal.eventStatus !== "SIGNAL" &&
       signal.timestampStatus === "valid" &&
+      describesRecentChange(signal.originalTitle || signal.title, signal.originalSummary || signal.summary) &&
       (trackedEntityTerms.length === 0 ||
         signal.entityMatches.length > 0 ||
         (signal.gapMatchScore >= 80 && signal.judgementImpactScore >= 80)) &&
@@ -1000,6 +1002,7 @@ export async function runResearchPipeline(
       signal.relevanceScore >= 70 &&
       signal.noveltyScore >= 60 &&
       signal.knowledgeStatus !== "KNOWN" &&
+      describesRecentChange(signal.originalTitle || signal.title, signal.originalSummary || signal.summary) &&
       (trackedEntityTerms.length === 0 ||
         signal.entityMatches.length > 0 ||
         signal.gapMatchScore >= 80);
