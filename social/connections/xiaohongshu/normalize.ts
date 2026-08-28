@@ -2,6 +2,19 @@ import type { LiveItem, SocialProfile } from "../../providers/types";
 
 type JsonRecord = Record<string, unknown>;
 
+function sourceTimestamp(value: unknown) {
+  if (typeof value === "number") {
+    const milliseconds = value < 10_000_000_000 ? value * 1000 : value;
+    const date = new Date(milliseconds);
+    return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
+  }
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return sourceTimestamp(numeric);
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
+}
+
 export function xhsItems(payload: unknown): LiveItem[] {
   const body = (payload || {}) as JsonRecord;
   const root = (body.data || body) as JsonRecord | unknown[];
@@ -16,13 +29,17 @@ export function xhsItems(payload: unknown): LiveItem[] {
     const id = String(item.id || item.feed_id || card.id || "");
     const xsec = String(item.xsec_token || item.xsecToken || "");
     if (!id) return [];
+    const retrievedAt = new Date().toISOString();
     return [{
       id,
       title: String(card.display_title || card.title || "Xiaohongshu post"),
       url: `https://www.xiaohongshu.com/explore/${id}${xsec ? `?xsec_token=${encodeURIComponent(xsec)}` : ""}`,
       snippet: `${String(user.nickname || user.nick_name || "Xiaohongshu user")} · ${String(interact.liked_count || interact.likedCount || 0)} likes`,
       source: "Xiaohongshu",
-      publishedAt: String(card.time || item.time || new Date().toISOString()),
+      publishedAt: sourceTimestamp(card.time || item.time),
+      firstSeenAt: retrievedAt,
+      retrievedAt,
+      dataOrigin: "live",
       channel: "社区",
       authority: 58,
       origin: "xhs",

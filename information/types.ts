@@ -45,6 +45,8 @@ export type InformationRun = {
   coverage: ProviderCoverage;
   failures: string[];
   fetchedAt: string;
+  dataMode: "DEMO" | "LIVE" | "MIXED";
+  lastCheckedAt?: string;
 };
 
 export type ProviderContext = {
@@ -78,7 +80,13 @@ export type DemoSource = {
   sourceUrl: string;
   sourceType: "primary" | "trusted_media" | "industry_media" | "social";
   sourceTier: "S" | "A" | "B" | "C";
-  ageHours: number;
+  publishedAt?: string;
+  eventOccurredAt?: string;
+  firstSeenAt: string;
+  lastUpdatedAt?: string;
+  retrievedAt: string;
+  metadataPublishedAt?: string;
+  dataOrigin: "demo";
   evidenceSnippet?: string;
   tags: string[];
   entities: string[];

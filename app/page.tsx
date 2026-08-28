@@ -103,6 +103,14 @@ const statusTone: Record<VerificationStatus, string> = {
   conflicting: "text-rose-700 bg-rose-50",
 };
 
+const eventStatusLabels: Record<ResearchSignal["eventStatus"], string> = {
+  NEW: "新信息",
+  UPDATED: "有更新",
+  FOLLOW_UP: "后续",
+  SIGNAL: "早期信号",
+  BACKGROUND: "背景资料",
+};
+
 function unique(values: string[]) {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
@@ -129,7 +137,10 @@ function EventCard({
   return (
     <article className="rounded-[24px] border border-[#e6e8e5] bg-white p-5 shadow-[0_8px_30px_rgba(28,36,50,.035)] sm:p-6">
       <div className="flex items-center justify-between gap-3 text-xs font-black">
-        <span className="text-[#2359ff]">{event.eventStatus}</span>
+        <span className="text-[#2359ff]">
+          {eventStatusLabels[event.eventStatus]}
+          {event.dataOrigin === "demo" ? " · 演示数据" : ""}
+        </span>
         <span className="shrink-0 text-[#7d8691]">{event.time}</span>
       </div>
 
@@ -254,7 +265,7 @@ function EventDetail({
             <span className={`rounded-full px-2.5 py-1 ${statusTone[event.verificationStatus]}`}>
               {verificationLabels[event.verificationStatus]}
             </span>
-            <span>{event.eventStatus}</span>
+            <span>{eventStatusLabels[event.eventStatus]}</span>
           </div>
           <button
             onClick={onClose}
@@ -268,6 +279,11 @@ function EventDetail({
         <h2 className="mt-5 text-2xl font-black leading-9 tracking-[-.04em]">
           {event.title}
         </h2>
+        {event.latestUpdateAt && event.originalOccurredAt && (
+          <p className="mt-2 text-xs font-semibold text-[#7d8691]">
+            原事件：{new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long", day: "numeric" }).format(new Date(event.originalOccurredAt))}
+          </p>
+        )}
         <section className="mt-6">
           <p className="text-xs font-black uppercase tracking-[.12em] text-[#7e8792]">Why it matters</p>
           <p className="mt-2 text-sm font-semibold leading-6 text-[#4f5968]">
@@ -424,7 +440,7 @@ function FocusReading({
           <span className={`rounded-full px-2.5 py-1 ${statusTone[event.verificationStatus]}`}>
             {verificationLabels[event.verificationStatus]}
           </span>
-          <span>{event.eventStatus}</span>
+          <span>{eventStatusLabels[event.eventStatus]}</span>
         </div>
         <h1 className="mt-5 text-3xl font-black leading-[1.2] tracking-[-.05em]">{event.title}</h1>
         <section className="mt-6 rounded-2xl bg-white p-5 shadow-[0_8px_30px_rgba(28,36,50,.035)]">
@@ -760,7 +776,11 @@ export default function HomePage() {
     const next = [...signals];
     return next.sort((left, right) => {
       if (sort === "reliability") return right.reliabilityScore - left.reliabilityScore;
-      if (sort === "newest") return new Date(right.publishedAt).getTime() - new Date(left.publishedAt).getTime();
+      if (sort === "newest") {
+        const rightTime = right.latestUpdateAt || right.eventOccurredAt || right.publishedAt;
+        const leftTime = left.latestUpdateAt || left.eventOccurredAt || left.publishedAt;
+        return (rightTime ? new Date(rightTime).getTime() : 0) - (leftTime ? new Date(leftTime).getTime() : 0);
+      }
       if (sort === "novelty") return right.noveltyScore - left.noveltyScore;
       if (sort === "impact") return right.judgementImpactScore - left.judgementImpactScore;
       return right.relevanceScore - left.relevanceScore;
@@ -1085,7 +1105,7 @@ export default function HomePage() {
 
         {libraryView === "saved" && <section className="mt-8">
           <p className="text-xs font-black uppercase tracking-[.12em] text-[#7b8490]">Saved · {library.length}</p>
-          <div className="mt-3 grid gap-3">{library.map((entry) => <article key={entry.event.id} className="rounded-[22px] border border-[#e5e7e4] bg-white p-5"><p className="text-xs font-black text-[#2359ff]">{entry.event.eventStatus} · {entry.event.sourceCount} sources</p><h3 className="mt-3 text-lg font-black leading-7">{entry.event.title}</h3><textarea value={notes[entry.event.id] ?? entry.notes} onChange={(eventObject) => { const note = eventObject.target.value; setNotes((current) => ({ ...current, [entry.event.id]: note })); setLibrary((current) => current.map((item) => item.event.id === entry.event.id ? { ...item, notes: note } : item)); }} placeholder="Add Note…" className="mt-4 min-h-24 w-full resize-none rounded-xl border border-[#dfe3e7] bg-[#fafbf9] p-3 text-base leading-6 outline-none"/><button onClick={() => setSelected(entry.event)} className="mt-3 min-h-11 text-sm font-black text-[#2359ff]">查看证据 →</button></article>)}</div>
+          <div className="mt-3 grid gap-3">{library.map((entry) => <article key={entry.event.id} className="rounded-[22px] border border-[#e5e7e4] bg-white p-5"><p className="text-xs font-black text-[#2359ff]">{eventStatusLabels[entry.event.eventStatus]} · {entry.event.sourceCount} sources{entry.event.dataOrigin === "demo" ? " · 演示数据" : ""}</p><h3 className="mt-3 text-lg font-black leading-7">{entry.event.title}</h3><textarea value={notes[entry.event.id] ?? entry.notes} onChange={(eventObject) => { const note = eventObject.target.value; setNotes((current) => ({ ...current, [entry.event.id]: note })); setLibrary((current) => current.map((item) => item.event.id === entry.event.id ? { ...item, notes: note } : item)); }} placeholder="Add Note…" className="mt-4 min-h-24 w-full resize-none rounded-xl border border-[#dfe3e7] bg-[#fafbf9] p-3 text-base leading-6 outline-none"/><button onClick={() => setSelected(entry.event)} className="mt-3 min-h-11 text-sm font-black text-[#2359ff]">查看证据 →</button></article>)}</div>
           {!library.length && <p className="mt-3 rounded-2xl bg-white p-6 text-sm text-[#7b8490]">在 Today 的 Insight Detail 中点击 Save。</p>}
         </section>}
 

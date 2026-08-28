@@ -4,7 +4,12 @@ export type LiveItem = {
   url: string;
   snippet: string;
   source: string;
-  publishedAt: string;
+  publishedAt?: string;
+  eventOccurredAt?: string;
+  firstSeenAt?: string;
+  lastUpdatedAt?: string;
+  retrievedAt: string;
+  dataOrigin: "live" | "imported";
   channel: "官方" | "社区" | "混合";
   authority: number;
   origin: "official" | "news" | "community" | "github" | "hn" | "x" | "xhs" | "reddit";

@@ -6,6 +6,13 @@ import type {
   VerificationStatus,
 } from "../research/types.ts";
 import { demoDataset } from "./demo-dataset.ts";
+import {
+  earliestValidTimestamp,
+  freshnessWindowHours,
+  latestValidTimestamp,
+  resolveFreshness,
+  validateTimestamp,
+} from "./freshness.ts";
 import type {
   DemoSource,
   InformationFilter,
@@ -56,12 +63,12 @@ function sourceAllowed(source: DemoSource, scope: InformationFilter["sourceScope
   return true;
 }
 
-export function validateFactEvidence(source: DemoSource) {
+export function validateFactEvidence(source: DemoSource, now = new Date()) {
   return Boolean(
     source.sourceUrl.trim() &&
       source.publisher.trim() &&
-      Number.isFinite(source.ageHours) &&
-      source.evidenceSnippet?.trim(),
+      source.evidenceSnippet?.trim() &&
+      validateTimestamp(source, now) === "valid",
   );
 }
 
@@ -77,32 +84,12 @@ export function deduplicateSources(sources: DemoSource[]) {
   });
 }
 
-function publishedAt(ageHours: number) {
-  return new Date(Date.now() - ageHours * 60 * 60 * 1000).toISOString();
-}
-
-function freshness(ageHours: number) {
-  if (ageHours <= 0.5) return { label: "Just now", score: 100 };
-  if (ageHours <= 1) return { label: "1h", score: 96 };
-  if (ageHours <= 6) return { label: "6h", score: 90 };
-  if (ageHours <= 24) return { label: "24h", score: 80 };
-  if (ageHours <= 72) return { label: "3d", score: 65 };
-  if (ageHours <= 168) return { label: "7d", score: 48 };
-  return { label: "7d", score: 15 };
-}
-
-function freshnessWindowHours(value: string) {
-  const amount = Number.parseInt(value, 10);
-  if (!Number.isFinite(amount)) return 24 * 7;
-  return value.endsWith("h") ? amount : amount * 24;
-}
-
-function verificationFor(sources: DemoSource[]): VerificationStatus {
+function verificationFor(sources: DemoSource[], now: Date): VerificationStatus {
   if (sources.some((source) => source.conflict)) return "conflicting";
-  if (sources.some((source) => source.sourceTier === "S" && validateFactEvidence(source))) {
+  if (sources.some((source) => source.sourceTier === "S" && validateFactEvidence(source, now))) {
     return "verified";
   }
-  if (sources.some((source) => source.sourceTier !== "C" && validateFactEvidence(source))) {
+  if (sources.some((source) => source.sourceTier !== "C" && validateFactEvidence(source, now))) {
     return "partially_verified";
   }
   return "unverified";
@@ -112,6 +99,7 @@ function scoreEvent(
   sources: DemoSource[],
   filter: InformationFilter,
   knowledge: KnowledgeState,
+  now: Date,
 ) {
   const primary = [...sources].sort((a, b) => {
     const rank = tierRank[b.sourceTier] - tierRank[a.sourceTier];
@@ -139,8 +127,33 @@ function scoreEvent(
     ...knowledge.knownInformation,
   ]);
   const trackedEvent = matchesAny(corpus, knowledge.trackedEvents).length > 0;
-  const ageHours = Math.min(...sources.map((source) => source.ageHours));
-  const fresh = freshness(ageHours);
+  const validSources = sources.filter((source) => validateTimestamp(source, now) === "valid");
+  const originalOccurredAt = earliestValidTimestamp(
+    validSources.map((source) => source.eventOccurredAt || source.publishedAt),
+    now,
+  );
+  const newestPublishedAt = latestValidTimestamp(
+    validSources.map((source) => source.publishedAt),
+    now,
+  );
+  const explicitLatestUpdateAt = latestValidTimestamp(
+    validSources.map((source) => source.lastUpdatedAt),
+    now,
+  );
+  const originalTime = originalOccurredAt ? new Date(originalOccurredAt).getTime() : undefined;
+  const newestTime = newestPublishedAt ? new Date(newestPublishedAt).getTime() : undefined;
+  const inferredLatestUpdateAt =
+    originalTime !== undefined && newestTime !== undefined && newestTime - originalTime > 24 * 60 * 60 * 1000
+      ? newestPublishedAt
+      : undefined;
+  const latestUpdateAt = explicitLatestUpdateAt || inferredLatestUpdateAt;
+  const fresh = resolveFreshness(
+    latestUpdateAt
+      ? { eventOccurredAt: latestUpdateAt }
+      : { eventOccurredAt: originalOccurredAt, publishedAt: newestPublishedAt },
+    now,
+  );
+  const ageHours = fresh.ageHours ?? Number.POSITIVE_INFINITY;
   const reliabilityScore = clamp(
     Math.max(...sources.map((source) => source.reliability)) +
       (sources.length > 1 ? 4 : 0) -
@@ -180,6 +193,8 @@ function scoreEvent(
     primary,
     ageHours,
     fresh,
+    originalOccurredAt,
+    latestUpdateAt,
     focusMatches,
     gapMatches,
     questionMatches,
@@ -200,19 +215,21 @@ function toSignal(
   sources: DemoSource[],
   filter: InformationFilter,
   knowledge: KnowledgeState,
+  now: Date,
 ): ResearchSignal {
-  const scored = scoreEvent(sources, filter, knowledge);
-  const verificationStatus = verificationFor(sources);
+  const scored = scoreEvent(sources, filter, knowledge, now);
+  const verificationStatus = verificationFor(sources, now);
   const validFacts = sources.filter(
-    (source) => source.sourceTier !== "C" && validateFactEvidence(source),
+    (source) => source.sourceTier !== "C" && validateFactEvidence(source, now),
   );
   const claims: Claim[] = sources
-    .filter((source) => source.sourceTier === "C" || validateFactEvidence(source))
+    .filter((source) => source.sourceTier === "C" || validateFactEvidence(source, now))
     .map((source) => ({
       claimText: source.claimText,
       sourceUrl: source.sourceUrl,
       publisher: source.publisher,
-      publishedAt: publishedAt(source.ageHours),
+      publishedAt:
+        validateTimestamp(source, now) === "valid" ? source.publishedAt : undefined,
       sourceType: source.sourceType,
       sourceTier: source.sourceTier,
       evidenceSnippet: source.evidenceSnippet || "该线索没有可验证的独立证据。",
@@ -227,31 +244,46 @@ function toSignal(
       contentType: source.sourceTier === "C" ? "SIGNAL" : "FACT",
     }));
   const isSignal = validFacts.length === 0;
+  const windowHours = freshnessWindowHours(filter.freshnessWindow);
+  const hasRecentUpdate = Boolean(scored.latestUpdateAt && scored.ageHours <= windowHours);
+  const originalFreshness = resolveFreshness(
+    { eventOccurredAt: scored.originalOccurredAt },
+    now,
+  );
+  const originalIsRecent =
+    originalFreshness.ageHours !== undefined && originalFreshness.ageHours <= windowHours;
+  const eventStatus: ResearchSignal["eventStatus"] = isSignal
+    ? "SIGNAL"
+    : scored.trackedEvent && hasRecentUpdate
+      ? "FOLLOW_UP"
+      : hasRecentUpdate && !originalIsRecent
+        ? "UPDATED"
+        : originalIsRecent
+          ? "NEW"
+          : "BACKGROUND";
   const reliableEnough =
     scored.reliabilityScore >= 70 &&
     scored.relevanceScore >= 75 &&
     scored.noveltyScore >= 60;
+  const criticalBackgroundEvidence =
+    eventStatus === "BACKGROUND" &&
+    scored.gapMatchScore >= 80 &&
+    scored.judgementImpactScore >= 80;
   const canBeMustRead =
     reliableEnough &&
     !isSignal &&
     verificationStatus !== "conflicting" &&
-    scored.ageHours <= freshnessWindowHours(filter.freshnessWindow);
-  const outsideFreshnessWindow =
-    scored.ageHours > freshnessWindowHours(filter.freshnessWindow);
-  const attentionDecision: ResearchSignal["attentionDecision"] = outsideFreshnessWindow
-    ? "IGNORE"
-    : canBeMustRead
+    scored.fresh.timestampStatus === "valid" &&
+    (eventStatus !== "BACKGROUND" || criticalBackgroundEvidence);
+  const attentionDecision: ResearchSignal["attentionDecision"] = canBeMustRead
       ? "MUST_READ"
-      : scored.overallScore >= 48 && scored.noveltyScore >= 35
+      : scored.overallScore >= 48 &&
+          scored.noveltyScore >= 35 &&
+          (eventStatus !== "BACKGROUND" ||
+            scored.gapMatches.length > 0 ||
+            scored.questionMatches.length > 0)
         ? "LIBRARY_ONLY"
         : "IGNORE";
-  const eventStatus: ResearchSignal["eventStatus"] = isSignal
-    ? "SIGNAL"
-    : scored.trackedEvent
-      ? "FOLLOW_UP"
-      : scored.knownMatches.length
-        ? "UPDATED"
-        : "NEW";
   const knowledgeStatus: ResearchSignal["knowledgeStatus"] = scored.knownMatches.length
     ? scored.noveltyScore >= 45
       ? "UPDATED"
@@ -278,7 +310,10 @@ function toSignal(
     title: bestSource.title,
     summary: bestSource.summary,
     translationStatus: "not_needed",
-    time: scored.fresh.label,
+    time:
+      (eventStatus === "UPDATED" || eventStatus === "FOLLOW_UP") && scored.latestUpdateAt
+        ? `有更新 · ${scored.fresh.label}`
+        : scored.fresh.label,
     truth: scored.reliabilityScore,
     baseUseful: scored.relevanceScore,
     lead: scored.noveltyScore,
@@ -295,7 +330,18 @@ function toSignal(
     sourceTier: bestSource.sourceTier,
     sourceUrl: bestSource.sourceUrl,
     publisher: bestSource.publisher,
-    publishedAt: publishedAt(scored.ageHours),
+    publishedAt:
+      validateTimestamp(bestSource, now) === "valid" ? bestSource.publishedAt : undefined,
+    eventOccurredAt: scored.originalOccurredAt,
+    firstSeenAt:
+      earliestValidTimestamp(sources.map((source) => source.firstSeenAt), now) || now.toISOString(),
+    lastUpdatedAt: scored.latestUpdateAt,
+    retrievedAt:
+      latestValidTimestamp(sources.map((source) => source.retrievedAt), now) || now.toISOString(),
+    originalOccurredAt: scored.originalOccurredAt,
+    latestUpdateAt: scored.latestUpdateAt,
+    timestampStatus: scored.fresh.timestampStatus,
+    dataOrigin: "demo",
     confidence: scored.reliabilityScore,
     verificationStatus,
     relevanceScore: scored.relevanceScore,
@@ -312,7 +358,8 @@ function toSignal(
       .map((source) => ({
         sourceUrl: source.sourceUrl,
         publisher: source.publisher,
-        publishedAt: publishedAt(source.ageHours),
+        publishedAt:
+          validateTimestamp(source, now) === "valid" ? source.publishedAt : undefined,
         sourceType: source.sourceType,
         sourceTier: source.sourceTier,
       })),
@@ -335,9 +382,19 @@ function toSignal(
   };
 }
 
+export function evaluateDemoEvent(
+  context: ProviderContext,
+  sources: DemoSource[],
+  now = new Date(),
+) {
+  if (!sources.length) throw new Error("At least one source is required");
+  return toSignal(sources[0].eventKey, sources, context.filter, context.knowledge, now);
+}
+
 export function runFilterEngine(
   context: ProviderContext,
   dataset: DemoSource[] = demoDataset,
+  now = new Date(),
 ): InformationRun {
   const scoped = dataset.filter((source) => sourceAllowed(source, context.filter.sourceScope));
   const deduplicated = deduplicateSources(scoped);
@@ -348,7 +405,7 @@ export function runFilterEngine(
     clusters.set(source.eventKey, current);
   }
   const allSignals = [...clusters.entries()].map(([eventKey, sources]) =>
-    toSignal(eventKey, sources, context.filter, context.knowledge),
+    toSignal(eventKey, sources, context.filter, context.knowledge, now),
   );
   const mustReadIds = new Set(
     allSignals
@@ -391,7 +448,8 @@ export function runFilterEngine(
     overview,
     coverage,
     failures: [],
-    fetchedAt: new Date().toISOString(),
+    fetchedAt: now.toISOString(),
+    dataMode: "DEMO",
   };
 }
 

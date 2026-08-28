@@ -1,4 +1,11 @@
 import { socialAccessLayer, type LiveItem } from "@/social/providers";
+import {
+  earliestValidTimestamp,
+  freshnessWindowHours,
+  latestValidTimestamp,
+  resolveFreshness,
+  validateTimestamp,
+} from "@/information/freshness";
 import { planQuery } from "./query-planner";
 import { translateSignalsForPresentation } from "./translation";
 import type {
@@ -45,6 +52,7 @@ function xmlValue(block: string, tag: string) {
 }
 
 async function googleNews(query: string): Promise<LiveItem[]> {
+  const retrievedAt = new Date().toISOString();
   const mostlyEnglish = (query.match(/[A-Za-z]/g)?.length || 0) > query.length / 3;
   const locale = mostlyEnglish
     ? "hl=en-US&gl=US&ceid=US:en"
@@ -69,6 +77,9 @@ async function googleNews(query: string): Promise<LiveItem[]> {
         snippet: xmlValue(block, "description"),
         source: publisher,
         publishedAt: xmlValue(block, "pubDate"),
+        firstSeenAt: retrievedAt,
+        retrievedAt,
+        dataOrigin: "live",
         channel: "混合",
         authority: 70,
         origin: "news",
@@ -78,6 +89,7 @@ async function googleNews(query: string): Promise<LiveItem[]> {
 }
 
 async function redditSearch(query: string): Promise<LiveItem[]> {
+  const retrievedAt = new Date().toISOString();
   const params = new URLSearchParams({
     q: query,
     sort: "new",
@@ -112,6 +124,9 @@ async function redditSearch(query: string): Promise<LiveItem[]> {
     snippet: `${data.selftext?.slice(0, 220) || "Reddit discussion"} · ${data.score || 0} points`,
     source: `Reddit · r/${data.subreddit}`,
     publishedAt: new Date(data.created_utc * 1000).toISOString(),
+    firstSeenAt: retrievedAt,
+    retrievedAt,
+    dataOrigin: "live",
     channel: "社区",
     authority: 52,
     origin: "reddit",
@@ -201,17 +216,14 @@ function related(a: LiveItem, b: LiveItem, plan: QueryPlan) {
   return shared.length >= 2 || shared.some((term) => /\s/.test(term) && term.length > 8);
 }
 
-function isoDate(value: string) {
+function isoDate(value?: string) {
+  if (!value) return undefined;
   const date = new Date(value);
-  return Number.isFinite(date.getTime()) ? date.toISOString() : new Date().toISOString();
+  return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
 }
 
-function ageLabel(value: string) {
-  const hours = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 3600000));
-  if (!Number.isFinite(hours)) return "7d";
-  if (hours < 1) return "Just now";
-  if (hours < 24) return `${Math.max(1, hours)}h`;
-  return `${Math.max(1, Math.round(hours / 24))}d`;
+function ageLabel(value?: string) {
+  return resolveFreshness({ publishedAt: value }).label;
 }
 
 function sourceTier(sourceType: SourceType) {
@@ -221,11 +233,6 @@ function sourceTier(sourceType: SourceType) {
     industry_media: "B",
     social: "C",
   }[sourceType] as "S" | "A" | "B" | "C";
-}
-
-function freshness(value: string) {
-  const days = Math.max(0, (Date.now() - new Date(value).getTime()) / 86400000);
-  return Number.isFinite(days) ? Math.max(42, Math.round(96 - Math.min(days, 54))) : 55;
 }
 
 function usefulness(item: LiveItem, plan: QueryPlan) {
@@ -265,23 +272,35 @@ async function searchQueries(
   expected: SourceType,
   plan: QueryPlan,
   failures: string[],
-  freshnessDays: number,
+  requestedFreshnessDays: number,
 ) {
-  const settled = await Promise.allSettled(queries.map((query) => googleNews(query)));
-  const failed = settled.filter((result) => result.status === "rejected").length;
-  if (failed) failures.push(`${expected}: ${failed}/${queries.length} 个搜索组合请求失败或超时。`);
-  const discovered = settled.flatMap((result) =>
-    result.status === "fulfilled" ? result.value : [],
-  );
+  const windows = [1, 3, 7, 30];
+  const discovered: LiveItem[] = [];
+  let failed = 0;
+  for (const days of windows) {
+    const settled = await Promise.allSettled(
+      queries.map((query) => googleNews(`${query} when:${days}d`)),
+    );
+    failed += settled.filter((result) => result.status === "rejected").length;
+    discovered.push(...settled.flatMap((result) => result.status === "fulfilled" ? result.value : []));
+    const verifiedRecent = unique(
+      discovered
+        .filter((item) => {
+          const result = resolveFreshness(item);
+          return result.ageHours !== undefined && result.ageHours <= days * 24;
+        })
+        .map((item) => ({ ...item, sourceType: expected })),
+    );
+    if (verifiedRecent.length >= 6 && days >= requestedFreshnessDays) break;
+  }
+  if (failed) failures.push(`${expected}: ${failed} 个搜索组合请求失败或超时。`);
   return {
     scanned: discovered.length,
     items: unique(
       discovered
       .filter((item) => {
-        const published = new Date(item.publishedAt).getTime();
-        const recent =
-          !Number.isFinite(published) ||
-          Date.now() - published < freshnessDays * 86400000;
+        const result = resolveFreshness(item);
+        const recent = result.ageHours === undefined || result.ageHours <= 30 * 24;
         return (
           recent &&
           classify(item.source, item.url) === expected &&
@@ -494,11 +513,10 @@ export async function runResearchPipeline(
   const social = unique(
     [...socialAccess.items, ...reddit]
       .filter((item) => {
-        const published = new Date(item.publishedAt).getTime();
+        const itemFreshness = resolveFreshness(item);
         return (
           relevant(item, plan) &&
-          (!Number.isFinite(published) ||
-            Date.now() - published < windowDays * 86400000)
+          (itemFreshness.ageHours === undefined || itemFreshness.ageHours <= 30 * 24)
         );
       })
       .map((item) => ({ ...item, sourceType: "social" as const })),
@@ -575,7 +593,8 @@ export async function runResearchPipeline(
         } as const;
         return (
           tier[b.sourceType] - tier[a.sourceType] ||
-          new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+          (isoDate(b.publishedAt) ? new Date(isoDate(b.publishedAt)!).getTime() : 0) -
+            (isoDate(a.publishedAt) ? new Date(isoDate(a.publishedAt)!).getTime() : 0)
         );
       });
       const item = ordered[0];
@@ -635,9 +654,40 @@ export async function runResearchPipeline(
               ? 42
               : 30) + Math.min(8, (ordered.length - 1) * 2),
       );
-      const freshnessScore = Math.max(
-        ...ordered.map((candidate) => freshness(candidate.publishedAt)),
+      const validTimestampCandidates = ordered.filter(
+        (candidate) => validateTimestamp(candidate) === "valid",
       );
+      const originalOccurredAt = earliestValidTimestamp(
+        validTimestampCandidates.map(
+          (candidate) => candidate.eventOccurredAt || candidate.publishedAt,
+        ),
+      );
+      const newestPublishedAt = latestValidTimestamp(
+        validTimestampCandidates.map((candidate) => candidate.publishedAt),
+      );
+      const explicitLatestUpdateAt = latestValidTimestamp(
+        validTimestampCandidates.map((candidate) => candidate.lastUpdatedAt),
+      );
+      const originalTime = originalOccurredAt
+        ? new Date(originalOccurredAt).getTime()
+        : undefined;
+      const newestTime = newestPublishedAt
+        ? new Date(newestPublishedAt).getTime()
+        : undefined;
+      const inferredLatestUpdateAt =
+        originalTime !== undefined &&
+        newestTime !== undefined &&
+        newestTime - originalTime > 24 * 60 * 60 * 1000
+          ? newestPublishedAt
+          : undefined;
+      const latestUpdateAt = explicitLatestUpdateAt || inferredLatestUpdateAt;
+      const eventFreshness = resolveFreshness(
+        latestUpdateAt
+          ? { eventOccurredAt: latestUpdateAt }
+          : { eventOccurredAt: originalOccurredAt, publishedAt: newestPublishedAt },
+      );
+      const originalFreshness = resolveFreshness({ eventOccurredAt: originalOccurredAt });
+      const freshnessScore = eventFreshness.score;
       const noveltyScore = clamp(
         (alreadyKnown
           ? 18
@@ -671,14 +721,23 @@ export async function runResearchPipeline(
       const socialOnly = ordered.every(
         (candidate) => candidate.sourceType === "social",
       );
+      const withinWindow =
+        eventFreshness.ageHours !== undefined &&
+        eventFreshness.ageHours <= freshnessWindowHours(input.freshnessWindow);
+      const originalWithinWindow =
+        originalFreshness.ageHours !== undefined &&
+        originalFreshness.ageHours <= freshnessWindowHours(input.freshnessWindow);
+      const hasRecentUpdate = Boolean(latestUpdateAt && withinWindow);
       const eventStatus: ResearchSignal["eventStatus"] =
         socialOnly || verificationStatus === "unverified"
           ? "SIGNAL"
-          : trackedEventMatches.length > 0
+          : trackedEventMatches.length > 0 && hasRecentUpdate
             ? "FOLLOW_UP"
-            : knownMatches.length > 0 || ordered.length > 1
+            : hasRecentUpdate && !originalWithinWindow
               ? "UPDATED"
-              : "NEW";
+              : originalWithinWindow
+                ? "NEW"
+                : "BACKGROUND";
       const canEnterLibrary =
         (reliabilityScore >= 55 && relevanceScore >= 58 && noveltyScore >= 38) ||
         (eventStatus === "SIGNAL" &&
@@ -706,14 +765,13 @@ export async function runResearchPipeline(
         verificationStatus: conflicting
           ? ("conflicting" as const)
           : checks[index].status,
-        contentType:
-          checks[index].status === "verified"
+         contentType:
+          checks[index].status === "verified" &&
+          validateTimestamp(candidate) === "valid"
             ? ("FACT" as const)
             : ("SIGNAL" as const),
       }));
-      const publishedAt = sources
-        .map((source) => source.publishedAt)
-        .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+      const publishedAt = newestPublishedAt;
       const official = sources
         .filter((source) => source.sourceType !== "social")
         .map((source) => ({
@@ -766,7 +824,10 @@ export async function runResearchPipeline(
             : "社区",
         title: item.title,
         summary: (item.snippet || item.title).slice(0, 240),
-        time: ageLabel(publishedAt),
+        time:
+          (eventStatus === "UPDATED" || eventStatus === "FOLLOW_UP") && latestUpdateAt
+            ? `有更新 · ${ageLabel(latestUpdateAt)}`
+            : eventFreshness.label,
         truth: reliabilityScore,
         baseUseful: relevanceScore,
         lead: freshnessScore,
@@ -788,6 +849,20 @@ export async function runResearchPipeline(
         sourceUrl: item.url,
         publisher: sources.length > 1 ? `${item.source} 等` : item.source,
         publishedAt,
+        eventOccurredAt: originalOccurredAt,
+        firstSeenAt:
+          earliestValidTimestamp(ordered.map((candidate) => candidate.firstSeenAt)) ||
+          new Date().toISOString(),
+        lastUpdatedAt: latestUpdateAt,
+        retrievedAt:
+          latestValidTimestamp(ordered.map((candidate) => candidate.retrievedAt)) ||
+          new Date().toISOString(),
+        originalOccurredAt,
+        latestUpdateAt,
+        timestampStatus: eventFreshness.timestampStatus,
+        dataOrigin: ordered.some((candidate) => candidate.dataOrigin === "live")
+          ? "live"
+          : "imported",
         confidence: reliabilityScore,
         verificationStatus,
         relevanceScore,
@@ -839,7 +914,10 @@ export async function runResearchPipeline(
       signal.knowledgeStatus !== "KNOWN" &&
       signal.verificationStatus !== "unverified" &&
       signal.verificationStatus !== "conflicting" &&
-      signal.eventStatus !== "SIGNAL";
+      signal.eventStatus !== "SIGNAL" &&
+      signal.timestampStatus === "valid" &&
+      (signal.eventStatus !== "BACKGROUND" ||
+        (signal.gapMatchScore >= 80 && signal.judgementImpactScore >= 80));
     const repeatsEntity = signal.entityMatches.some((entity) =>
       selectedEntities.has(entity),
     );
@@ -958,5 +1036,7 @@ export async function runResearchPipeline(
     counts,
     overview,
     fetchedAt: new Date().toISOString(),
+    dataMode: "LIVE",
+    lastCheckedAt: new Date().toISOString(),
   };
 }

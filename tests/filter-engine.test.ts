@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { demoDataset } from "../information/demo-dataset.ts";
 import {
+  evaluateDemoEvent,
   runFilterEngine,
   sourceCoverageExplanation,
   validateFactEvidence,
@@ -10,6 +11,48 @@ import type {
   InformationFilter,
   KnowledgeState,
 } from "../information/types.ts";
+import type { DemoSource } from "../information/types.ts";
+
+const regressionNow = new Date("2026-08-28T12:00:00.000Z");
+
+function source(overrides: Partial<DemoSource> = {}): DemoSource {
+  return {
+    id: "source-1",
+    eventKey: "timestamp-event",
+    title: "Technology IPO update",
+    summary: "A timestamp regression fixture.",
+    claimText: "The company published an IPO update.",
+    publisher: "Company Investor Relations",
+    sourceUrl: "https://example.com/ir/update",
+    sourceType: "primary",
+    sourceTier: "S",
+    publishedAt: "2026-08-28T08:00:00.000Z",
+    eventOccurredAt: "2026-08-28T08:00:00.000Z",
+    firstSeenAt: "2026-08-28T12:00:00.000Z",
+    retrievedAt: "2026-08-28T12:00:00.000Z",
+    dataOrigin: "demo",
+    evidenceSnippet: "The official filing records the event and its date.",
+    tags: ["IPO", "technology"],
+    entities: ["Example Co"],
+    reliability: 94,
+    ...overrides,
+  };
+}
+
+function evaluate(
+  sources: DemoSource[],
+  filterOverrides: Partial<InformationFilter> = {},
+  knowledgeOverrides: Partial<KnowledgeState> = {},
+) {
+  return evaluateDemoEvent(
+    {
+      filter: filter({ focusAreas: ["IPO"], ...filterOverrides }),
+      knowledge: knowledge(knowledgeOverrides),
+    },
+    sources,
+    regressionNow,
+  );
+}
 
 function filter(overrides: Partial<InformationFilter> = {}): InformationFilter {
   const now = new Date().toISOString();
@@ -124,4 +167,96 @@ test("an unavailable source is not described as having no information", () => {
   assert.ok(result.coverage.unavailableProviders.includes("ImportedDataProvider"));
   assert.equal(result.failures.length, 0);
   assert.match(sourceCoverageExplanation, /不代表该来源没有信息/);
+});
+
+test("old article retrieved today is BACKGROUND, not NEW", () => {
+  const event = evaluate([
+    source({
+      publishedAt: "2026-01-09T09:00:00.000Z",
+      eventOccurredAt: "2026-01-09T09:00:00.000Z",
+      firstSeenAt: "2026-08-28T12:00:00.000Z",
+      retrievedAt: "2026-08-28T12:00:00.000Z",
+    }),
+  ], { informationGaps: ["IPO"], currentQuestions: ["Technology IPO update"] });
+  assert.equal(event.eventStatus, "BACKGROUND");
+  assert.equal(event.time.includes("24小时"), false);
+  assert.match(event.time, /个月前/);
+});
+
+test("new article published today is NEW", () => {
+  const event = evaluate([source()]);
+  assert.equal(event.eventStatus, "NEW");
+  assert.ok(event.freshnessScore >= 80);
+});
+
+test("old event with important new evidence today is UPDATED", () => {
+  const original = source({
+    id: "original",
+    publishedAt: "2026-07-29T08:00:00.000Z",
+    eventOccurredAt: "2026-07-29T08:00:00.000Z",
+    retrievedAt: "2026-07-29T12:00:00.000Z",
+    firstSeenAt: "2026-07-29T12:00:00.000Z",
+  });
+  const update = source({
+    id: "update",
+    sourceUrl: "https://example.com/ir/update-2",
+    claimText: "The company added a material update.",
+    publishedAt: "2026-08-28T10:00:00.000Z",
+    eventOccurredAt: "2026-07-29T08:00:00.000Z",
+    lastUpdatedAt: "2026-08-28T10:00:00.000Z",
+  });
+  const event = evaluate([original, update]);
+  assert.equal(event.eventStatus, "UPDATED");
+  assert.equal(event.originalOccurredAt, "2026-07-29T08:00:00.000Z");
+  assert.equal(event.latestUpdateAt, "2026-08-28T10:00:00.000Z");
+  assert.match(event.time, /^有更新/);
+});
+
+test("very new low reliability social content remains SIGNAL, not FACT", () => {
+  const event = evaluate([
+    source({
+      sourceType: "social",
+      sourceTier: "C",
+      publisher: "X Community",
+      sourceUrl: "https://x.com/example/status/1",
+      evidenceSnippet: undefined,
+      reliability: 24,
+      publishedAt: "2026-08-28T11:50:00.000Z",
+      eventOccurredAt: "2026-08-28T11:50:00.000Z",
+    }),
+  ]);
+  assert.equal(event.eventStatus, "SIGNAL");
+  assert.equal(event.informationType, "SIGNAL");
+  assert.equal(event.claims.some((claim) => claim.contentType === "FACT"), false);
+  assert.notEqual(event.attentionDecision, "MUST_READ");
+});
+
+test("fresh information already known has high Freshness but low Novelty", () => {
+  const article = source();
+  const event = evaluate([article], {}, {
+    knownInformation: ["Technology IPO update"],
+  });
+  assert.ok(event.freshnessScore >= 80);
+  assert.ok(event.noveltyScore < 40);
+  assert.notEqual(event.attentionDecision, "MUST_READ");
+});
+
+test("old information filling a critical gap stays BACKGROUND evidence", () => {
+  const event = evaluate([
+    source({
+      title: "Archived IPO proceeds filing",
+      summary: "The archived filing explains the use of proceeds.",
+      claimText: "The filing specifies how IPO proceeds were allocated.",
+      tags: ["IPO proceeds", "use of proceeds"],
+      publishedAt: "2026-01-09T09:00:00.000Z",
+      eventOccurredAt: "2026-01-09T09:00:00.000Z",
+    }),
+  ], {
+    focusAreas: ["IPO proceeds"],
+    informationGaps: ["use of proceeds", "IPO proceeds"],
+    currentQuestions: ["IPO proceeds allocated"],
+  });
+  assert.equal(event.eventStatus, "BACKGROUND");
+  assert.notEqual(event.eventStatus, "NEW");
+  assert.notEqual(event.attentionDecision, "IGNORE");
 });

@@ -31,13 +31,17 @@ function xPost(
   },
   user?: { username: string; name: string },
 ): LiveItem {
+  const retrievedAt = new Date().toISOString();
   return {
     id: post.id,
     title: post.text.replace(/\s+/g, " ").slice(0, 90),
     url: `https://x.com/${user?.username || "i"}/status/${post.id}`,
     snippet: `${user?.name || "X user"} @${user?.username || "unknown"} · ${post.public_metrics?.like_count || 0} likes · ${post.public_metrics?.retweet_count || 0} reposts`,
     source: `X · @${user?.username || "unknown"}`,
-    publishedAt: post.created_at || new Date().toISOString(),
+    publishedAt: post.created_at || undefined,
+    firstSeenAt: retrievedAt,
+    retrievedAt,
+    dataOrigin: "live",
     channel: "社区",
     authority: 60,
     origin: "x",

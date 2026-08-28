@@ -95,6 +95,7 @@ export function planQuery(input: ResearchInput): QueryPlan {
       (item) => item.replace(/[“”「」『』\"]/g, ""),
     ),
   ]);
+  const knownSubjects = tokens(input.knownInformation).slice(0, 4);
   const industryKeywords = unique([
     input.industry,
     ...(/IPO|上市|纳指|股票|投资|金融|证券/i.test(originalNeed)
@@ -108,7 +109,17 @@ export function planQuery(input: ResearchInput): QueryPlan {
       : []),
   ]);
   const searchCombinations = unique([
-    ...englishKeywords,
+    ...entities.flatMap((entity) => [
+      `${entity} latest update`,
+      `${entity} today announcement`,
+      `${entity} release notes changelog`,
+      `${entity} new feature limitation policy`,
+    ]),
+    ...knownSubjects.flatMap((subject) => [
+      `${subject} latest update`,
+      `${subject} API new feature restriction`,
+    ]),
+    ...englishKeywords.map((keyword) => `${keyword} latest update`),
     ...entities.flatMap((entity) => [
       `${entity} Investor Relations`,
       `${entity} official announcement`,
@@ -121,7 +132,7 @@ export function planQuery(input: ResearchInput): QueryPlan {
     ...coreKeywords.slice(0, 4).flatMap((keyword) =>
       englishKeywords.slice(0, 3).map((english) => `${keyword} ${english}`),
     ),
-  ], 14);
+  ], 24);
 
   return {
     originalNeed,
@@ -131,5 +142,6 @@ export function planQuery(input: ResearchInput): QueryPlan {
     entities,
     industryKeywords,
     searchCombinations,
+    retrievalWindows: ["24h", "3d", "7d", "30d"],
   };
 }

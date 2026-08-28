@@ -17,7 +17,7 @@ export type Claim = {
   originalClaimText?: string;
   sourceUrl: string;
   publisher: string;
-  publishedAt: string;
+  publishedAt?: string;
   sourceType: SourceType;
   sourceTier: SourceTier;
   evidenceSnippet: string;
@@ -34,6 +34,7 @@ export type QueryPlan = {
   entities: string[];
   industryKeywords: string[];
   searchCombinations: string[];
+  retrievalWindows: Array<"24h" | "3d" | "7d" | "30d">;
 };
 
 export type PipelineCounts = {
@@ -95,7 +96,20 @@ export type ResearchSignal = {
   sourceTier: SourceTier;
   sourceUrl: string;
   publisher: string;
-  publishedAt: string;
+  publishedAt?: string;
+  eventOccurredAt?: string;
+  firstSeenAt: string;
+  lastUpdatedAt?: string;
+  retrievedAt: string;
+  originalOccurredAt?: string;
+  latestUpdateAt?: string;
+  timestampStatus:
+    | "valid"
+    | "missing"
+    | "future"
+    | "metadata_conflict"
+    | "suspected_retrieval_copy";
+  dataOrigin: "demo" | "live" | "imported";
   confidence: number;
   verificationStatus: VerificationStatus;
   relevanceScore: number;
@@ -110,7 +124,7 @@ export type ResearchSignal = {
   sources: Array<{
     sourceUrl: string;
     publisher: string;
-    publishedAt: string;
+    publishedAt?: string;
     sourceType: SourceType;
     sourceTier: SourceTier;
   }>;
@@ -119,7 +133,7 @@ export type ResearchSignal = {
   questionMatches: string[];
   entityMatches: string[];
   whyItMatters: string;
-  eventStatus: "NEW" | "UPDATED" | "FOLLOW_UP" | "SIGNAL";
+  eventStatus: "NEW" | "UPDATED" | "FOLLOW_UP" | "SIGNAL" | "BACKGROUND";
   informationType: "FACT" | "INTERPRETATION" | "SIGNAL";
   knowledgeStatus: "NOVEL" | "UPDATED" | "KNOWN";
   attentionDecision: "MUST_READ" | "LIBRARY_ONLY" | "IGNORE";
@@ -147,6 +161,8 @@ export type ResearchResponse = {
   counts: PipelineCounts;
   overview: ResearchOverview;
   fetchedAt: string;
+  dataMode: "DEMO" | "LIVE" | "MIXED";
+  lastCheckedAt?: string;
 };
 
 export type ResearchInput = {
