@@ -74,10 +74,10 @@ const defaultKnowledge: KnowledgeState = {
 };
 
 const navItems: Array<{ id: Page; label: string; icon: typeof Target }> = [
-  { id: "today", label: "Today", icon: Target },
-  { id: "information", label: "Information", icon: FileSearch },
-  { id: "library", label: "Library", icon: LibraryBig },
-  { id: "settings", label: "Settings", icon: Settings },
+  { id: "today", label: "今日", icon: Target },
+  { id: "information", label: "信息", icon: FileSearch },
+  { id: "library", label: "资料库", icon: LibraryBig },
+  { id: "settings", label: "设置", icon: Settings },
 ];
 
 function liveResearchParams(filter: InformationFilter, knowledge: KnowledgeState) {
@@ -97,12 +97,12 @@ function liveResearchParams(filter: InformationFilter, knowledge: KnowledgeState
 }
 
 const feedbackLabels: Record<Feedback, string> = {
-  changed_view: "Changed my view",
-  added_context: "Added context",
-  already_knew: "Already knew it",
-  not_useful: "Not useful",
-  monitor: "Continue monitoring",
-  resolved: "Resolved my question",
+  changed_view: "改变了我的看法",
+  added_context: "补充了有用背景",
+  already_knew: "我已经知道",
+  not_useful: "对我没用",
+  monitor: "继续关注",
+  resolved: "解决了我的问题",
 };
 
 const verificationLabels: Record<VerificationStatus, string> = {
@@ -136,9 +136,9 @@ function textToList(value: string) {
 }
 
 function reliabilityLabel(score: number) {
-  if (score >= 85) return "High reliability";
-  if (score >= 70) return "Medium reliability";
-  return "Low reliability";
+  if (score >= 85) return "高可靠性";
+  if (score >= 70) return "中等可靠性";
+  return "低可靠性";
 }
 
 function EventCard({
@@ -165,7 +165,7 @@ function EventCard({
       </h3>
       <div className="mt-4 rounded-2xl bg-[#f6f7f4] p-4">
         <p className="text-[10px] font-black uppercase tracking-[.12em] text-[#8a929d]">
-          Why it matters
+          为什么值得关注
         </p>
         <p className="mt-2 text-sm font-semibold leading-6 text-[#4f5968]">
           {event.whyItMatters}
@@ -174,7 +174,7 @@ function EventCard({
 
       <div className="mt-5 flex items-center justify-between gap-4 border-t border-[#eceeea] pt-4 text-xs text-[#68727f]">
         <span className="font-black text-[#172033]">{reliabilityLabel(event.reliabilityScore)}</span>
-        <span>{event.sourceCount} {event.sourceCount === 1 ? "source" : "sources"}</span>
+        <span>{event.sourceCount} 个来源</span>
       </div>
 
       {!compact && (
@@ -205,7 +205,7 @@ function EmptyToday({ onRefresh }: { onRefresh: () => void }) {
         <Check size={22} />
       </div>
       <h2 className="mt-5 text-2xl font-black tracking-[-.04em] text-[#172033]">
-        You&apos;re caught up.
+        今天已经看完了
       </h2>
       <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-[#77808b]">
         今天没有值得占用你注意力的重要变化。
@@ -301,17 +301,17 @@ function EventDetail({
           </p>
         )}
         <section className="mt-6">
-          <p className="text-xs font-black uppercase tracking-[.12em] text-[#7e8792]">Why it matters</p>
+          <p className="text-xs font-black uppercase tracking-[.12em] text-[#7e8792]">为什么值得关注</p>
           <p className="mt-2 text-sm font-semibold leading-6 text-[#4f5968]">
             {event.whyItMatters}
           </p>
         </section>
 
         <section className="mt-6">
-          <p className="text-xs font-black uppercase tracking-[.12em] text-[#7e8792]">Fact</p>
+          <p className="text-xs font-black uppercase tracking-[.12em] text-[#7e8792]">事实</p>
           {factClaims.length === 0 && (
             <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-800">
-              No reliable evidence found.
+              未找到可靠证据。
             </div>
           )}
           <div className="mt-3 grid gap-2">
@@ -320,45 +320,45 @@ function EventDetail({
         </section>
 
         <section className="mt-7">
-          <p className="text-xs font-black uppercase tracking-[.12em] text-[#7e8792]">Evidence</p>
+          <p className="text-xs font-black uppercase tracking-[.12em] text-[#7e8792]">证据</p>
           <div className="mt-3 grid gap-3">
-            {event.claims.map((claim) => <article key={`${claim.sourceUrl}-${claim.claimText}`} className="border-l-2 border-[#d9e0ff] pl-4"><p className={`text-xs font-black ${claim.contentType === "FACT" ? "text-emerald-700" : "text-amber-700"}`}>{claim.contentType} · {claim.publisher}</p><p className="mt-2 text-sm leading-6 text-[#5d6775]">{claim.evidenceSnippet}</p></article>)}
+            {event.claims.map((claim) => <article key={`${claim.sourceUrl}-${claim.claimText}`} className="border-l-2 border-[#d9e0ff] pl-4"><p className={`text-xs font-black ${claim.contentType === "FACT" ? "text-emerald-700" : "text-amber-700"}`}>{claim.contentType === "FACT" ? "事实" : "线索"} · {claim.publisher}</p><p className="mt-2 text-sm leading-6 text-[#5d6775]">{claim.evidenceSnippet}</p></article>)}
           </div>
         </section>
 
         <section className="mt-7 rounded-2xl bg-[#f6f7f4] p-4">
-          <p className="text-xs font-black uppercase tracking-[.12em] text-[#7e8792]">Interpretation</p>
+          <p className="text-xs font-black uppercase tracking-[.12em] text-[#7e8792]">解读</p>
           <p className="mt-2 text-sm font-semibold leading-6 text-[#4f5968]">{event.why}</p>
         </section>
 
         <section className="mt-7">
-          <p className="text-xs font-black uppercase tracking-[.12em] text-[#7e8792]">Sources · {event.sourceCount}</p>
+          <p className="text-xs font-black uppercase tracking-[.12em] text-[#7e8792]">原始来源 · {event.sourceCount}</p>
           <div className="mt-3 grid gap-2">
             {event.sources.map((source) => <a key={`${source.publisher}-${source.sourceUrl}`} href={source.sourceUrl} target="_blank" rel="noreferrer" className="flex min-h-12 items-center justify-between rounded-xl border border-[#e2e5e8] px-4 text-sm font-bold text-[#2359ff]"><span>{source.publisher}</span><span>原文 ↗</span></a>)}
           </div>
         </section>
 
         <label className="mt-7 block">
-          <span className="text-xs font-black uppercase tracking-[.12em] text-[#7e8792]">My Note</span>
+          <span className="text-xs font-black uppercase tracking-[.12em] text-[#7e8792]">我的笔记</span>
           <textarea value={note} onChange={(eventObject) => setNote(eventObject.target.value)} placeholder="这条证据如何影响你的判断？" className="mt-3 min-h-28 w-full resize-none rounded-2xl border border-[#dfe3e7] bg-white p-4 text-base leading-6 outline-none focus:border-[#8facff]" />
         </label>
 
         <section className="mt-7">
-          <p className="text-xs font-black uppercase tracking-[.12em] text-[#7e8792]">Actions</p>
+          <p className="text-xs font-black uppercase tracking-[.12em] text-[#7e8792]">操作</p>
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <button onClick={() => onSave(note)} className={`min-h-12 rounded-xl text-sm font-black ${saved ? "bg-emerald-50 text-emerald-700" : "bg-[#172033] text-white"}`}>{saved ? "Saved" : "Save"}</button>
-            <button onClick={() => respond("monitor")} className="min-h-12 rounded-xl border border-[#dfe3e7] text-sm font-black">Follow</button>
-            <button onClick={() => respond("already_knew")} className="min-h-12 rounded-xl border border-[#dfe3e7] px-2 text-xs font-black">Already knew this</button>
-            <button onClick={() => respond("changed_view")} className="min-h-12 rounded-xl border border-[#dfe3e7] px-2 text-xs font-black">Changed my view</button>
-            <button onClick={() => respond("not_useful")} className="min-h-12 rounded-xl border border-[#dfe3e7] px-2 text-xs font-black">Not useful</button>
-            <button onClick={() => respond("monitor")} className="min-h-12 rounded-xl border border-[#dfe3e7] px-2 text-xs font-black">Continue monitoring</button>
+            <button onClick={() => onSave(note)} className={`min-h-12 rounded-xl text-sm font-black ${saved ? "bg-emerald-50 text-emerald-700" : "bg-[#172033] text-white"}`}>{saved ? "已保存" : "保存"}</button>
+            <button onClick={() => respond("monitor")} className="min-h-12 rounded-xl border border-[#dfe3e7] text-sm font-black">关注</button>
+            <button onClick={() => respond("already_knew")} className="min-h-12 rounded-xl border border-[#dfe3e7] px-2 text-xs font-black">我已经知道</button>
+            <button onClick={() => respond("changed_view")} className="min-h-12 rounded-xl border border-[#dfe3e7] px-2 text-xs font-black">改变了我的看法</button>
+            <button onClick={() => respond("not_useful")} className="min-h-12 rounded-xl border border-[#dfe3e7] px-2 text-xs font-black">对我没用</button>
+            <button onClick={() => respond("monitor")} className="min-h-12 rounded-xl border border-[#dfe3e7] px-2 text-xs font-black">继续关注</button>
           </div>
         </section>
 
         <details className="mt-7 rounded-2xl border border-[#e2e5e8] p-4">
-          <summary className="min-h-11 cursor-pointer text-sm font-black">Score Breakdown</summary>
+          <summary className="min-h-11 cursor-pointer text-sm font-black">评分明细</summary>
           <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-            {[[event.relevanceScore, "Relevance"], [event.reliabilityScore, "Reliability"], [event.freshnessScore, "Freshness"], [event.noveltyScore, "Novelty"], [event.judgementImpactScore, "Judgement impact"], [event.gapMatchScore, "Gap match"]].map(([value, label]) => <div key={String(label)} className="rounded-xl bg-[#f4f6f8] p-3"><strong>{value}</strong><span className="ml-2 text-xs text-[#7b8490]">{label}</span></div>)}
+            {[[event.relevanceScore, "相关性"], [event.reliabilityScore, "可靠性"], [event.freshnessScore, "新鲜度"], [event.noveltyScore, "信息增量"], [event.judgementImpactScore, "判断影响"], [event.gapMatchScore, "缺口匹配"]].map(([value, label]) => <div key={String(label)} className="rounded-xl bg-[#f4f6f8] p-3"><strong>{value}</strong><span className="ml-2 text-xs text-[#7b8490]">{label}</span></div>)}
           </div>
         </details>
       </section>
@@ -408,7 +408,7 @@ function FocusReading({
           <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-white/10">
             <Check size={26} />
           </div>
-          <h2 className="mt-6 text-3xl font-black tracking-[-.05em]">You’re caught up.</h2>
+          <h2 className="mt-6 text-3xl font-black tracking-[-.05em]">今天已经看完了</h2>
           <p className="mt-3 text-sm leading-6 text-white/65">
             今天真正值得注意的信息已经处理完。现在可以离开产品，继续你的工作。
           </p>
@@ -440,8 +440,8 @@ function FocusReading({
       <header className="sticky top-0 z-10 border-b border-[#e5e7e4] bg-[#fbfbf8]/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-2xl items-center justify-between">
           <div>
-            <p className="text-[9px] font-black uppercase tracking-[.16em] text-[#7e8791]">Focus Reading</p>
-            <p className="mt-0.5 text-xs font-bold">Today Must Read · {index + 1} / {events.length}</p>
+            <p className="text-[9px] font-black uppercase tracking-[.16em] text-[#7e8791]">专注阅读</p>
+            <p className="mt-0.5 text-xs font-bold">今日必读 · {index + 1} / {events.length}</p>
           </div>
           <div className="flex items-center gap-3">
             <span className="font-mono text-sm font-black">{minutes}:{remainingSeconds}</span>
@@ -460,27 +460,27 @@ function FocusReading({
         </div>
         <h1 className="mt-5 text-3xl font-black leading-[1.2] tracking-[-.05em]">{event.title}</h1>
         <section className="mt-6 rounded-2xl bg-white p-5 shadow-[0_8px_30px_rgba(28,36,50,.035)]">
-          <p className="text-[9px] font-black tracking-[.14em] text-[#8a929d]">WHY IT MATTERS · INTERPRETATION</p>
+          <p className="text-[9px] font-black tracking-[.14em] text-[#8a929d]">为什么值得关注 · 解读</p>
           <p className="mt-2 text-sm font-semibold leading-7 text-[#4f5968]">{event.whyItMatters}</p>
         </section>
         <section className="mt-5">
-          <p className="text-[10px] font-black uppercase tracking-[.15em] text-[#7b8490]">Evidence</p>
+          <p className="text-[10px] font-black uppercase tracking-[.15em] text-[#7b8490]">证据</p>
           <div className="mt-3 grid gap-3">
             {event.claims.map((claim) => (
               <article key={claim.sourceUrl} className="rounded-2xl border border-[#e4e6e2] bg-white p-4">
                 <p className={`text-[9px] font-black ${claim.contentType === "FACT" ? "text-emerald-700" : "text-amber-700"}`}>
-                  {claim.contentType} · Tier {claim.sourceTier}
+                  {claim.contentType === "FACT" ? "事实" : "线索"} · 来源等级 {claim.sourceTier}
                 </p>
                 <p className="mt-2 text-sm font-bold leading-6">{claim.claimText}</p>
                 <a href={claim.sourceUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block text-[10px] font-black text-[#2359ff]">
-                  Original source ↗
+                  查看原文 ↗
                 </a>
               </article>
             ))}
           </div>
         </section>
         <label className="mt-6 block">
-          <span className="text-[10px] font-black uppercase tracking-[.14em] text-[#7b8490]">My Notes</span>
+          <span className="text-[10px] font-black uppercase tracking-[.14em] text-[#7b8490]">我的笔记</span>
           <textarea
             value={note}
             onChange={(eventObject) => setNote(eventObject.target.value)}
@@ -489,7 +489,7 @@ function FocusReading({
           />
         </label>
         <div className="mt-6">
-          <p className="mb-3 text-[10px] font-black uppercase tracking-[.14em] text-[#7b8490]">Did this change your view?</p>
+          <p className="mb-3 text-[10px] font-black uppercase tracking-[.14em] text-[#7b8490]">这条信息改变了你的看法吗？</p>
           <FeedbackButtons onFeedback={(value) => finishEvent(value)} />
         </div>
         <button onClick={() => finishEvent()} className="mt-4 w-full rounded-xl bg-[#172033] py-3 text-xs font-black text-white">
@@ -552,7 +552,7 @@ function FilterBuilder({
           <div className="flex items-center gap-3">
             <span className="grid h-10 w-10 place-items-center rounded-2xl bg-[#2359ff] text-[11px] font-black text-white">SM</span>
             <div>
-              <p className="text-[9px] font-black uppercase tracking-[.16em] text-[#2359ff]">Filter first</p>
+              <p className="text-[9px] font-black uppercase tracking-[.16em] text-[#2359ff]">先建立过滤器</p>
               <p className="text-sm font-black">Signal Map</p>
             </div>
           </div>
@@ -560,10 +560,10 @@ function FilterBuilder({
         </div>
 
         <div className="mt-9 flex items-center justify-between">
-          <p className="text-[11px] font-black uppercase tracking-[.14em] text-[#2359ff]">Step {step + 1} of 4</p>
-          <p className="text-xs font-bold text-[#858e99]">{["Identity", "Focus", "Knowledge", "Gaps"][step]}</p>
+          <p className="text-[11px] font-black uppercase tracking-[.14em] text-[#2359ff]">第 {step + 1} 步，共 4 步</p>
+          <p className="text-xs font-bold text-[#858e99]">{["身份", "关注重点", "已有认知", "信息缺口"][step]}</p>
         </div>
-        <div className="mt-3 grid grid-cols-4 gap-2" aria-label={`Onboarding progress ${step + 1} of 4`}>
+        <div className="mt-3 grid grid-cols-4 gap-2" aria-label={`引导进度：第 ${step + 1} 步，共 4 步`}>
           {[0, 1, 2, 3].map((index) => <span key={index} className={`h-1.5 rounded-full ${index <= step ? "bg-[#2359ff]" : "bg-[#e3e6e8]"}`} />)}
         </div>
 
@@ -571,7 +571,7 @@ function FilterBuilder({
           {["先从你是谁开始。", "你正在关注什么？", "你已经知道什么？", "最后，告诉我缺什么。"][step]}
         </h1>
         <p className="mt-4 text-sm leading-6 text-[#707986]">
-          {step === 0 ? "Signal Map 只把可能改变你判断的新证据带到面前。所有字段都可以跳过。" : "可以留空，之后随时在 Settings 里补充。"}
+          {step === 0 ? "Signal Map 只把可能改变你判断的新证据带到面前。所有字段都可以跳过。" : "可以留空，之后随时在设置中补充。"}
         </p>
 
         {step === 0 && (
@@ -597,32 +597,32 @@ function FilterBuilder({
 
         <div className="mt-7 grid gap-5 rounded-[28px] border border-[#e2e5e8] bg-[#f5f6f3] p-5 sm:p-7">
           {step === 0 && <>
-            <label><span className="text-sm font-black">Filter Name</span><input value={draft.filterName} onChange={(event) => setDraft((current) => ({ ...current, filterName: event.target.value }))} placeholder="例如：我的 AI 产品雷达" className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none focus:border-[#7e9cff]" /></label>
-            <label><span className="text-sm font-black">Identity</span><input value={draft.identity} onChange={(event) => setDraft((current) => ({ ...current, identity: event.target.value }))} placeholder="你是谁 / 正在做什么" className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none focus:border-[#7e9cff]" /></label>
-            <label><span className="text-sm font-black">Industry</span><input value={draft.industry} onChange={(event) => setDraft((current) => ({ ...current, industry: event.target.value }))} placeholder="所在行业或赛道" className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none focus:border-[#7e9cff]" /></label>
+            <label><span className="text-sm font-black">过滤器名称</span><input value={draft.filterName} onChange={(event) => setDraft((current) => ({ ...current, filterName: event.target.value }))} placeholder="例如：我的 AI 产品雷达" className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none focus:border-[#7e9cff]" /></label>
+            <label><span className="text-sm font-black">你的身份</span><input value={draft.identity} onChange={(event) => setDraft((current) => ({ ...current, identity: event.target.value }))} placeholder="你是谁 / 正在做什么" className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none focus:border-[#7e9cff]" /></label>
+            <label><span className="text-sm font-black">行业</span><input value={draft.industry} onChange={(event) => setDraft((current) => ({ ...current, industry: event.target.value }))} placeholder="所在行业或赛道" className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none focus:border-[#7e9cff]" /></label>
           </>}
           {step === 1 && <>
-            {listInput("focusAreas", "Focus Areas", "每行一项，例如：AI Agent")}
-            {listInput("trackedEntities", "Tracked Entities", "公司、产品、人物；每行一项")}
-            {listInput("currentQuestions", "Current Questions", "当前尚未解决的问题；每行一项")}
+            {listInput("focusAreas", "关注领域", "每行一项，例如：AI Agent")}
+            {listInput("trackedEntities", "关注实体", "公司、产品、人物；每行一项")}
+            {listInput("currentQuestions", "当前问题", "当前尚未解决的问题；每行一项")}
           </>}
           {step === 2 && <>
-            {listInput("knownInformation", "Known Information", "你已经确认的信息；每行一项")}
-            <label><span className="text-sm font-black">Current Judgement</span><textarea value={draft.currentJudgement} onChange={(event) => setDraft((current) => ({ ...current, currentJudgement: event.target.value }))} placeholder="你现在如何判断这个领域？" className="mt-2 min-h-28 w-full resize-none rounded-2xl border border-[#dde2e7] bg-white p-4 text-base leading-6 outline-none focus:border-[#7e9cff]" /></label>
+            {listInput("knownInformation", "已知信息", "你已经确认的信息；每行一项")}
+            <label><span className="text-sm font-black">当前判断</span><textarea value={draft.currentJudgement} onChange={(event) => setDraft((current) => ({ ...current, currentJudgement: event.target.value }))} placeholder="你现在如何判断这个领域？" className="mt-2 min-h-28 w-full resize-none rounded-2xl border border-[#dde2e7] bg-white p-4 text-base leading-6 outline-none focus:border-[#7e9cff]" /></label>
           </>}
           {step === 3 && <>
-            {listInput("informationGaps", "Information Gaps", "还缺少哪些证据；每行一项")}
-            <label><span className="text-sm font-black">Freshness Window</span><select value={draft.freshnessWindow} onChange={(event) => setDraft((current) => ({ ...current, freshnessWindow: event.target.value }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="1d">24 小时</option><option value="3d">3 天</option><option value="7d">7 天</option><option value="30d">30 天</option></select></label>
-            <label><span className="text-sm font-black">Source Scope</span><select value={draft.sourceScope} onChange={(event) => setDraft((current) => ({ ...current, sourceScope: event.target.value as SourceScope }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="all">全部层级</option><option value="verified">已验证来源</option><option value="official">仅官方</option></select></label>
+            {listInput("informationGaps", "信息缺口", "还缺少哪些证据；每行一项")}
+            <label><span className="text-sm font-black">信息时效范围</span><select value={draft.freshnessWindow} onChange={(event) => setDraft((current) => ({ ...current, freshnessWindow: event.target.value }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="1d">24 小时</option><option value="3d">3 天</option><option value="7d">7 天</option><option value="30d">30 天</option></select></label>
+            <label><span className="text-sm font-black">来源范围</span><select value={draft.sourceScope} onChange={(event) => setDraft((current) => ({ ...current, sourceScope: event.target.value as SourceScope }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="all">全部层级</option><option value="verified">已验证来源</option><option value="official">仅官方</option></select></label>
           </>}
 
           <div className="flex gap-3 pt-1">
             {step > 0 && <button onClick={() => setStep((value) => value - 1)} className="min-h-12 flex-1 rounded-xl border border-[#d8dde3] bg-white text-sm font-black text-[#657080]">返回</button>}
             <button
-              onClick={() => step < 3 ? setStep((value) => value + 1) : onSave({ ...draft, filterName: draft.filterName.trim() || "My Filter" })}
+              onClick={() => step < 3 ? setStep((value) => value + 1) : onSave({ ...draft, filterName: draft.filterName.trim() || "我的过滤器" })}
               className="min-h-12 flex-[2] rounded-xl bg-[#2359ff] px-4 text-sm font-black text-white"
             >
-              {step < 3 ? "继续" : "创建过滤器并查看 Today"}
+              {step < 3 ? "继续" : "创建过滤器并查看今日信息"}
             </button>
           </div>
           <p className="text-center text-[11px] leading-5 text-[#8a929d]">数据只保存在这台设备的浏览器中，不需要账号或 API。</p>
@@ -636,13 +636,13 @@ function CoverageBadge({ coverage }: { coverage: ProviderCoverage }) {
   return (
     <details className="mt-5 rounded-2xl border border-[#e3e6e8] bg-white px-4 py-3 text-xs text-[#68727f]">
       <summary className="cursor-pointer list-none font-black">
-        Source Coverage · <span className="text-[#2359ff]">{coverage.level}</span>
+        来源覆盖 · <span className="text-[#2359ff]">{{ Broad: "广泛", Partial: "部分", Limited: "有限" }[coverage.level]}</span>
       </summary>
       <div className="mt-3 grid gap-2 border-t border-[#eceeea] pt-3 text-[10px] leading-5">
-        {coverage.usedProviders.length > 0 && <p><strong>Used:</strong> {coverage.usedProviders.join(" · ")}</p>}
-        {coverage.unavailableProviders.length > 0 && <p><strong>Unavailable:</strong> {coverage.unavailableProviders.join(" · ")}</p>}
-        {coverage.notConfiguredProviders.length > 0 && <p><strong>Not configured:</strong> {coverage.notConfiguredProviders.join(" · ")}</p>}
-        {coverage.failedProviders.length > 0 && <p><strong>Failed:</strong> {coverage.failedProviders.join(" · ")}</p>}
+        {coverage.usedProviders.length > 0 && <p><strong>已使用：</strong> {coverage.usedProviders.join(" · ")}</p>}
+        {coverage.unavailableProviders.length > 0 && <p><strong>不可用：</strong> {coverage.unavailableProviders.join(" · ")}</p>}
+        {coverage.notConfiguredProviders.length > 0 && <p><strong>未配置：</strong> {coverage.notConfiguredProviders.join(" · ")}</p>}
+        {coverage.failedProviders.length > 0 && <p><strong>失败：</strong> {coverage.failedProviders.join(" · ")}</p>}
         <p className="text-[#8b929b]">{sourceCoverageExplanation}</p>
       </div>
     </details>
@@ -961,7 +961,7 @@ export default function HomePage() {
     <main className="mx-auto max-w-[760px] px-4 pb-32 pt-8 sm:px-6 sm:pt-12">
       <button onClick={() => navigate("settings")} className="flex min-h-14 w-full items-center justify-between rounded-2xl border border-[#e1e5e8] bg-white px-4 text-left">
         <span>
-          <span className="block text-[10px] font-black uppercase tracking-[.12em] text-[#7b8490]">Active Filter</span>
+          <span className="block text-[10px] font-black uppercase tracking-[.12em] text-[#7b8490]">当前过滤器</span>
           <span className="mt-1 block text-sm font-black text-[#172033]">{activeFilter?.filterName}</span>
         </span>
         <ChevronRight size={18} className="text-[#8a929d]" />
@@ -970,8 +970,8 @@ export default function HomePage() {
       <div className="mt-8 flex items-start justify-between gap-4">
         <div>
           <p className="text-[11px] font-black uppercase tracking-[.16em] text-[#2359ff]">{todayDate}</p>
-          <h1 className="mt-2 text-4xl font-black tracking-[-.055em] text-[#172033] sm:text-5xl">Today</h1>
-          {!loading && response && <p className="mt-3 text-2xl font-black tracking-[-.04em] text-[#172033]">You only need to read {mustRead.length}.</p>}
+          <h1 className="mt-2 text-4xl font-black tracking-[-.055em] text-[#172033] sm:text-5xl">今日</h1>
+          {!loading && response && <p className="mt-3 text-2xl font-black tracking-[-.04em] text-[#172033]">今天只需阅读 {mustRead.length} 条。</p>}
           <p className="mt-3 max-w-xl text-sm leading-6 text-[#737c88]">只保留可能改变你判断、且有证据支持的新变化。</p>
         </div>
         <button
@@ -987,7 +987,7 @@ export default function HomePage() {
       {loading && (
         <section className="mt-12 rounded-[28px] border border-[#e5e7e4] bg-white p-8 text-center">
           <Clock3 className="mx-auto animate-pulse text-[#2359ff]" size={24} />
-          <p className="mt-4 text-sm font-black">正在比较你的 Knowledge State 与新证据…</p>
+          <p className="mt-4 text-sm font-black">正在比较你的认知状态与新证据…</p>
           <p className="mt-2 text-xs text-[#7b8490]">先验证，后判断；没有可靠证据就不生成事实。</p>
         </section>
       )}
@@ -1001,9 +1001,9 @@ export default function HomePage() {
       {!loading && mustRead.length > 0 && (
         <>
           <div className="mt-10 flex items-center justify-between gap-4">
-            <p className="text-xs font-black uppercase tracking-[.16em] text-[#7d8691]">Must Read</p>
+            <p className="text-xs font-black uppercase tracking-[.16em] text-[#7d8691]">必读</p>
             <button onClick={() => setFocusOpen(true)} className="min-h-11 shrink-0 rounded-full bg-[#2359ff] px-4 text-xs font-black text-white">
-              Start Focus Reading · 15 min
+              开始专注阅读 · 15 分钟
             </button>
           </div>
           <div className="mt-5 grid gap-4">
@@ -1017,7 +1017,7 @@ export default function HomePage() {
       )}
       {!loading && worthWatching.length > 0 && (
         <section className="mt-10">
-          <p className="text-xs font-black uppercase tracking-[.16em] text-[#7d8691]">Worth Watching</p>
+          <p className="text-xs font-black uppercase tracking-[.16em] text-[#7d8691]">值得关注</p>
           <p className="mt-2 text-sm leading-6 text-[#737c88]">近期且高度相关，但证据还不足以作为事实。</p>
           <div className="mt-5 grid gap-4">
             {worthWatching.map((event) => <EventCard key={event.id} event={event} onOpen={() => setSelected(event)} />)}
@@ -1053,17 +1053,17 @@ export default function HomePage() {
 
     return (
       <main className="mx-auto max-w-[760px] px-4 pb-32 pt-8 sm:px-6 sm:pt-12">
-        <p className="text-[10px] font-black uppercase tracking-[.18em] text-[#2359ff]">Filtered events · not a feed</p>
-        <h1 className="mt-2 text-4xl font-black tracking-[-.055em]">Information</h1>
-        <p className="mt-3 text-sm leading-6 text-[#737c88]">只展示经过聚合、验证、知识比较后仍具有价值的 Event。</p>
+        <p className="text-[10px] font-black uppercase tracking-[.18em] text-[#2359ff]">筛选后的事件 · 不是信息流</p>
+        <h1 className="mt-2 text-4xl font-black tracking-[-.055em]">信息</h1>
+        <p className="mt-3 text-sm leading-6 text-[#737c88]">只展示经过聚合、验证和认知比较后仍具有价值的事件。</p>
 
         {response && (
           <div className="mt-7 grid grid-cols-4 border-y border-[#e5e7e4] py-4 text-center">
             {[
-              [response.overview.scanned, "Scanned"],
-              [response.overview.events, "Events"],
-              [response.overview.relevant, "Relevant"],
-              [response.overview.mustKnow, "Must Read"],
+              [response.overview.scanned, "已扫描"],
+              [response.overview.events, "事件"],
+              [response.overview.relevant, "相关"],
+              [response.overview.mustKnow, "必读"],
             ].map(([value, label]) => (
               <div key={String(label)} className="min-w-0">
                 <p className="text-lg font-black">{value}</p>
@@ -1075,18 +1075,18 @@ export default function HomePage() {
         {response && <CoverageBadge coverage={response.coverage} />}
 
         <label className="mt-6 block sm:hidden">
-          <span className="text-xs font-black text-[#6f7884]">Sort events</span>
+          <span className="text-xs font-black text-[#6f7884]">事件排序</span>
           <select value={sort} onChange={(event) => { setSort(event.target.value as typeof sort); setVisibleCount(8); }} className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] bg-white px-4 text-base">
-            <option value="relevance">Most Relevant</option><option value="reliability">Most Reliable</option><option value="newest">Newest</option><option value="novelty">Most Novel</option><option value="impact">Highest Judgement Impact</option>
+            <option value="relevance">最相关</option><option value="reliability">最可靠</option><option value="newest">最新</option><option value="novelty">信息增量最高</option><option value="impact">最可能影响判断</option>
           </select>
         </label>
         <div className="mt-6 hidden flex-wrap gap-2 sm:flex">
           {([
-            ["relevance", "Most Relevant"],
-            ["reliability", "Most Reliable"],
-            ["newest", "Newest"],
-            ["novelty", "Most Novel"],
-            ["impact", "Highest Judgement Impact"],
+            ["relevance", "最相关"],
+            ["reliability", "最可靠"],
+            ["newest", "最新"],
+            ["novelty", "信息增量最高"],
+            ["impact", "最可能影响判断"],
           ] as const).map(([value, label]) => (
             <button
               key={value}
@@ -1098,15 +1098,15 @@ export default function HomePage() {
           ))}
         </div>
 
-        {!response && !loading && <p className="mt-12 text-center text-sm text-[#7b8490]">先在 Today 完成一次信息过滤。</p>}
-        <Section eyebrow="Relevant now" title="Relevant Events" events={relevant} />
-        <Section eyebrow="Your knowledge gaps" title="Gap Updates" events={gapUpdates} />
-        <Section eyebrow="Needs caution" title="Conflicting Evidence" events={conflicting} />
-        <Section eyebrow="Early and unconfirmed" title="Emerging Signals" events={emerging} />
+        {!response && !loading && <p className="mt-12 text-center text-sm text-[#7b8490]">请先在“今日”完成一次信息过滤。</p>}
+        <Section eyebrow="当前相关" title="相关事件" events={relevant} />
+        <Section eyebrow="命中你的信息缺口" title="缺口更新" events={gapUpdates} />
+        <Section eyebrow="需要谨慎判断" title="冲突证据" events={conflicting} />
+        <Section eyebrow="较早且尚未确认" title="早期信号" events={emerging} />
 
         {visibleCount < sortedInformation.length && (
           <button onClick={() => setVisibleCount((value) => value + 8)} className="mt-8 w-full rounded-xl border border-[#dfe3e7] py-3 text-xs font-black text-[#596473]">
-            Load more events · {sortedInformation.length - visibleCount} remaining
+            加载更多事件 · 还剩 {sortedInformation.length - visibleCount} 条
           </button>
         )}
       </main>
@@ -1122,38 +1122,38 @@ export default function HomePage() {
     };
     return (
       <main className="mx-auto max-w-[760px] px-4 pb-32 pt-8 sm:px-6 sm:pt-12">
-        <p className="text-[11px] font-black uppercase tracking-[.16em] text-[#2359ff]">Personal Knowledge Memory</p>
-        <h1 className="mt-2 text-4xl font-black tracking-[-.055em]">Library</h1>
+        <p className="text-[11px] font-black uppercase tracking-[.16em] text-[#2359ff]">个人认知记忆</p>
+        <h1 className="mt-2 text-4xl font-black tracking-[-.055em]">资料库</h1>
         <p className="mt-3 text-sm leading-6 text-[#737c88]">保存证据、跟踪事件，并维护你自己的问题与判断。</p>
 
         <div className="mt-7 grid grid-cols-4 rounded-2xl bg-[#eceeea] p-1">
-          {([['following', 'Following'], ['saved', 'Saved'], ['questions', 'Questions'], ['knowledge', 'Knowledge']] as const).map(([value, label]) => (
+          {([['following', '关注中'], ['saved', '已保存'], ['questions', '问题'], ['knowledge', '认知']] as const).map(([value, label]) => (
             <button key={value} onClick={() => setLibraryView(value)} className={`min-h-11 rounded-xl px-1 text-[11px] font-black ${libraryView === value ? "bg-white text-[#172033] shadow-sm" : "text-[#737c88]"}`}>{label}</button>
           ))}
         </div>
 
         {libraryView === "following" && <section className="mt-8 grid gap-5">
-          {knowledge.trackedEntities.length > 0 && <div><p className="text-xs font-black uppercase tracking-[.12em] text-[#7b8490]">Entities</p><div className="mt-3 flex flex-wrap gap-2">{knowledge.trackedEntities.map((entity) => <span key={entity} className="rounded-full border border-[#dfe3e7] bg-white px-4 py-2.5 text-sm font-bold">{entity}</span>)}</div></div>}
-          {knowledge.trackedEvents.length > 0 && <div><p className="text-xs font-black uppercase tracking-[.12em] text-[#7b8490]">Events</p><div className="mt-3 grid gap-2">{knowledge.trackedEvents.map((event) => <div key={event} className="rounded-2xl border border-[#e4e6e2] bg-white p-4 text-sm font-bold leading-6">{event}</div>)}</div></div>}
+          {knowledge.trackedEntities.length > 0 && <div><p className="text-xs font-black uppercase tracking-[.12em] text-[#7b8490]">关注实体</p><div className="mt-3 flex flex-wrap gap-2">{knowledge.trackedEntities.map((entity) => <span key={entity} className="rounded-full border border-[#dfe3e7] bg-white px-4 py-2.5 text-sm font-bold">{entity}</span>)}</div></div>}
+          {knowledge.trackedEvents.length > 0 && <div><p className="text-xs font-black uppercase tracking-[.12em] text-[#7b8490]">关注事件</p><div className="mt-3 grid gap-2">{knowledge.trackedEvents.map((event) => <div key={event} className="rounded-2xl border border-[#e4e6e2] bg-white p-4 text-sm font-bold leading-6">{event}</div>)}</div></div>}
           {!knowledge.trackedEntities.length && !knowledge.trackedEvents.length && <p className="rounded-2xl bg-white p-6 text-sm text-[#7b8490]">你还没有关注任何实体或事件。</p>}
-          <div className="flex gap-2"><input value={newEntity} onChange={(event) => setNewEntity(event.target.value)} placeholder="Follow an entity" className="min-h-12 min-w-0 flex-1 rounded-xl border border-[#dfe3e7] px-4 text-base"/><button onClick={() => addKnowledgeItem(newEntity, "trackedEntities", setNewEntity)} className="min-h-12 rounded-xl bg-[#172033] px-4 text-sm font-black text-white">Follow</button></div>
+          <div className="flex gap-2"><input value={newEntity} onChange={(event) => setNewEntity(event.target.value)} placeholder="添加关注实体" className="min-h-12 min-w-0 flex-1 rounded-xl border border-[#dfe3e7] px-4 text-base"/><button onClick={() => addKnowledgeItem(newEntity, "trackedEntities", setNewEntity)} className="min-h-12 rounded-xl bg-[#172033] px-4 text-sm font-black text-white">关注</button></div>
         </section>}
 
         {libraryView === "saved" && <section className="mt-8">
-          <p className="text-xs font-black uppercase tracking-[.12em] text-[#7b8490]">Saved · {library.length}</p>
-          <div className="mt-3 grid gap-3">{library.map((entry) => <article key={entry.event.id} className="rounded-[22px] border border-[#e5e7e4] bg-white p-5"><p className="text-xs font-black text-[#2359ff]">{eventStatusLabels[entry.event.eventStatus]} · {entry.event.sourceCount} sources{entry.event.dataOrigin === "demo" ? " · 演示数据" : ""}</p><h3 className="mt-3 text-lg font-black leading-7">{entry.event.title}</h3><textarea value={notes[entry.event.id] ?? entry.notes} onChange={(eventObject) => { const note = eventObject.target.value; setNotes((current) => ({ ...current, [entry.event.id]: note })); setLibrary((current) => current.map((item) => item.event.id === entry.event.id ? { ...item, notes: note } : item)); }} placeholder="Add Note…" className="mt-4 min-h-24 w-full resize-none rounded-xl border border-[#dfe3e7] bg-[#fafbf9] p-3 text-base leading-6 outline-none"/><button onClick={() => setSelected(entry.event)} className="mt-3 min-h-11 text-sm font-black text-[#2359ff]">查看证据 →</button></article>)}</div>
-          {!library.length && <p className="mt-3 rounded-2xl bg-white p-6 text-sm text-[#7b8490]">在 Today 的 Insight Detail 中点击 Save。</p>}
+          <p className="text-xs font-black uppercase tracking-[.12em] text-[#7b8490]">已保存 · {library.length}</p>
+          <div className="mt-3 grid gap-3">{library.map((entry) => <article key={entry.event.id} className="rounded-[22px] border border-[#e5e7e4] bg-white p-5"><p className="text-xs font-black text-[#2359ff]">{eventStatusLabels[entry.event.eventStatus]} · {entry.event.sourceCount} 个来源{entry.event.dataOrigin === "demo" ? " · 演示数据" : ""}</p><h3 className="mt-3 text-lg font-black leading-7">{entry.event.title}</h3><textarea value={notes[entry.event.id] ?? entry.notes} onChange={(eventObject) => { const note = eventObject.target.value; setNotes((current) => ({ ...current, [entry.event.id]: note })); setLibrary((current) => current.map((item) => item.event.id === entry.event.id ? { ...item, notes: note } : item)); }} placeholder="添加笔记…" className="mt-4 min-h-24 w-full resize-none rounded-xl border border-[#dfe3e7] bg-[#fafbf9] p-3 text-base leading-6 outline-none"/><button onClick={() => setSelected(entry.event)} className="mt-3 min-h-11 text-sm font-black text-[#2359ff]">查看证据 →</button></article>)}</div>
+          {!library.length && <p className="mt-3 rounded-2xl bg-white p-6 text-sm text-[#7b8490]">在“今日”的信息详情中点击“保存”。</p>}
         </section>}
 
         {libraryView === "questions" && <section className="mt-8 grid gap-7">
-          <div><p className="text-xs font-black uppercase tracking-[.12em] text-[#7b8490]">Open Questions</p><div className="mt-3 grid gap-2">{knowledge.currentQuestions.map((question) => <div key={question} className="flex items-start justify-between gap-3 rounded-2xl bg-white p-4 text-sm font-bold leading-6"><span>{question}</span><button onClick={() => setKnowledge((current) => ({ ...current, currentQuestions: current.currentQuestions.filter((item) => item !== question) }))} className="min-h-11 shrink-0 text-xs text-[#2359ff]">Resolve</button></div>)}</div><div className="mt-3 flex gap-2"><input value={newQuestion} onChange={(event) => setNewQuestion(event.target.value)} placeholder="Add a question" className="min-h-12 min-w-0 flex-1 rounded-xl border border-[#dfe3e7] px-4 text-base"/><button onClick={() => addKnowledgeItem(newQuestion, "currentQuestions", setNewQuestion)} className="min-h-12 rounded-xl bg-[#172033] px-4 text-sm font-black text-white">Add</button></div></div>
-          {knowledge.informationGaps.length > 0 && <div><p className="text-xs font-black uppercase tracking-[.12em] text-[#7b8490]">Information Gaps</p><div className="mt-3 grid gap-2">{knowledge.informationGaps.map((gap) => <div key={gap} className="rounded-2xl border border-[#e4e6e2] bg-white p-4 text-sm font-bold leading-6">{gap}</div>)}</div></div>}
+          <div><p className="text-xs font-black uppercase tracking-[.12em] text-[#7b8490]">未解决的问题</p><div className="mt-3 grid gap-2">{knowledge.currentQuestions.map((question) => <div key={question} className="flex items-start justify-between gap-3 rounded-2xl bg-white p-4 text-sm font-bold leading-6"><span>{question}</span><button onClick={() => setKnowledge((current) => ({ ...current, currentQuestions: current.currentQuestions.filter((item) => item !== question) }))} className="min-h-11 shrink-0 text-xs text-[#2359ff]">标记解决</button></div>)}</div><div className="mt-3 flex gap-2"><input value={newQuestion} onChange={(event) => setNewQuestion(event.target.value)} placeholder="添加问题" className="min-h-12 min-w-0 flex-1 rounded-xl border border-[#dfe3e7] px-4 text-base"/><button onClick={() => addKnowledgeItem(newQuestion, "currentQuestions", setNewQuestion)} className="min-h-12 rounded-xl bg-[#172033] px-4 text-sm font-black text-white">添加</button></div></div>
+          {knowledge.informationGaps.length > 0 && <div><p className="text-xs font-black uppercase tracking-[.12em] text-[#7b8490]">信息缺口</p><div className="mt-3 grid gap-2">{knowledge.informationGaps.map((gap) => <div key={gap} className="rounded-2xl border border-[#e4e6e2] bg-white p-4 text-sm font-bold leading-6">{gap}</div>)}</div></div>}
         </section>}
 
         {libraryView === "knowledge" && <section className="mt-8 grid gap-7">
-          {knowledge.knownInformation.length > 0 && <div><p className="text-xs font-black uppercase tracking-[.12em] text-[#7b8490]">Known Information</p><div className="mt-3 grid gap-2">{knowledge.knownInformation.map((item) => <div key={item} className="rounded-2xl bg-[#f1f3ef] p-4 text-sm leading-6">{item}</div>)}</div></div>}
-          {knowledge.userJudgements.length > 0 && <div><p className="text-xs font-black uppercase tracking-[.12em] text-[#7b8490]">My Judgements</p><div className="mt-3 grid gap-2">{knowledge.userJudgements.map((item) => <div key={item} className="rounded-2xl border border-[#e4e6e2] bg-white p-4 text-sm leading-6">{item}</div>)}</div></div>}
-          <div className="flex gap-2"><input value={newJudgement} onChange={(event) => setNewJudgement(event.target.value)} placeholder="Add a judgement" className="min-h-12 min-w-0 flex-1 rounded-xl border border-[#dfe3e7] px-4 text-base"/><button onClick={() => addKnowledgeItem(newJudgement, "userJudgements", setNewJudgement)} className="min-h-12 rounded-xl bg-[#172033] px-4 text-sm font-black text-white">Add</button></div>
+          {knowledge.knownInformation.length > 0 && <div><p className="text-xs font-black uppercase tracking-[.12em] text-[#7b8490]">已知信息</p><div className="mt-3 grid gap-2">{knowledge.knownInformation.map((item) => <div key={item} className="rounded-2xl bg-[#f1f3ef] p-4 text-sm leading-6">{item}</div>)}</div></div>}
+          {knowledge.userJudgements.length > 0 && <div><p className="text-xs font-black uppercase tracking-[.12em] text-[#7b8490]">我的判断</p><div className="mt-3 grid gap-2">{knowledge.userJudgements.map((item) => <div key={item} className="rounded-2xl border border-[#e4e6e2] bg-white p-4 text-sm leading-6">{item}</div>)}</div></div>}
+          <div className="flex gap-2"><input value={newJudgement} onChange={(event) => setNewJudgement(event.target.value)} placeholder="添加判断" className="min-h-12 min-w-0 flex-1 rounded-xl border border-[#dfe3e7] px-4 text-base"/><button onClick={() => addKnowledgeItem(newJudgement, "userJudgements", setNewJudgement)} className="min-h-12 rounded-xl bg-[#172033] px-4 text-sm font-black text-white">添加</button></div>
         </section>}
       </main>
     );
@@ -1187,62 +1187,62 @@ export default function HomePage() {
 
   const renderSettings = () => {
     const sourceRows = [
-      ["Demo Data", "Available"],
-      ["Imported Data", "Available"],
-      ["Web", "Available"],
-      ["X", connections.find((item) => item.id === "x")?.state === "connected" ? "Connected" : "Not configured"],
-      ["Xiaohongshu", connections.find((item) => item.id === "xiaohongshu")?.state === "connected" ? "Connected" : connections.find((item) => item.id === "xiaohongshu")?.state === "login_required" ? "Login required" : "Unavailable"],
+      ["演示数据", "可用"],
+      ["导入数据", "可用"],
+      ["网页", "可用"],
+      ["X", connections.find((item) => item.id === "x")?.state === "connected" ? "已连接" : "未配置"],
+      ["小红书", connections.find((item) => item.id === "xiaohongshu")?.state === "connected" ? "已连接" : connections.find((item) => item.id === "xiaohongshu")?.state === "login_required" ? "需要登录" : "不可用"],
     ];
     const accordionClass = "rounded-[22px] border border-[#e3e6e8] bg-white p-5";
     const summaryClass = "flex min-h-11 cursor-pointer list-none items-center justify-between text-base font-black";
     return (
       <main className="mx-auto max-w-[760px] px-4 pb-32 pt-8 sm:px-6 sm:pt-12">
-        <p className="text-[11px] font-black uppercase tracking-[.16em] text-[#2359ff]">Private by default</p>
-        <h1 className="mt-2 text-4xl font-black tracking-[-.055em]">Settings</h1>
+        <p className="text-[11px] font-black uppercase tracking-[.16em] text-[#2359ff]">默认仅本地保存</p>
+        <h1 className="mt-2 text-4xl font-black tracking-[-.055em]">设置</h1>
         <p className="mt-3 text-sm leading-6 text-[#737c88]">管理你的过滤器、认知状态和本地测试数据。</p>
 
         <div className="mt-8 grid gap-3">
           <details className={accordionClass}>
-            <summary className={summaryClass}><span>My Profile</span><ChevronRight size={18}/></summary>
-            <div className="mt-5 grid gap-5"><label><span className="text-sm font-black">Identity</span><input value={knowledge.identity} onChange={(event) => setKnowledge((current) => ({ ...current, identity: event.target.value }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] px-4 text-base"/></label><label><span className="text-sm font-black">Industry</span><input value={knowledge.industry} onChange={(event) => setKnowledge((current) => ({ ...current, industry: event.target.value }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] px-4 text-base"/></label></div>
+            <summary className={summaryClass}><span>我的资料</span><ChevronRight size={18}/></summary>
+            <div className="mt-5 grid gap-5"><label><span className="text-sm font-black">身份</span><input value={knowledge.identity} onChange={(event) => setKnowledge((current) => ({ ...current, identity: event.target.value }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] px-4 text-base"/></label><label><span className="text-sm font-black">行业</span><input value={knowledge.industry} onChange={(event) => setKnowledge((current) => ({ ...current, industry: event.target.value }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] px-4 text-base"/></label></div>
           </details>
 
           <details className={accordionClass}>
-            <summary className={summaryClass}><span>My Knowledge</span><ChevronRight size={18}/></summary>
-            <div className="mt-5 grid gap-5">{listField("focusAreas", "Focus Areas", "每行一项")}{listField("currentQuestions", "Current Questions", "尚未解决的问题")}{listField("knownInformation", "Known Information", "已确认的事实")}{listField("informationGaps", "Information Gaps", "仍缺少的证据")}{listField("trackedEntities", "Tracked Entities", "公司、产品、人物")}{listField("trackedEvents", "Tracked Events", "持续观察的事件")}{listField("userJudgements", "User Judgements", "当前判断")}<label><span className="text-sm font-black">Freshness Window</span><select value={knowledge.freshnessWindow} onChange={(event) => setKnowledge((current) => ({ ...current, freshnessWindow: event.target.value }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] bg-white px-4 text-base"><option value="1d">24 小时</option><option value="3d">3 天</option><option value="7d">7 天</option><option value="30d">30 天</option></select></label><button onClick={() => { if (!activeFilter) return; setResponse(null); setPage("today"); void refreshToday(knowledge, activeFilter); }} className="min-h-12 rounded-xl bg-[#2359ff] text-sm font-black text-white">保存并重新判断 Today</button></div>
+            <summary className={summaryClass}><span>我的认知</span><ChevronRight size={18}/></summary>
+            <div className="mt-5 grid gap-5">{listField("focusAreas", "关注领域", "每行一项")}{listField("currentQuestions", "当前问题", "尚未解决的问题")}{listField("knownInformation", "已知信息", "已确认的事实")}{listField("informationGaps", "信息缺口", "仍缺少的证据")}{listField("trackedEntities", "关注实体", "公司、产品、人物")}{listField("trackedEvents", "关注事件", "持续观察的事件")}{listField("userJudgements", "我的判断", "当前判断")}<label><span className="text-sm font-black">信息时效范围</span><select value={knowledge.freshnessWindow} onChange={(event) => setKnowledge((current) => ({ ...current, freshnessWindow: event.target.value }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] bg-white px-4 text-base"><option value="1d">24 小时</option><option value="3d">3 天</option><option value="7d">7 天</option><option value="30d">30 天</option></select></label><button onClick={() => { if (!activeFilter) return; setResponse(null); setPage("today"); void refreshToday(knowledge, activeFilter); }} className="min-h-12 rounded-xl bg-[#2359ff] text-sm font-black text-white">保存并重新判断今日信息</button></div>
           </details>
 
           <details className={accordionClass}>
-            <summary className={summaryClass}><span>My Filters</span><ChevronRight size={18}/></summary>
-            <div className="mt-4 grid gap-2">{filters.map((filter) => <button key={filter.id} onClick={() => switchFilter(filter)} className={`flex min-h-14 items-center justify-between rounded-2xl border p-4 text-left ${filter.id === activeFilterId ? "border-[#9eb2ff] bg-[#f2f5ff]" : "border-[#e4e6e2] bg-white"}`}><span><strong className="block text-sm">{filter.filterName}</strong>{(filter.industry || filter.identity) && <span className="mt-1 block text-xs text-[#7b8490]">{filter.industry || filter.identity}</span>}</span><span className="text-xs font-black text-[#2359ff]">{filter.id === activeFilterId ? "ACTIVE" : "USE"}</span></button>)}<button onClick={() => setFilterBuilderOpen(true)} className="min-h-12 rounded-xl border border-dashed border-[#bfc7d1] text-sm font-black text-[#596473]">＋ Create another filter</button></div>
+            <summary className={summaryClass}><span>我的过滤器</span><ChevronRight size={18}/></summary>
+            <div className="mt-4 grid gap-2">{filters.map((filter) => <button key={filter.id} onClick={() => switchFilter(filter)} className={`flex min-h-14 items-center justify-between rounded-2xl border p-4 text-left ${filter.id === activeFilterId ? "border-[#9eb2ff] bg-[#f2f5ff]" : "border-[#e4e6e2] bg-white"}`}><span><strong className="block text-sm">{filter.filterName}</strong>{(filter.industry || filter.identity) && <span className="mt-1 block text-xs text-[#7b8490]">{filter.industry || filter.identity}</span>}</span><span className="text-xs font-black text-[#2359ff]">{filter.id === activeFilterId ? "使用中" : "使用"}</span></button>)}<button onClick={() => setFilterBuilderOpen(true)} className="min-h-12 rounded-xl border border-dashed border-[#bfc7d1] text-sm font-black text-[#596473]">＋ 新建过滤器</button></div>
           </details>
 
           <details className={accordionClass}>
-            <summary className={summaryClass}><span>Data Sources</span><ChevronRight size={18}/></summary>
-            <div className="mt-4 grid gap-2">{sourceRows.map(([label, value]) => <div key={label} className="flex min-h-12 items-center justify-between border-b border-[#eceeea] text-sm last:border-0"><strong>{label}</strong><span className={value === "Available" || value === "Connected" ? "font-bold text-emerald-700" : "text-[#7b8490]"}>{value}</span></div>)}</div>
-            {response && <CoverageBadge coverage={response.coverage}/>}<details className="mt-4 rounded-xl bg-[#f4f6f3] p-4 text-sm"><summary className="min-h-11 cursor-pointer font-black">Advanced</summary><p className="mt-2 leading-6 text-[#68727f]">真实 Provider 的连接参数只由运行环境提供。普通测试不需要配置任何凭证。</p></details>
+            <summary className={summaryClass}><span>数据来源</span><ChevronRight size={18}/></summary>
+            <div className="mt-4 grid gap-2">{sourceRows.map(([label, value]) => <div key={label} className="flex min-h-12 items-center justify-between border-b border-[#eceeea] text-sm last:border-0"><strong>{label}</strong><span className={value === "可用" || value === "已连接" ? "font-bold text-emerald-700" : "text-[#7b8490]"}>{value}</span></div>)}</div>
+            {response && <CoverageBadge coverage={response.coverage}/>}<details className="mt-4 rounded-xl bg-[#f4f6f3] p-4 text-sm"><summary className="min-h-11 cursor-pointer font-black">高级设置</summary><p className="mt-2 leading-6 text-[#68727f]">真实数据源的连接参数只由运行环境提供。普通测试不需要配置任何凭证。</p></details>
           </details>
 
           <details className={accordionClass}>
-            <summary className={summaryClass}><span>My Data</span><ChevronRight size={18}/></summary>
-            <p className="mt-4 text-sm leading-6 text-[#68727f]">Filters、Knowledge、Library、Notes 与 Feedback 只保存在当前浏览器。</p>{experienceFeedback.length ? <a href={feedbackExportHref} download={`signal-map-feedback-${sessionId.slice(0, 8) || "alpha"}.json`} className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black">Export Feedback JSON</a> : <span className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black opacity-40">Export Feedback JSON</span>}<button onClick={() => { if (!window.confirm("清除当前设备上的全部 Signal Map Alpha 数据？")) return; void clearAlphaData().then(() => { setFilters([]); setActiveFilterId(null); setKnowledge(defaultKnowledge); setLibrary([]); setNotes({}); setFeedbackRecords([]); setExperienceFeedback([]); setResponse(null); setPage("today"); }); }} className="mt-2 min-h-12 w-full rounded-xl text-sm font-black text-rose-700">Clear local alpha data</button>
+            <summary className={summaryClass}><span>我的数据</span><ChevronRight size={18}/></summary>
+            <p className="mt-4 text-sm leading-6 text-[#68727f]">过滤器、认知状态、资料库、笔记与反馈只保存在当前浏览器。</p>{experienceFeedback.length ? <a href={feedbackExportHref} download={`signal-map-feedback-${sessionId.slice(0, 8) || "alpha"}.json`} className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black">导出反馈 JSON</a> : <span className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black opacity-40">导出反馈 JSON</span>}<button onClick={() => { if (!window.confirm("清除当前设备上的全部 Signal Map Alpha 数据？")) return; void clearAlphaData().then(() => { setFilters([]); setActiveFilterId(null); setKnowledge(defaultKnowledge); setLibrary([]); setNotes({}); setFeedbackRecords([]); setExperienceFeedback([]); setResponse(null); setPage("today"); }); }} className="mt-2 min-h-12 w-full rounded-xl text-sm font-black text-rose-700">清除本地测试数据</button>
           </details>
         </div>
 
         <details className="mt-6 rounded-[22px] border border-[#cfd8ff] bg-[#f4f6ff] p-5">
           <summary className={summaryClass}><span>反馈本次体验</span><ChevronRight size={18}/></summary>
           <div className="mt-5 grid gap-5">
-            <label><span className="text-sm font-black">1. Today 里有几条真的值得你看？</span><select value={feedbackDraft.worthwhileCount} onChange={(event) => setFeedbackDraft((current) => ({ ...current, worthwhileCount: Number(event.target.value) as 0 | 1 | 2 | 3 | 4 | 5 }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] bg-white px-4 text-base">{[0,1,2,3,4,5].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-            <label><span className="text-sm font-black">2. 有没有你本来就知道的信息？</span><select value={feedbackDraft.alreadyKnown} onChange={(event) => setFeedbackDraft((current) => ({ ...current, alreadyKnown: event.target.value as "yes" | "no" }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] bg-white px-4 text-base"><option value="yes">Yes</option><option value="no">No</option></select></label>
+            <label><span className="text-sm font-black">1. “今日”里有几条真的值得你看？</span><select value={feedbackDraft.worthwhileCount} onChange={(event) => setFeedbackDraft((current) => ({ ...current, worthwhileCount: Number(event.target.value) as 0 | 1 | 2 | 3 | 4 | 5 }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] bg-white px-4 text-base">{[0,1,2,3,4,5].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+            <label><span className="text-sm font-black">2. 有没有你本来就知道的信息？</span><select value={feedbackDraft.alreadyKnown} onChange={(event) => setFeedbackDraft((current) => ({ ...current, alreadyKnown: event.target.value as "yes" | "no" }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] bg-white px-4 text-base"><option value="yes">有</option><option value="no">没有</option></select></label>
             <label><span className="text-sm font-black">3. 你信任这些信息吗？</span><select value={feedbackDraft.trustScore} onChange={(event) => setFeedbackDraft((current) => ({ ...current, trustScore: Number(event.target.value) as 1 | 2 | 3 | 4 | 5 }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] bg-white px-4 text-base">{[1,2,3,4,5].map((value) => <option key={value} value={value}>{value} / 5</option>)}</select></label>
             <label><span className="text-sm font-black">4. 系统漏掉了什么重要信息？</span><textarea value={feedbackDraft.missedInformation} onChange={(event) => setFeedbackDraft((current) => ({ ...current, missedInformation: event.target.value }))} className="mt-2 min-h-24 w-full resize-none rounded-xl border border-[#dfe3e7] bg-white p-4 text-base"/></label>
-            <label><span className="text-sm font-black">5. 如果每天只给这些，你愿意继续用吗？</span><select value={feedbackDraft.continueUsing} onChange={(event) => setFeedbackDraft((current) => ({ ...current, continueUsing: event.target.value as "yes" | "maybe" | "no" }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] bg-white px-4 text-base"><option value="yes">Yes</option><option value="maybe">Maybe</option><option value="no">No</option></select></label>
+            <label><span className="text-sm font-black">5. 如果每天只给这些，你愿意继续用吗？</span><select value={feedbackDraft.continueUsing} onChange={(event) => setFeedbackDraft((current) => ({ ...current, continueUsing: event.target.value as "yes" | "maybe" | "no" }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] bg-white px-4 text-base"><option value="yes">愿意</option><option value="maybe">可能愿意</option><option value="no">不愿意</option></select></label>
             <label><span className="text-sm font-black">6. 最大的问题是什么？</span><textarea value={feedbackDraft.biggestProblem} onChange={(event) => setFeedbackDraft((current) => ({ ...current, biggestProblem: event.target.value }))} className="mt-2 min-h-24 w-full resize-none rounded-xl border border-[#dfe3e7] bg-white p-4 text-base"/></label>
             <button onClick={submitExperienceFeedback} className="min-h-12 rounded-xl bg-[#2359ff] text-sm font-black text-white">{feedbackSaved ? "反馈已保存在本机" : "提交体验反馈"}</button>
           </div>
         </details>
 
-        {testMode && <section className="mt-6 rounded-[22px] border border-[#e3e6e8] bg-white p-5"><p className="text-xs font-black uppercase tracking-[.12em] text-[#2359ff]">Alpha Test Mode</p><p className="mt-2 text-sm text-[#68727f]">Session ID · {sessionId.slice(0, 8)}</p><div className="mt-4 grid gap-2"><button onClick={() => activeFilter && void refreshToday(knowledge, activeFilter)} className="min-h-12 rounded-xl border border-[#dfe3e7] text-sm font-black">Reset Demo Data</button><button onClick={() => { setActiveFilterId(null); setResponse(null); void setAlphaValue("lastRun", null); }} className="min-h-12 rounded-xl border border-[#dfe3e7] text-sm font-black">Reset Filter</button>{experienceFeedback.length ? <a href={feedbackExportHref} download={`signal-map-feedback-${sessionId.slice(0, 8) || "alpha"}.json`} className="flex min-h-12 items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black">Export Feedback</a> : <span className="flex min-h-12 items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black opacity-40">Export Feedback</span>}</div></section>}
+        {testMode && <section className="mt-6 rounded-[22px] border border-[#e3e6e8] bg-white p-5"><p className="text-xs font-black uppercase tracking-[.12em] text-[#2359ff]">Alpha 测试模式</p><p className="mt-2 text-sm text-[#68727f]">测试会话 ID · {sessionId.slice(0, 8)}</p><div className="mt-4 grid gap-2"><button onClick={() => activeFilter && void refreshToday(knowledge, activeFilter)} className="min-h-12 rounded-xl border border-[#dfe3e7] text-sm font-black">重置演示数据</button><button onClick={() => { setActiveFilterId(null); setResponse(null); void setAlphaValue("lastRun", null); }} className="min-h-12 rounded-xl border border-[#dfe3e7] text-sm font-black">重置过滤器</button>{experienceFeedback.length ? <a href={feedbackExportHref} download={`signal-map-feedback-${sessionId.slice(0, 8) || "alpha"}.json`} className="flex min-h-12 items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black">导出反馈</a> : <span className="flex min-h-12 items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black opacity-40">导出反馈</span>}</div></section>}
       </main>
     );
   };
@@ -1252,7 +1252,7 @@ export default function HomePage() {
       <div className="grid min-h-screen place-items-center bg-[#fbfbf8] text-[#172033]">
         <div className="text-center">
           <RefreshCw className="mx-auto animate-spin text-[#2359ff]" size={20} />
-          <p className="mt-3 text-xs font-black">正在恢复本地 Knowledge State…</p>
+          <p className="mt-3 text-xs font-black">正在恢复本地认知状态…</p>
         </div>
       </div>
     );
@@ -1282,7 +1282,7 @@ export default function HomePage() {
               </button>
             ))}
           </nav>
-          <span className="text-[9px] font-bold text-[#939aa3]">Attention, protected.</span>
+          <span className="text-[9px] font-bold text-[#939aa3]">守住你的注意力。</span>
         </div>
       </header>
 
