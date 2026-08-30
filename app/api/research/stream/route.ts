@@ -36,13 +36,10 @@ export async function GET(request: Request) {
           (progress) => send("progress", progress),
         );
         send("result", result);
-      } catch (error) {
+      } catch {
         send("pipeline_error", {
           error: "Research Pipeline 未能完成。",
-          reason:
-            error instanceof Error
-              ? error.message
-              : "发生无法识别的检索错误。",
+          reason: "本轮来源检索暂时不可用，请稍后再试。",
         });
       } finally {
         controller.close();

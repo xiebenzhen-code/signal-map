@@ -8,8 +8,8 @@ import {
   validateFactEvidence,
 } from "../information/filter-engine.ts";
 import type {
+  ActiveKnowledgeContext,
   InformationFilter,
-  KnowledgeState,
 } from "../information/types.ts";
 import type { DemoSource } from "../information/types.ts";
 import { planQuery } from "../research/query-planner.ts";
@@ -45,7 +45,7 @@ function source(overrides: Partial<DemoSource> = {}): DemoSource {
 function evaluate(
   sources: DemoSource[],
   filterOverrides: Partial<InformationFilter> = {},
-  knowledgeOverrides: Partial<KnowledgeState> = {},
+  knowledgeOverrides: Partial<ActiveKnowledgeContext> = {},
 ) {
   return evaluateDemoEvent(
     {
@@ -62,21 +62,17 @@ function filter(overrides: Partial<InformationFilter> = {}): InformationFilter {
   return {
     id: "test-filter",
     filterName: "Test Filter",
-    identity: "",
     industry: "",
     focusAreas: [],
-    knownInformation: [],
-    informationGaps: [],
-    currentQuestions: [],
     freshnessWindow: "7d",
-    sourceScope: "all",
+    sourceScope: "hybrid",
     createdAt: now,
     updatedAt: now,
     ...overrides,
   };
 }
 
-function knowledge(overrides: Partial<KnowledgeState> = {}): KnowledgeState {
+function knowledge(overrides: Partial<ActiveKnowledgeContext> = {}): ActiveKnowledgeContext {
   return {
     identity: "",
     industry: "",
@@ -87,8 +83,10 @@ function knowledge(overrides: Partial<KnowledgeState> = {}): KnowledgeState {
     trackedEntities: [],
     trackedEvents: [],
     userJudgements: [],
-    evidenceHistory: [],
     freshnessWindow: "7d",
+    sourceScope: "hybrid",
+    customSources: [],
+    researchContextRevision: 1,
     ...overrides,
   };
 }
@@ -138,8 +136,8 @@ test("an information gap improves relevance", () => {
   );
   const withGap = runFilterEngine(
     {
-      filter: filter({ informationGaps: ["AI 生成内容标识"] }),
-      knowledge: knowledge(),
+      filter: filter(),
+      knowledge: knowledge({ informationGaps: ["AI 生成内容标识"] }),
     },
     dataset,
   );
@@ -180,7 +178,7 @@ test("old article retrieved today is BACKGROUND, not NEW", () => {
       firstSeenAt: "2026-08-28T12:00:00.000Z",
       retrievedAt: "2026-08-28T12:00:00.000Z",
     }),
-  ], { informationGaps: ["IPO"], currentQuestions: ["Technology IPO update"] });
+  ], {}, { informationGaps: ["IPO"], currentQuestions: ["Technology IPO update"] });
   assert.equal(event.eventStatus, "BACKGROUND");
   assert.equal(event.time.includes("24小时"), false);
   assert.match(event.time, /个月前/);
@@ -227,12 +225,65 @@ test("very new low reliability social content remains SIGNAL, not FACT", () => {
       publishedAt: "2026-08-28T11:50:00.000Z",
       eventOccurredAt: "2026-08-28T11:50:00.000Z",
     }),
-  ], { informationGaps: ["Technology IPO update"], currentQuestions: ["Technology IPO update"] });
+  ], {}, { informationGaps: ["Technology IPO update"], currentQuestions: ["Technology IPO update"] });
   assert.equal(event.eventStatus, "SIGNAL");
   assert.equal(event.informationType, "SIGNAL");
   assert.equal(event.claims.some((claim) => claim.contentType === "FACT"), false);
   assert.notEqual(event.attentionDecision, "MUST_READ");
   assert.equal(event.attentionDecision, "WORTH_WATCHING");
+});
+
+test("a fresh GitHub discussion can be Worth Watching without becoming a FACT", () => {
+  const event = evaluate([
+    source({
+      sourceType: "social",
+      sourceTier: "C",
+      publisher: "GitHub Discussions · openai/codex",
+      sourceUrl: "https://github.com/openai/codex/discussions/42",
+      evidenceSnippet: undefined,
+      reliability: 38,
+      publishedAt: "2026-08-28T11:50:00.000Z",
+      eventOccurredAt: "2026-08-28T11:50:00.000Z",
+    }),
+  ], {}, {
+    informationGaps: ["Technology IPO update"],
+    currentQuestions: ["Technology IPO update"],
+  });
+  assert.equal(event.eventStatus, "SIGNAL");
+  assert.equal(event.informationType, "SIGNAL");
+  assert.equal(event.claims.some((claim) => claim.contentType === "FACT"), false);
+  assert.equal(event.attentionDecision, "WORTH_WATCHING");
+});
+
+test("one claim can retain both discovery and verification evidence sources", () => {
+  const claimText = "The company confirmed a material API change.";
+  const event = evaluate([
+    source({
+      id: "social-discovery",
+      claimText,
+      sourceType: "social",
+      sourceTier: "C",
+      publisher: "Community Post",
+      sourceUrl: "https://x.com/example/status/2",
+      reliability: 35,
+    }),
+    source({
+      id: "official-verification",
+      claimText,
+      publisher: "Company Documentation",
+      sourceUrl: "https://example.com/docs/api-change",
+      sourceType: "primary",
+      sourceTier: "S",
+      reliability: 95,
+    }),
+  ]);
+  const claim = event.claims.find((candidate) => candidate.claimText === claimText);
+  assert.ok(claim);
+  assert.deepEqual(
+    claim.evidenceSources.map((evidence) => evidence.sourceRole),
+    ["discovery", "verification"],
+  );
+  assert.equal("sourceRole" in claim, false);
 });
 
 test("fresh information already known has high Freshness but low Novelty", () => {
@@ -255,8 +306,7 @@ test("old information filling a critical gap stays BACKGROUND evidence", () => {
       publishedAt: "2026-01-09T09:00:00.000Z",
       eventOccurredAt: "2026-01-09T09:00:00.000Z",
     }),
-  ], {
-    focusAreas: ["IPO proceeds"],
+  ], { focusAreas: ["IPO proceeds"] }, {
     informationGaps: ["use of proceeds", "IPO proceeds"],
     currentQuestions: ["IPO proceeds allocated"],
   });
@@ -310,14 +360,14 @@ test("demo runs are explicitly distinguishable from live research", () => {
     filter: filter({ focusAreas: ["Codex"] }),
     knowledge: knowledge(),
   });
-  assert.equal(result.dataMode, "DEMO");
+  assert.equal(result.dataMode, "demo");
   assert.ok(result.signals.every((signal) => signal.dataOrigin === "demo"));
 });
 
-test("a community GitHub result is not promoted to an official primary source", () => {
+test("a community GitHub result remains a social discovery source", () => {
   assert.equal(
     classifySource("GitHub", "https://news.google.com/rss/articles/community-repository"),
-    "other",
+    "social",
   );
 });
 

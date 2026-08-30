@@ -1,0 +1,18 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "app/**/*.{ts,tsx}",
+    "tests/**/*.test.ts",
+    "vite.config.ts"
+  ],
+  "project": [
+    "app/**/*.{ts,tsx,css}",
+    "information/**/*.ts",
+    "lib/**/*.ts",
+    "research/**/*.ts",
+    "social/**/*.ts",
+    "tests/**/*.ts"
+  ],
+  "vite": false,
+  "treatConfigHintsAsErrors": true
+}

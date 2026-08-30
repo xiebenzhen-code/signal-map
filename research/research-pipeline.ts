@@ -1,4 +1,5 @@
 import { socialAccessLayer, type LiveItem } from "../social/providers/index.ts";
+import { deduplicateSocialEvidence } from "../social/evidence-dedup.ts";
 import {
   earliestValidTimestamp,
   freshnessWindowHours,
@@ -7,9 +8,26 @@ import {
   validateTimestamp,
 } from "../information/freshness.ts";
 import { planQuery } from "./query-planner";
+import {
+  selectBoundedCandidates,
+  type CandidateEligibilityAudit,
+  type CandidateSelectionAudit,
+  type CandidateSelectionInput,
+  type PreliminaryEligibilityFailure,
+  type ProtectedReason,
+} from "./candidate-selection.ts";
+import {
+  discoverOfficialGithubReleases,
+  discoverOfficialUpdatePages,
+} from "./github-discovery.ts";
 import { classifySource } from "./source-classifier";
 import { describesRecentChange } from "./recent-signal";
+import {
+  assessNoveltyAttribution,
+  type NoveltyClusterMember,
+} from "./novelty-attribution.ts";
 import { translateSignalsForPresentation } from "./translation";
+import { buildSourceCoverage, type SourceExecutionOutcome } from "./source-coverage.ts";
 import type {
   PipelineCounts,
   PipelineProgress,
@@ -23,6 +41,22 @@ import type {
 } from "./types";
 
 type ProgressHandler = (progress: PipelineProgress) => void | Promise<void>;
+
+export type ResearchPipelineDebug = {
+  onCandidateSelectionAudit?: (audit: CandidateSelectionAudit[]) => void;
+  onEligibilityAudit?: (audit: EligibilityAuditFunnel) => void;
+};
+
+export type EligibilityAuditFunnel = {
+  eventClusters: number;
+  preliminaryEligible: number;
+  preliminaryIgnore: number;
+  candidatePool: number;
+  mustRead: number;
+  worthWatching: number;
+  libraryOnly: number;
+  preliminaryIgnoreFailureCounts: Partial<Record<PreliminaryEligibilityFailure, number>>;
+};
 
 const emptyCounts = (): PipelineCounts => ({
   candidates: 0,
@@ -133,67 +167,6 @@ async function redditSearch(query: string): Promise<LiveItem[]> {
     authority: 52,
     origin: "reddit",
   }));
-}
-
-const officialGithubRepos: Record<string, string[]> = {
-  openai: ["openai/codex"],
-  codex: ["openai/codex"],
-  anthropic: ["anthropics/anthropic-sdk-python", "anthropics/anthropic-sdk-typescript"],
-  "google gemini": ["google-gemini/gemini-cli"],
-  gemini: ["google-gemini/gemini-cli"],
-};
-
-async function githubLatestRelease(repo: string): Promise<LiveItem | null> {
-  const retrievedAt = new Date().toISOString();
-  const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
-    headers: {
-      Accept: "application/vnd.github+json",
-      "User-Agent": "SignalMapResearch/0.5",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-    signal: AbortSignal.timeout(10000),
-  });
-  if (response.status === 404) return null;
-  if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
-  const release = (await response.json()) as {
-    id: number;
-    name?: string;
-    tag_name: string;
-    html_url: string;
-    body?: string;
-    published_at?: string;
-    created_at?: string;
-  };
-  const publishedAt = release.published_at || release.created_at;
-  return {
-    id: `github-release-${release.id}`,
-    title: `${repo} ${release.name || release.tag_name}`,
-    url: release.html_url,
-    snippet: (release.body || `Official GitHub release ${release.tag_name}`).slice(0, 500),
-    source: `GitHub · ${repo}`,
-    publishedAt,
-    eventOccurredAt: publishedAt,
-    firstSeenAt: retrievedAt,
-    retrievedAt,
-    dataOrigin: "live",
-    channel: "官方",
-    authority: 94,
-    origin: "github",
-  };
-}
-
-async function discoverOfficialGithubReleases(entities: string[], failures: string[]) {
-  const repos = Array.from(
-    new Set(
-      entities.flatMap((entity) => officialGithubRepos[entity.toLowerCase()] || []),
-    ),
-  ).slice(0, 4);
-  const settled = await Promise.allSettled(repos.map(githubLatestRelease));
-  const failed = settled.filter((result) => result.status === "rejected").length;
-  if (failed) failures.push(`Official GitHub: ${failed} 个 Release 请求失败或超时。`);
-  return settled.flatMap((result) =>
-    result.status === "fulfilled" && result.value ? [result.value] : [],
-  );
 }
 
 function primaryDomains(plan: QueryPlan) {
@@ -317,10 +290,14 @@ async function searchQueries(
   const windows = [1, 3, 7, 30];
   const discovered: LiveItem[] = [];
   let failed = 0;
+  let attempted = 0;
+  let successful = 0;
   for (const days of windows) {
+    attempted += queries.length;
     const settled = await Promise.allSettled(
       queries.map((query) => googleNews(`${query} when:${days}d`)),
     );
+    successful += settled.filter((result) => result.status === "fulfilled").length;
     failed += settled.filter((result) => result.status === "rejected").length;
     discovered.push(...settled.flatMap((result) => result.status === "fulfilled" ? result.value : []));
     const verifiedRecent = unique(
@@ -336,6 +313,9 @@ async function searchQueries(
   if (failed) failures.push(`${expected}: ${failed} 个搜索组合请求失败或超时。`);
   return {
     scanned: discovered.length,
+    attempted,
+    successful,
+    failed,
     items: unique(
       discovered
       .filter((item) => {
@@ -349,6 +329,30 @@ async function searchQueries(
       })
       .map((item) => ({ ...item, sourceType: expected })),
     ),
+  };
+}
+
+function webSearchOutcome(
+  source: string,
+  result: { items: ResearchCandidate[]; attempted: number; successful: number },
+): SourceExecutionOutcome {
+  if (!result.attempted) {
+    return { source, execution: "not_searched", searched: false, resultCount: 0 };
+  }
+  if (!result.successful) {
+    return {
+      source,
+      execution: "failed",
+      searched: true,
+      resultCount: 0,
+      failureCode: "upstream_error",
+    };
+  }
+  return {
+    source,
+    execution: result.items.length ? "searched_with_results" : "searched_no_results",
+    searched: true,
+    resultCount: result.items.length,
   };
 }
 
@@ -455,12 +459,14 @@ function stableEventId(title: string) {
 export async function runResearchPipeline(
   input: ResearchInput,
   onProgress?: ProgressHandler,
+  debug?: ResearchPipelineDebug,
 ): Promise<ResearchResponse> {
   const progress: PipelineProgress[] = [];
   const failures: string[] = [];
   const windowDays = freshnessDays(input.freshnessWindow);
   let scanned = 0;
   let counts = emptyCounts();
+  const sourceOutcomes: SourceExecutionOutcome[] = [];
   const emit = async (event: PipelineProgress) => {
     progress.push(event);
     await onProgress?.(event);
@@ -484,16 +490,25 @@ export async function runResearchPipeline(
   const primaryQueries = plan.searchCombinations
     .slice(0, 5)
     .map((query) => `${query} ${domains}`);
-  const [primaryResult, githubReleases] = await Promise.all([
+  const [primaryResult, githubReleaseResult, officialUpdatePageResult] = await Promise.all([
     searchQueries(primaryQueries, "primary", plan, failures, windowDays),
-    discoverOfficialGithubReleases(plan.entities, failures),
+    discoverOfficialGithubReleases(plan.entities),
+    discoverOfficialUpdatePages(plan.entities),
   ]);
+  if (githubReleaseResult.failure) failures.push(githubReleaseResult.failure);
+  if (officialUpdatePageResult.failure) failures.push(officialUpdatePageResult.failure);
   const primary = unique([
-    ...githubReleases
+    ...officialUpdatePageResult.items
+      .filter((item) => relevant(item, plan))
+      .map((item) => ({ ...item, sourceType: "primary" as const })),
+    ...githubReleaseResult.items
       .filter((item) => relevant(item, plan))
       .map((item) => ({ ...item, sourceType: "primary" as const })),
     ...primaryResult.items,
   ]);
+  sourceOutcomes.push(webSearchOutcome("Primary Sources", primaryResult));
+  sourceOutcomes.push(githubReleaseResult.outcome);
+  sourceOutcomes.push(officialUpdatePageResult.outcome);
   scanned += primaryResult.scanned;
   counts = { ...counts, candidates: primary.length, primary: primary.length };
   if (!primary.length) {
@@ -521,6 +536,7 @@ export async function runResearchPipeline(
     windowDays,
   );
   const trustedMedia = trustedMediaResult.items;
+  sourceOutcomes.push(webSearchOutcome("Trusted Media", trustedMediaResult));
   scanned += trustedMediaResult.scanned;
   counts = {
     ...counts,
@@ -548,12 +564,27 @@ export async function runResearchPipeline(
     windowDays,
   );
   const industryMedia = industryMediaResult.items;
+  sourceOutcomes.push(webSearchOutcome("Industry Media", industryMediaResult));
   scanned += industryMediaResult.scanned;
   counts = {
     ...counts,
     candidates: counts.candidates + industryMedia.length,
     industryMedia: industryMedia.length,
   };
+
+  const communityWebQueries = plan.searchCombinations.slice(0, 3).map(
+    (query) =>
+      `${query} (site:reddit.com OR site:github.com OR site:news.ycombinator.com OR site:stackoverflow.com OR site:dev.to)`,
+  );
+  const communityWebResult = await searchQueries(
+    communityWebQueries,
+    "social",
+    plan,
+    failures,
+    windowDays,
+  );
+  sourceOutcomes.push(webSearchOutcome("Public Web Community", communityWebResult));
+  scanned += communityWebResult.scanned;
 
   const trustedClaims = [...trustedMedia, ...industryMedia]
     .filter((item) => resolveFreshness(item).ageHours !== undefined)
@@ -576,7 +607,7 @@ export async function runResearchPipeline(
   });
   const socialQuery = plan.searchCombinations.slice(0, 3).join(" OR ");
   const [socialAccess, redditResult] = await Promise.all([
-    socialAccessLayer.search({ query: socialQuery, industry: input.industry }),
+    socialAccessLayer.search({ query: socialQuery, industry: input.industry, maxSearchesPerProvider: 1 }),
     Promise.allSettled([redditSearch(socialQuery)]),
   ]);
   const reddit =
@@ -585,8 +616,31 @@ export async function runResearchPipeline(
   if (redditResult[0].status === "rejected") {
     failures.push("Social Discovery: Reddit 请求失败或超时。");
   }
-  const social = unique(
-    [...socialAccess.items, ...reddit]
+  sourceOutcomes.push(
+    ...socialAccess.outcomes.map((outcome) => ({
+      source: socialAccess.statuses.find((status) => status.id === outcome.provider)?.label || outcome.provider,
+      execution: outcome.execution,
+      searched: outcome.searched,
+      resultCount: outcome.resultCount,
+      failureCode: outcome.failureCode,
+    })),
+    redditResult[0].status === "fulfilled"
+      ? {
+          source: "Reddit",
+          execution: reddit.length ? "searched_with_results" as const : "searched_no_results" as const,
+          searched: true,
+          resultCount: reddit.length,
+        }
+      : {
+          source: "Reddit",
+          execution: "failed" as const,
+          searched: true,
+          resultCount: 0,
+          failureCode: "upstream_error" as const,
+        },
+  );
+  const socialCandidates =
+    [...socialAccess.items, ...reddit, ...communityWebResult.items]
       .filter((item) => {
         const itemFreshness = resolveFreshness(item);
         return (
@@ -594,17 +648,17 @@ export async function runResearchPipeline(
           (itemFreshness.ageHours === undefined || itemFreshness.ageHours <= 30 * 24)
         );
       })
-      .map((item) => ({ ...item, sourceType: "social" as const })),
-  );
+      .map((item) => ({ ...item, sourceType: "social" as const }));
+  const social = deduplicateSocialEvidence(socialCandidates);
   counts = {
     ...counts,
-    candidates: counts.candidates + social.length,
-    social: social.length,
+    candidates: counts.candidates + social.representatives.length,
+    social: social.representatives.length,
   };
 
   let reversePrimary: ResearchCandidate[] = [...trustedReverseResult.items];
-  if (social.length) {
-    const reverseQueries = social
+  if (social.representatives.length) {
+    const reverseQueries = social.representatives
       .slice(0, 3)
       .map((item) => `${item.title.slice(0, 120)} ${domains}`);
     const reverseResult = await searchQueries(
@@ -618,10 +672,17 @@ export async function runResearchPipeline(
     scanned += reverseResult.scanned;
   }
   const allPrimary = unique([...primary, ...reversePrimary]);
+  const primaryOutcome = sourceOutcomes.find((outcome) => outcome.source === "Primary Sources");
+  if (primaryOutcome && allPrimary.length > 0) {
+    primaryOutcome.execution = "searched_with_results";
+    primaryOutcome.searched = true;
+    primaryOutcome.resultCount = allPrimary.length;
+    delete primaryOutcome.failureCode;
+  }
   counts = { ...counts, primary: allPrimary.length };
   await emit({
     stage: "social",
-    label: `社交媒体线索 ${social.length} 条 · 已尝试反向查证`,
+    label: `社交媒体线索 ${social.representatives.length} 条 · 已尝试反向查证`,
     counts,
   });
 
@@ -629,7 +690,7 @@ export async function runResearchPipeline(
     ...allPrimary,
     ...trustedMedia,
     ...industryMedia,
-    ...social,
+    ...social.representatives,
   ]);
   await emit({
     stage: "deduplication",
@@ -644,9 +705,7 @@ export async function runResearchPipeline(
   });
   const gapTerms = filterTerms(input.informationGaps);
   const questionTerms = filterTerms(input.currentQuestions);
-  const knownTerms = filterTerms(
-    `${input.knownInformation}\n${input.evidenceHistory}`,
-  );
+  const focusAreaTerms = filterTerms(input.focusAreas);
   const trackedEntityTerms = entityFilterTerms(input.trackedEntities).filter(
     (term) =>
       !/^(ai|agent|model|research|official|update|人工智能|大模型|模型)$/i.test(
@@ -655,7 +714,7 @@ export async function runResearchPipeline(
   );
   const trackedEventTerms = filterTerms(input.trackedEvents);
   const judgementTerms = filterTerms(input.userJudgements);
-  const allSignals: ResearchSignal[] = eventClusters
+  const evaluatedCandidates = eventClusters
     .map((cluster) => {
       const ordered = [...cluster].sort((a, b) => {
         const tier = {
@@ -699,8 +758,9 @@ export async function runResearchPipeline(
       const questionMatches = questionTerms.filter((term) =>
         clusterText.includes(term),
       );
-      const knownMatches = knownTerms.filter((term) => clusterText.includes(term));
-      const alreadyKnown = knownMatches.some((term) => term.length >= 14);
+      const focusAreaMatches = focusAreaTerms.filter((term) =>
+        clusterText.includes(term),
+      );
       const entityMatches = trackedEntityTerms.filter((term) =>
         clusterText.includes(term),
       );
@@ -710,6 +770,19 @@ export async function runResearchPipeline(
       const judgementMatches = judgementTerms.filter((term) =>
         clusterText.includes(term),
       );
+      const socialChains = new Map(
+        ordered
+          .filter((candidate) => candidate.sourceType === "social" && candidate.socialEvidenceChain)
+          .map((candidate) => [candidate.socialEvidenceChain!.evidenceChainId, candidate.socialEvidenceChain!] as const),
+      );
+      const nonSocialSourceCount = new Set(
+        ordered
+          .filter((candidate) => candidate.sourceType !== "social")
+          .map((candidate) => candidate.url),
+      ).size;
+      const independentEvidenceCount = nonSocialSourceCount + socialChains.size;
+      const propagationCount = [...socialChains.values()]
+        .reduce((total, chain) => total + chain.propagationCount, 0);
       const relevanceScore = clamp(
         Math.max(...ordered.map((candidate) => usefulness(candidate, plan))) +
           Math.min(12, gapMatches.length * 4) +
@@ -725,7 +798,7 @@ export async function runResearchPipeline(
               : 62
             : verificationStatus === "conflicting"
               ? 42
-              : 30) + Math.min(8, (ordered.length - 1) * 2),
+          : 30) + Math.min(8, Math.max(0, independentEvidenceCount - 1) * 2),
       );
       const validTimestampCandidates = ordered.filter(
         (candidate) => validateTimestamp(candidate) === "valid",
@@ -761,15 +834,25 @@ export async function runResearchPipeline(
       );
       const originalFreshness = resolveFreshness({ eventOccurredAt: originalOccurredAt });
       const freshnessScore = eventFreshness.score;
-      const noveltyScore = clamp(
-        (alreadyKnown
-          ? 18
-          : knownTerms.length
-            ? 92 - knownMatches.length * 28
-            : 86) +
-          (freshnessScore >= 85 ? 4 : 0) -
-          Math.min(18, judgementMatches.length * 6),
-      );
+      const clusterMembers: NoveltyClusterMember[] = ordered.map((candidate) => ({
+        title: candidate.title,
+        snippet: candidate.snippet,
+        sourceUrl: candidate.url,
+        publisher: candidate.source,
+      }));
+      const noveltyAttribution = assessNoveltyAttribution({
+        knownInformation: input.knownInformation,
+        evidenceHistory: input.evidenceHistory,
+        userJudgements: input.userJudgements,
+        title: item.title,
+        snippet: item.snippet,
+        clusterMembers,
+        freshnessScore,
+        judgementMatchCount: judgementMatches.length,
+      });
+      const knownMatches = noveltyAttribution.knownMatches;
+      const alreadyKnown = knownMatches.length > 0;
+      const noveltyScore = noveltyAttribution.noveltyScore;
       const gapMatchScore = clamp(
         gapMatches.length || questionMatches.length
           ? 55 + gapMatches.length * 18 + questionMatches.length * 14
@@ -811,12 +894,37 @@ export async function runResearchPipeline(
               : originalWithinWindow
                 ? "NEW"
                 : "BACKGROUND";
+      const libraryBranch = {
+        reliability: { actual: reliabilityScore, threshold: 55, pass: reliabilityScore >= 55 },
+        relevance: { actual: relevanceScore, threshold: 58, pass: relevanceScore >= 58 },
+        novelty: { actual: noveltyScore, threshold: 38, pass: noveltyScore >= 38 },
+      };
+      const signalBranch = {
+        eventStatus: { actual: eventStatus, expected: "SIGNAL", pass: eventStatus === "SIGNAL" },
+        relevance: { actual: relevanceScore, threshold: 70, pass: relevanceScore >= 70 },
+        freshness: { actual: freshnessScore, threshold: 80, pass: freshnessScore >= 80 },
+        novelty: { actual: noveltyScore, threshold: 65, pass: noveltyScore >= 65 },
+      };
       const canEnterLibrary =
-        (reliabilityScore >= 55 && relevanceScore >= 58 && noveltyScore >= 38) ||
-        (eventStatus === "SIGNAL" &&
-          relevanceScore >= 70 &&
-          freshnessScore >= 80 &&
-          noveltyScore >= 65);
+        (libraryBranch.reliability.pass &&
+          libraryBranch.relevance.pass &&
+          libraryBranch.novelty.pass) ||
+        (signalBranch.eventStatus.pass &&
+          signalBranch.relevance.pass &&
+          signalBranch.freshness.pass &&
+          signalBranch.novelty.pass);
+      const preliminaryIgnoreFailures: PreliminaryEligibilityFailure[] = canEnterLibrary
+        ? []
+        : [
+            ...(libraryBranch.reliability.pass ? [] : ["library_reliability_below_55" as const]),
+            ...(libraryBranch.relevance.pass ? [] : ["library_relevance_below_58" as const]),
+            ...(libraryBranch.novelty.pass ? [] : ["library_novelty_below_38" as const]),
+            ...(signalBranch.eventStatus.pass ? [] : ["signal_event_status_not_signal" as const]),
+            ...(signalBranch.relevance.pass ? [] : ["signal_relevance_below_70" as const]),
+            ...(signalBranch.freshness.pass ? [] : ["signal_freshness_below_80" as const]),
+            ...(signalBranch.novelty.pass ? [] : ["signal_novelty_below_65" as const]),
+          ];
+      const preliminaryEligible = canEnterLibrary;
       const sourceMap = new Map(
         ordered.map((candidate) => [candidate.url, candidate]),
       );
@@ -827,23 +935,43 @@ export async function runResearchPipeline(
         sourceType: candidate.sourceType,
         sourceTier: sourceTier(candidate.sourceType),
       }));
-      const claims = ordered.map((candidate, index) => ({
-        claimText: candidate.title,
-        sourceUrl: candidate.url,
-        publisher: candidate.source,
-        publishedAt: isoDate(candidate.publishedAt),
-        sourceType: candidate.sourceType,
-        sourceTier: sourceTier(candidate.sourceType),
-        evidenceSnippet: candidate.snippet || candidate.title,
-        verificationStatus: conflicting
+      const claims = ordered.map((candidate, index) => {
+        const verificationStatus = conflicting
           ? ("conflicting" as const)
-          : checks[index].status,
-         contentType:
-          checks[index].status === "verified" &&
-          validateTimestamp(candidate) === "valid"
-            ? ("FACT" as const)
-            : ("SIGNAL" as const),
-      }));
+          : checks[index].status;
+        const tier = sourceTier(candidate.sourceType);
+        const evidenceSnippet = candidate.snippet || candidate.title;
+        const chain = candidate.socialEvidenceChain;
+        return {
+          claimText: candidate.title,
+          sourceUrl: candidate.url,
+          publisher: candidate.source,
+          publishedAt: isoDate(candidate.publishedAt),
+          sourceType: candidate.sourceType,
+          sourceTier: tier,
+          evidenceSnippet,
+          verificationStatus,
+          contentType:
+            checks[index].status === "verified" &&
+            validateTimestamp(candidate) === "valid"
+              ? ("FACT" as const)
+              : ("SIGNAL" as const),
+          evidenceSources: [{
+            sourceUrl: candidate.url,
+            publisher: candidate.source,
+            publishedAt: isoDate(candidate.publishedAt),
+            sourceType: candidate.sourceType,
+            sourceTier: tier,
+            evidenceSnippet,
+            sourceRole: candidate.sourceType === "social" ? ("discovery" as const) : ("verification" as const),
+            verificationStatus,
+          }],
+          evidenceChainId: chain?.evidenceChainId,
+          canonicalClaimFingerprint: chain?.canonicalClaimFingerprint,
+          propagationCount: chain?.propagationCount || 1,
+          independentEvidenceCount: 1,
+        };
+      });
       const publishedAt = newestPublishedAt;
       const official = sources
         .filter((source) => source.sourceType !== "social")
@@ -867,7 +995,7 @@ export async function runResearchPipeline(
             : entityMatches.length
               ? `涉及正在跟踪的实体：${entityMatches.join("、")}`
               : "与当前关注领域匹配",
-        `${sources.length} 个原始来源`,
+        `${independentEvidenceCount} 条独立证据链`,
         verificationStatus === "verified"
           ? "包含 Primary Source"
           : verificationStatus === "partially_verified"
@@ -887,8 +1015,56 @@ export async function runResearchPipeline(
               : verificationStatus === "unverified"
                 ? "这是非常早期的线索，目前不能当作事实。"
                 : "它与当前问题相关，并包含此前知识状态中没有记录的证据。";
-      return {
-        id: stableEventId(item.title),
+      const id = stableEventId(item.title);
+      const knowledgeStatus = alreadyKnown
+        ? "KNOWN"
+        : knownMatches.length
+          ? "UPDATED"
+          : "NOVEL";
+      const protectedReasons: ProtectedReason[] = [
+        ...(entityMatches.length ? ["tracked_entity" as const] : []),
+        ...(trackedEventMatches.length ? ["tracked_event" as const] : []),
+        ...(questionMatches.length ? ["current_question" as const] : []),
+        ...(gapMatches.length ? ["information_gap" as const] : []),
+        ...(focusAreaMatches.length ? ["focus_area" as const] : []),
+      ];
+      const eligibilityAudit: CandidateEligibilityAudit = {
+        scores: {
+          relevance: relevanceScore,
+          reliability: reliabilityScore,
+          novelty: noveltyScore,
+          freshness: freshnessScore,
+          eventStatus,
+        },
+        canEnterLibrary: {
+          value: canEnterLibrary,
+          libraryBranch,
+          signalBranch,
+          failedConditions: preliminaryIgnoreFailures,
+        },
+        contextMatches: {
+          entityMatches,
+          trackedEventMatches,
+          questionMatches,
+          gapMatches,
+          focusAreaMatches,
+        },
+        noveltyAttribution: {
+          ...noveltyAttribution,
+          clusterId: id,
+          title: item.title,
+          snippet: item.snippet,
+          clusterMembers,
+          claims: claims.map((claim) => ({
+            claimText: claim.claimText,
+            sourceUrl: claim.sourceUrl,
+            verificationStatus: claim.verificationStatus,
+          })),
+          claimAttribution: "unavailable",
+        },
+      };
+      const signal: ResearchSignal = {
+        id,
         category: "匹配",
         channel: hasPrimary
           ? "官方"
@@ -945,7 +1121,9 @@ export async function runResearchPipeline(
         judgementImpactScore,
         gapMatchScore,
         overallScore,
-        sourceCount: sources.length,
+        sourceCount: independentEvidenceCount,
+        independentEvidenceCount,
+        propagationCount,
         claims,
         sources,
         section:
@@ -965,16 +1143,30 @@ export async function runResearchPipeline(
             : eventStatus === "SIGNAL"
               ? "SIGNAL"
               : "INTERPRETATION",
-        knowledgeStatus: alreadyKnown
-          ? "KNOWN"
-          : knownMatches.length
-            ? "UPDATED"
-            : "NOVEL",
-        attentionDecision: canEnterLibrary ? "LIBRARY_ONLY" : "IGNORE",
-      } satisfies ResearchSignal;
+        knowledgeStatus,
+        attentionDecision: preliminaryEligible ? "LIBRARY_ONLY" : "IGNORE",
+      };
+      return {
+        signal,
+        selection: {
+          id,
+          overallScore,
+          preliminaryEligible,
+          freshnessEligible: withinWindow,
+          timestampValid: eventFreshness.timestampStatus === "valid",
+          isBackground: eventStatus === "BACKGROUND",
+          isKnown: knowledgeStatus === "KNOWN",
+          protectedReasons,
+          eligibilityAudit,
+        } satisfies Omit<CandidateSelectionInput<ResearchSignal>, "value">,
+      };
     })
-    .sort((a, b) => b.overallScore - a.overallScore)
-    .slice(0, 50);
+    ;
+  const candidateSelection = selectBoundedCandidates(
+    evaluatedCandidates.map(({ signal, selection }) => ({ ...selection, value: signal })),
+  );
+  debug?.onCandidateSelectionAudit?.(candidateSelection.audit);
+  const allSignals = candidateSelection.selected.map((candidate) => candidate.value);
 
   const selectedEntities = new Set<string>();
   let selectedCount = 0;
@@ -1118,26 +1310,48 @@ export async function runResearchPipeline(
       : 0,
   };
 
+  if (debug?.onEligibilityAudit) {
+    const preliminaryIgnoreFailureCounts: Partial<Record<PreliminaryEligibilityFailure, number>> = {};
+    for (const audit of candidateSelection.audit) {
+      if (audit.eligibility.preliminaryEligible) continue;
+      for (const failure of audit.eligibilityAudit?.canEnterLibrary.failedConditions || []) {
+        preliminaryIgnoreFailureCounts[failure] =
+          (preliminaryIgnoreFailureCounts[failure] || 0) + 1;
+      }
+    }
+    debug.onEligibilityAudit({
+      eventClusters: evaluatedCandidates.length,
+      preliminaryEligible: candidateSelection.audit.filter(
+        (audit) => audit.eligibility.preliminaryEligible,
+      ).length,
+      preliminaryIgnore: candidateSelection.audit.filter(
+        (audit) => !audit.eligibility.preliminaryEligible,
+      ).length,
+      candidatePool: candidateSelection.selected.length,
+      mustRead: allSignals.filter((signal) => signal.attentionDecision === "MUST_READ").length,
+      worthWatching: allSignals.filter(
+        (signal) => signal.attentionDecision === "WORTH_WATCHING").length,
+      libraryOnly: allSignals.filter((signal) => signal.attentionDecision === "LIBRARY_ONLY").length,
+      preliminaryIgnoreFailureCounts,
+    });
+  }
+
+  const coverage = buildSourceCoverage(sourceOutcomes);
   return {
     signals: presentation.signals,
-    status: [
-      { name: "Primary Sources", ok: allPrimary.length > 0 },
-      { name: "Trusted Media", ok: trustedMedia.length > 0 },
-      { name: "Industry Media", ok: industryMedia.length > 0 },
-      { name: "Reddit", ok: reddit.length > 0 },
-      ...socialAccess.statuses.map((provider) => ({
-        name: provider.label,
-        ok: provider.state === "connected",
-        state: provider.state,
-      })),
-    ],
+    status: coverage.outcomes.map((outcome) => ({
+      name: outcome.source,
+      ok: outcome.execution === "searched_with_results" || outcome.execution === "searched_no_results",
+      state: outcome.execution,
+    })),
     queryPlan: plan,
     progress,
     failures,
     counts,
     overview,
+    coverage,
     fetchedAt: new Date().toISOString(),
-    dataMode: "LIVE",
+    dataMode: "live",
     lastCheckedAt: new Date().toISOString(),
   };
 }

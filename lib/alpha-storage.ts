@@ -3,30 +3,37 @@ import type {
   ExperienceFeedback,
   InformationFilter,
   InformationRun,
-  KnowledgeState,
+  KnowledgeByFilterId,
+  LibraryEntry,
+  PersonalProfile,
 } from "../information/types.ts";
-import type { ResearchSignal } from "../research/types.ts";
+import {
+  KNOWLEDGE_SCHEMA_VERSION,
+  isNormalizedInformationFilter,
+  migrateAlphaSnapshot,
+  migrationWriteEntries,
+  type AlphaSnapshotV2,
+  type LegacyInformationFilter,
+  type LegacyKnowledgeState,
+} from "./alpha-migration.ts";
 
-export type LibraryEntry = {
-  event: ResearchSignal;
-  notes: string;
-  judgement: string;
-  savedAt: string;
-};
+export type AlphaSnapshot = AlphaSnapshotV2;
 
-export type AlphaSnapshot = {
+type PersistedState = {
   filters: InformationFilter[];
   activeFilterId: string | null;
-  knowledge: KnowledgeState | null;
+  profile: PersonalProfile;
+  knowledgeByFilterId: KnowledgeByFilterId;
+  knowledgeSchemaVersion: 2;
   library: LibraryEntry[];
   notes: Record<string, string>;
   feedback: FeedbackRecord[];
   experienceFeedback: ExperienceFeedback[];
   sessionId: string | null;
-  lastRun: InformationRun | null;
+  lastRunByFilterId: Record<string, InformationRun>;
 };
 
-type AlphaKey = keyof AlphaSnapshot;
+type AlphaKey = keyof PersistedState;
 
 const databaseName = "signal-map-mobile-alpha";
 const storeName = "state";
@@ -44,7 +51,7 @@ function openDatabase() {
   });
 }
 
-async function readValue<T>(key: AlphaKey): Promise<T | undefined> {
+async function readValue<T>(key: string): Promise<T | undefined> {
   const database = await openDatabase();
   return new Promise<T | undefined>((resolve, reject) => {
     const transaction = database.transaction(storeName, "readonly");
@@ -57,7 +64,7 @@ async function readValue<T>(key: AlphaKey): Promise<T | undefined> {
 
 export async function setAlphaValue<K extends AlphaKey>(
   key: K,
-  value: AlphaSnapshot[K],
+  value: PersistedState[K],
 ) {
   const database = await openDatabase();
   return new Promise<void>((resolve, reject) => {
@@ -71,30 +78,68 @@ export async function setAlphaValue<K extends AlphaKey>(
   });
 }
 
+async function writeMigration(snapshot: AlphaSnapshotV2) {
+  const database = await openDatabase();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(storeName, "readwrite");
+    const store = transaction.objectStore(storeName);
+    for (const [key, value] of migrationWriteEntries(snapshot)) store.put(value, key);
+    transaction.oncomplete = () => {
+      database.close();
+      resolve();
+    };
+    transaction.onerror = () => reject(transaction.error || new Error("Unable to migrate local data"));
+  });
+}
+
 export async function loadAlphaSnapshot(): Promise<AlphaSnapshot> {
-  const [filters, activeFilterId, knowledge, library, notes, feedback, experienceFeedback, sessionId, lastRun] =
+  const [filters, activeFilterId, profile, knowledgeByFilterId, knowledgeSchemaVersion, library, notes, feedback, experienceFeedback, sessionId, lastRunByFilterId, legacyKnowledge, legacyLastRun] =
     await Promise.all([
-      readValue<InformationFilter[]>("filters"),
+      readValue<Array<InformationFilter | LegacyInformationFilter>>("filters"),
       readValue<string | null>("activeFilterId"),
-      readValue<KnowledgeState | null>("knowledge"),
+      readValue<PersonalProfile>("profile"),
+      readValue<KnowledgeByFilterId>("knowledgeByFilterId"),
+      readValue<number>("knowledgeSchemaVersion"),
       readValue<LibraryEntry[]>("library"),
       readValue<Record<string, string>>("notes"),
       readValue<FeedbackRecord[]>("feedback"),
       readValue<ExperienceFeedback[]>("experienceFeedback"),
       readValue<string | null>("sessionId"),
-      readValue<InformationRun | null>("lastRun"),
+      readValue<Record<string, InformationRun>>("lastRunByFilterId"),
+      readValue<LegacyKnowledgeState | null>("knowledge"),
+      readValue<unknown>("lastRun"),
     ]);
-  return {
-    filters: filters || [],
-    activeFilterId: activeFilterId || null,
-    knowledge: knowledge || null,
+
+  const filtersAreNormalized = (filters ?? []).every(isNormalizedInformationFilter);
+  if (knowledgeSchemaVersion === KNOWLEDGE_SCHEMA_VERSION && profile && knowledgeByFilterId && filtersAreNormalized) {
+    return {
+      filters: (filters ?? []) as InformationFilter[],
+      activeFilterId: activeFilterId ?? null,
+      profile,
+      knowledgeByFilterId,
+      knowledgeSchemaVersion: KNOWLEDGE_SCHEMA_VERSION,
+      library: library ?? [],
+      notes: notes ?? {},
+      feedback: feedback ?? [],
+      experienceFeedback: experienceFeedback ?? [],
+      sessionId: sessionId ?? null,
+      lastRunByFilterId: lastRunByFilterId ?? {},
+    };
+  }
+
+  const migrated = migrateAlphaSnapshot({
+    filters: (filters ?? []) as LegacyInformationFilter[],
+    activeFilterId: activeFilterId ?? null,
+    knowledge: legacyKnowledge ?? null,
     library: library || [],
     notes: notes || {},
     feedback: feedback || [],
     experienceFeedback: experienceFeedback || [],
-    sessionId: sessionId || null,
-    lastRun: lastRun || null,
-  };
+    sessionId: sessionId ?? null,
+    lastRun: legacyLastRun ?? null,
+  }, new Date().toISOString());
+  await writeMigration(migrated);
+  return migrated;
 }
 
 export async function clearAlphaData() {

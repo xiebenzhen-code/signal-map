@@ -14,10 +14,10 @@ import {
   validateTimestamp,
 } from "./freshness.ts";
 import type {
+  ActiveKnowledgeContext,
   DemoSource,
   InformationFilter,
-  InformationRun,
-  KnowledgeState,
+  InformationRunPayload,
   ProviderCoverage,
   ProviderContext,
 } from "./types.ts";
@@ -25,9 +25,12 @@ import type {
 const coverage: ProviderCoverage = {
   level: "Limited",
   usedProviders: ["DemoProvider"],
+  zeroResultProviders: [],
+  notSearchedProviders: [],
   unavailableProviders: ["ImportedDataProvider"],
   notConfiguredProviders: ["WebProvider", "XProvider", "XiaohongshuProvider"],
   failedProviders: [],
+  outcomes: [],
 };
 
 const tierRank: Record<SourceTier, number> = { S: 4, A: 3, B: 2, C: 1 };
@@ -57,9 +60,10 @@ function matchesAny(haystack: string, needles: string[]) {
   return needles.filter((needle) => containsMeaningfulMatch(haystack, needle));
 }
 
-function sourceAllowed(source: DemoSource, scope: InformationFilter["sourceScope"]) {
-  if (scope === "official") return source.sourceTier === "S";
-  if (scope === "verified") return source.sourceTier !== "C";
+function sourceAllowed(source: DemoSource, filter: InformationFilter) {
+  if (filter.sourceScope === "custom") {
+    return (filter.customSources ?? []).some((prefix) => source.sourceUrl.startsWith(prefix));
+  }
   return true;
 }
 
@@ -72,7 +76,7 @@ export function validateFactEvidence(source: DemoSource, now = new Date()) {
   );
 }
 
-export function deduplicateSources(sources: DemoSource[]) {
+function deduplicateSources(sources: DemoSource[]) {
   const seen = new Set<string>();
   return sources.filter((source) => {
     const key = [source.eventKey, source.publisher, source.sourceUrl, source.claimText]
@@ -98,7 +102,7 @@ function verificationFor(sources: DemoSource[], now: Date): VerificationStatus {
 function scoreEvent(
   sources: DemoSource[],
   filter: InformationFilter,
-  knowledge: KnowledgeState,
+  knowledge: ActiveKnowledgeContext,
   now: Date,
 ) {
   const primary = [...sources].sort((a, b) => {
@@ -110,22 +114,13 @@ function scoreEvent(
     primary.summary,
     ...sources.flatMap((source) => [...source.tags, ...source.entities, source.claimText]),
   ].join(" ");
-  const focusMatches = matchesAny(corpus, [...filter.focusAreas, ...knowledge.focusAreas]);
-  const gapMatches = matchesAny(corpus, [
-    ...filter.informationGaps,
-    ...knowledge.informationGaps,
-  ]);
-  const questionMatches = matchesAny(corpus, [
-    ...filter.currentQuestions,
-    ...knowledge.currentQuestions,
-  ]);
+  const focusMatches = matchesAny(corpus, filter.focusAreas);
+  const gapMatches = matchesAny(corpus, knowledge.informationGaps);
+  const questionMatches = matchesAny(corpus, knowledge.currentQuestions);
   const entityMatches = matchesAny(corpus, knowledge.trackedEntities);
-  const identityMatch = matchesAny(corpus, [filter.identity, knowledge.identity]).length > 0;
+  const identityMatch = matchesAny(corpus, [knowledge.identity]).length > 0;
   const industryMatch = matchesAny(corpus, [filter.industry, knowledge.industry]).length > 0;
-  const knownMatches = matchesAny(corpus, [
-    ...filter.knownInformation,
-    ...knowledge.knownInformation,
-  ]);
+  const knownMatches = matchesAny(corpus, knowledge.knownInformation);
   const trackedEvent = matchesAny(corpus, knowledge.trackedEvents).length > 0;
   const validSources = sources.filter((source) => validateTimestamp(source, now) === "valid");
   const originalOccurredAt = earliestValidTimestamp(
@@ -214,7 +209,7 @@ function toSignal(
   eventKey: string,
   sources: DemoSource[],
   filter: InformationFilter,
-  knowledge: KnowledgeState,
+  knowledge: ActiveKnowledgeContext,
   now: Date,
 ): ResearchSignal {
   const scored = scoreEvent(sources, filter, knowledge, now);
@@ -222,27 +217,52 @@ function toSignal(
   const validFacts = sources.filter(
     (source) => source.sourceTier !== "C" && validateFactEvidence(source, now),
   );
-  const claims: Claim[] = sources
-    .filter((source) => source.sourceTier === "C" || validateFactEvidence(source, now))
-    .map((source) => ({
-      claimText: source.claimText,
-      sourceUrl: source.sourceUrl,
-      publisher: source.publisher,
-      publishedAt:
-        validateTimestamp(source, now) === "valid" ? source.publishedAt : undefined,
-      sourceType: source.sourceType,
-      sourceTier: source.sourceTier,
-      evidenceSnippet: source.evidenceSnippet || "该线索没有可验证的独立证据。",
-      verificationStatus:
-        source.conflict
-          ? "conflicting"
+  const claimSources = sources.filter(
+    (source) => source.sourceTier === "C" || validateFactEvidence(source, now),
+  );
+  const claims: Claim[] = [...new Set(claimSources.map((source) => source.claimText))].map(
+    (claimText) => {
+      const matches = claimSources.filter((source) => source.claimText === claimText);
+      const primary = [...matches].sort(
+        (left, right) => tierRank[right.sourceTier] - tierRank[left.sourceTier],
+      )[0];
+      const evidenceSources = matches.map((source) => {
+        const sourceVerification = source.conflict
+          ? "conflicting" as const
           : source.sourceTier === "S"
-            ? "verified"
+            ? "verified" as const
             : source.sourceTier === "C"
-              ? "unverified"
-              : "partially_verified",
-      contentType: source.sourceTier === "C" ? "SIGNAL" : "FACT",
-    }));
+              ? "unverified" as const
+              : "partially_verified" as const;
+        return {
+          sourceUrl: source.sourceUrl,
+          publisher: source.publisher,
+          publishedAt: validateTimestamp(source, now) === "valid" ? source.publishedAt : undefined,
+          sourceType: source.sourceType,
+          sourceTier: source.sourceTier,
+          evidenceSnippet: source.evidenceSnippet || "该线索没有可验证的独立证据。",
+          sourceRole: source.sourceTier === "C" ? "discovery" as const : "verification" as const,
+          verificationStatus: sourceVerification,
+        };
+      });
+      const bestEvidence = evidenceSources.find(
+        (evidence) => evidence.sourceUrl === primary.sourceUrl,
+      ) ?? evidenceSources[0];
+      return {
+        claimText,
+        sourceUrl: bestEvidence.sourceUrl,
+        publisher: bestEvidence.publisher,
+        publishedAt: bestEvidence.publishedAt,
+        sourceType: bestEvidence.sourceType,
+        sourceTier: bestEvidence.sourceTier,
+        evidenceSnippet: bestEvidence.evidenceSnippet,
+        verificationStatus: bestEvidence.verificationStatus,
+        contentType: primary.sourceTier === "C" ? "SIGNAL" as const : "FACT" as const,
+        evidenceSources,
+        independentEvidenceCount: evidenceSources.length,
+      };
+    },
+  );
   const isSignal = validFacts.length === 0;
   const windowHours = freshnessWindowHours(filter.freshnessWindow);
   const hasRecentUpdate = Boolean(scored.latestUpdateAt && scored.ageHours <= windowHours);
@@ -361,6 +381,8 @@ function toSignal(
     gapMatchScore: scored.gapMatchScore,
     overallScore: scored.overallScore,
     sourceCount: sources.length,
+    independentEvidenceCount: sources.length,
+    propagationCount: sources.filter((source) => source.sourceTier === "C").length,
     claims,
     sources: sources
       .filter((source) => source.sourceUrl)
@@ -404,8 +426,8 @@ export function runFilterEngine(
   context: ProviderContext,
   dataset: DemoSource[] = demoDataset,
   now = new Date(),
-): InformationRun {
-  const scoped = dataset.filter((source) => sourceAllowed(source, context.filter.sourceScope));
+): InformationRunPayload {
+  const scoped = dataset.filter((source) => sourceAllowed(source, context.filter));
   const deduplicated = deduplicateSources(scoped);
   const clusters = new Map<string, DemoSource[]>();
   for (const source of deduplicated) {
@@ -470,25 +492,9 @@ export function runFilterEngine(
     coverage,
     failures: [],
     fetchedAt: now.toISOString(),
-    dataMode: "DEMO",
+    dataMode: "demo",
   };
 }
 
 export const sourceCoverageExplanation =
   "未搜索或未配置某个来源，不代表该来源没有信息；本次结果只反映实际运行的 Provider。";
-
-export function createEmptyKnowledge(filter: InformationFilter): KnowledgeState {
-  return {
-    identity: filter.identity,
-    industry: filter.industry,
-    focusAreas: filter.focusAreas,
-    currentQuestions: filter.currentQuestions,
-    knownInformation: filter.knownInformation,
-    informationGaps: filter.informationGaps,
-    trackedEntities: [],
-    trackedEvents: [],
-    userJudgements: [],
-    evidenceHistory: [],
-    freshnessWindow: filter.freshnessWindow,
-  };
-}

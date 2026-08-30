@@ -1,9 +1,5 @@
-export { socialAccessLayer } from "../access/social-access-layer";
+export { socialAccessLayer } from "../access/default-social-access-layer.ts";
 export type {
-  ConnectionState,
   LiveItem,
-  SocialProfile,
   SocialProvider,
-  SocialProviderStatus,
-  SocialSearchContext,
-} from "./types";
+} from "./types.ts";

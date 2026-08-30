@@ -1,26 +1,28 @@
 import type { ResearchOverview, ResearchSignal } from "../research/types.ts";
+import type { SourceCoverage } from "../research/source-coverage.ts";
 
-export type SourceScope = "official" | "verified" | "all";
+export type FreshnessWindow = "24h" | "3d" | "7d" | "30d";
+export type SourceScope = "domestic" | "global" | "hybrid" | "custom";
+type DataMode = "live" | "demo" | "mixed";
+
+export type PersonalProfile = { defaultIdentity: string };
 
 export type InformationFilter = {
   id: string;
   filterName: string;
-  identity: string;
+  identityOverride?: string;
   industry: string;
   focusAreas: string[];
-  knownInformation: string[];
-  informationGaps: string[];
-  currentQuestions: string[];
-  freshnessWindow: string;
+  freshnessWindow: FreshnessWindow;
   sourceScope: SourceScope;
+  customSources?: string[];
   createdAt: string;
   updatedAt: string;
 };
 
-export type KnowledgeState = {
-  identity: string;
-  industry: string;
-  focusAreas: string[];
+export type FilterKnowledgeState = {
+  researchContextRevision: number;
+  updatedAt: string;
   currentQuestions: string[];
   knownInformation: string[];
   informationGaps: string[];
@@ -28,30 +30,47 @@ export type KnowledgeState = {
   trackedEvents: string[];
   userJudgements: string[];
   evidenceHistory: string[];
-  freshnessWindow: string;
 };
 
-export type ProviderCoverage = {
-  level: "Broad" | "Partial" | "Limited";
-  usedProviders: string[];
-  unavailableProviders: string[];
-  notConfiguredProviders: string[];
-  failedProviders: string[];
+export type KnowledgeByFilterId = Record<string, FilterKnowledgeState>;
+
+export type ActiveKnowledgeContext = {
+  identity: string;
+  industry: string;
+  focusAreas: string[];
+  freshnessWindow: FreshnessWindow;
+  sourceScope: SourceScope;
+  customSources: string[];
+  currentQuestions: string[];
+  knownInformation: string[];
+  informationGaps: string[];
+  trackedEntities: string[];
+  trackedEvents: string[];
+  userJudgements: string[];
+  researchContextRevision: number;
 };
 
-export type InformationRun = {
+export type ProviderCoverage = SourceCoverage;
+
+export type InformationRunPayload = {
   signals: ResearchSignal[];
   overview: ResearchOverview;
   coverage: ProviderCoverage;
   failures: string[];
   fetchedAt: string;
-  dataMode: "DEMO" | "LIVE" | "MIXED";
+  dataMode: DataMode;
   lastCheckedAt?: string;
+  fallbackReason?: string;
+};
+
+export type InformationRun = InformationRunPayload & {
+  filterId: string;
+  generatedFromResearchContextRevision: number;
 };
 
 export type ProviderContext = {
   filter: InformationFilter;
-  knowledge: KnowledgeState;
+  knowledge: ActiveKnowledgeContext;
 };
 
 export interface InformationProvider {
@@ -67,7 +86,7 @@ export interface InformationProvider {
     | "unavailable"
     | "not_configured"
     | "error";
-  run(context: ProviderContext): Promise<InformationRun>;
+  run(context: ProviderContext): Promise<InformationRunPayload>;
 }
 
 export type DemoSource = {
@@ -116,4 +135,11 @@ export type ExperienceFeedback = {
   continueUsing: "yes" | "maybe" | "no";
   biggestProblem: string;
   createdAt: string;
+};
+
+export type LibraryEntry = {
+  event: ResearchSignal;
+  notes: string;
+  judgement: string;
+  savedAt: string;
 };

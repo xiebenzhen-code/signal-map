@@ -15,7 +15,12 @@ export async function GET(
   const params = await context.params;
   const provider = providerId(params.provider);
   if (!provider) return Response.json({ error: "Unknown provider" }, { status: 404 });
-  const post = await socialAccessLayer.getPost(provider, params.id);
+  let post;
+  try {
+    post = await socialAccessLayer.getPost(provider, params.id);
+  } catch {
+    return Response.json({ error: "Provider temporarily unavailable" }, { status: 502 });
+  }
   return post
     ? Response.json({ post }, { headers: { "Cache-Control": "no-store" } })
     : Response.json({ error: "Post not found or provider unavailable" }, { status: 404 });

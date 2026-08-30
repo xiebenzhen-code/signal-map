@@ -63,7 +63,7 @@ export function validateTimestamp(
   return "valid";
 }
 
-export function formatFreshness(ageHours: number) {
+function formatFreshness(ageHours: number) {
   if (ageHours < 0.5) return "刚刚";
   if (ageHours < 1.5) return "1小时前";
   if (ageHours < 24) return `${Math.max(1, Math.round(ageHours))}小时前`;
@@ -75,7 +75,7 @@ export function formatFreshness(ageHours: number) {
   return `${Math.max(1, Math.round(months / 12))}年前`;
 }
 
-export function freshnessScore(ageHours: number) {
+function freshnessScore(ageHours: number) {
   if (ageHours <= 0.5) return 100;
   if (ageHours <= 1) return 96;
   if (ageHours <= 6) return 90;

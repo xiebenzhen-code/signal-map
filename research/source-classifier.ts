@@ -2,6 +2,7 @@ import type { SourceType } from "./types.ts";
 
 export function classifySource(publisher: string, url: string): SourceType | "other" {
   const value = `${publisher} ${url}`;
+  if (/\bX\b|Twitter|Xiaohongshu|小红书|Reddit|GitHub|github\.com\/.+\/(discussions|issues)|Hacker News|news\.ycombinator\.com|Stack Overflow|stackoverflow\.com|Dev\.to|dev\.to|Lobsters/i.test(value)) return "social";
   if (
     /SEC(?:\.gov)?|Securities and Exchange Commission|Nasdaq|NYSE|Investor Relations|official|官网|政府|委员会|交易所|教育部|药监局|卫健委|OpenAI|Anthropic|Google Developers|Microsoft|Runway|ByteDance Seed/i.test(
       value,
@@ -19,6 +20,5 @@ export function classifySource(publisher: string, url: string): SourceType | "ot
   ) {
     return "industry_media";
   }
-  if (/\bX\b|Twitter|Xiaohongshu|小红书|Reddit/i.test(value)) return "social";
   return "other";
 }

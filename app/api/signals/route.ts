@@ -1,4 +1,8 @@
-import { runResearchPipeline } from "@/research/research-pipeline";
+import {
+  runResearchPipeline,
+  type EligibilityAuditFunnel,
+} from "@/research/research-pipeline";
+import type { CandidateSelectionAudit } from "@/research/candidate-selection";
 
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
@@ -10,6 +14,15 @@ export async function GET(request: Request) {
     );
   }
   try {
+    const includeEligibilityAudit =
+      process.env.NODE_ENV !== "production" &&
+      ["candidate-selection", "eligibility"].includes(params.get("audit") || "");
+    const auditOnly = includeEligibilityAudit && params.get("auditOnly") === "1";
+    const auditEventId = includeEligibilityAudit
+      ? (params.get("auditEventId") || "").trim()
+      : "";
+    let candidateSelectionAudit: CandidateSelectionAudit[] = [];
+    let eligibilityFunnel: EligibilityAuditFunnel | undefined;
     const result = await runResearchPipeline({
       identity: (params.get("identity") || params.get("role") || "").trim(),
       industry,
@@ -22,29 +35,32 @@ export async function GET(request: Request) {
       userJudgements: (params.get("userJudgements") || "").trim(),
       evidenceHistory: (params.get("evidenceHistory") || "").trim(),
       freshnessWindow: (params.get("freshnessWindow") || "7d").trim(),
-    });
-    const failedProviders = result.status.filter((provider) => !provider.ok && provider.state === "error").map((provider) => provider.name);
-    const notConfiguredProviders = result.status.filter((provider) => provider.state === "not_configured").map((provider) => provider.name);
-    const unavailableProviders = result.status.filter((provider) => !provider.ok && provider.state === "unavailable").map((provider) => provider.name);
-    const usedProviders = result.status.filter((provider) => provider.ok).map((provider) => provider.name);
-    const coverage = {
-      level: usedProviders.length >= 2 ? "Broad" : usedProviders.length === 1 ? "Partial" : "Limited",
-      usedProviders,
-      unavailableProviders,
-      notConfiguredProviders,
-      failedProviders,
-    } as const;
-    return Response.json({ ...result, coverage }, {
+    }, undefined, includeEligibilityAudit
+      ? {
+          onCandidateSelectionAudit: (audit) => { candidateSelectionAudit = audit; },
+          onEligibilityAudit: (audit) => { eligibilityFunnel = audit; },
+        }
+      : undefined);
+    return Response.json(auditOnly
+      ? {
+          overview: result.overview,
+          debug: {
+            candidateSelectionAudit: auditEventId
+              ? candidateSelectionAudit.filter((audit) => audit.id === auditEventId)
+              : candidateSelectionAudit,
+            eligibilityFunnel,
+          },
+        }
+      : includeEligibilityAudit
+        ? { ...result, debug: { candidateSelectionAudit, eligibilityFunnel } }
+        : result, {
       headers: { "Cache-Control": "no-store" },
     });
-  } catch (error) {
+  } catch {
     return Response.json(
       {
         error: "Research Pipeline 未能完成。",
-        reason:
-          error instanceof Error
-            ? error.message
-            : "发生无法识别的检索错误。",
+        reason: "本轮来源检索暂时不可用，请稍后再试。",
       },
       { status: 502 },
     );

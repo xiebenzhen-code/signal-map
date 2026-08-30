@@ -13,6 +13,15 @@ export type LiveItem = {
   channel: "官方" | "社区" | "混合";
   authority: number;
   origin: "official" | "news" | "community" | "github" | "hn" | "x" | "xhs" | "reddit";
+  socialEvidenceChain?: SocialEvidenceChain;
+};
+
+export type SocialEvidenceChain = {
+  evidenceChainId: string;
+  canonicalClaimFingerprint: string;
+  canonicalSourceUrl?: string;
+  representativeSourceUrl: string;
+  propagationCount: number;
 };
 
 export type SocialProfile = {
@@ -24,6 +33,8 @@ export type SocialProfile = {
   source: "x" | "xhs";
 };
 
+type SocialProviderId = "x" | "xiaohongshu";
+
 export type ConnectionState =
   | "connected"
   | "login_required"
@@ -31,13 +42,13 @@ export type ConnectionState =
   | "unavailable"
   | "error";
 
-export type ConnectionPart = {
+type ConnectionPart = {
   state: ConnectionState;
   detail: string;
 };
 
 export type SocialProviderStatus = {
-  id: "x" | "xiaohongshu";
+  id: SocialProviderId;
   label: string;
   adapter: "official-api" | "official-oauth" | "local-browser";
   state: ConnectionState;
@@ -46,9 +57,56 @@ export type SocialProviderStatus = {
   account?: ConnectionPart;
 };
 
+export type ProviderSearchFailureCode =
+  | "invalid_query"
+  | "timeout"
+  | "rate_limited"
+  | "upstream_error";
+
+export type ProviderSearchOutcome = {
+  provider: string;
+  connectionStatus: ConnectionState;
+  execution:
+    | "searched_with_results"
+    | "searched_no_results"
+    | "not_searched"
+    | "not_configured"
+    | "unavailable"
+    | "failed";
+  searched: boolean;
+  resultCount: number;
+  startedAt?: string;
+  completedAt?: string;
+  failureCode?: ProviderSearchFailureCode;
+  retryAfterSeconds?: number;
+};
+
+export class ProviderSearchError extends Error {
+  readonly code: ProviderSearchFailureCode;
+  readonly retryAfterSeconds?: number;
+  readonly diagnostic?: string;
+
+  constructor(
+    code: ProviderSearchFailureCode,
+    message: string,
+    options: { retryAfterSeconds?: number; diagnostic?: string } = {},
+  ) {
+    super(message);
+    this.name = "ProviderSearchError";
+    this.code = code;
+    this.retryAfterSeconds = options.retryAfterSeconds;
+    this.diagnostic = options.diagnostic;
+  }
+}
+
+export function isProviderSearchError(error: unknown): error is ProviderSearchError {
+  return error instanceof ProviderSearchError;
+}
+
 export type SocialSearchContext = {
   query: string;
   industry: string;
+  maxSearchesPerProvider?: number;
 };
 
 export interface SocialProvider {

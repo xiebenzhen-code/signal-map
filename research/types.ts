@@ -1,4 +1,5 @@
 import type { LiveItem } from "../social/providers/index.ts";
+import type { SourceCoverage } from "./source-coverage.ts";
 
 export type SourceType =
   | "primary"
@@ -12,6 +13,19 @@ export type VerificationStatus =
   | "unverified"
   | "conflicting";
 
+type SourceRole = "discovery" | "verification";
+
+type EvidenceSource = {
+  sourceUrl: string;
+  publisher: string;
+  publishedAt?: string;
+  sourceType: SourceType;
+  sourceTier: SourceTier;
+  evidenceSnippet: string;
+  sourceRole: SourceRole;
+  verificationStatus: VerificationStatus;
+};
+
 export type Claim = {
   claimText: string;
   originalClaimText?: string;
@@ -24,6 +38,11 @@ export type Claim = {
   originalEvidenceSnippet?: string;
   verificationStatus: VerificationStatus;
   contentType: "FACT" | "SIGNAL";
+  evidenceSources: EvidenceSource[];
+  evidenceChainId?: string;
+  canonicalClaimFingerprint?: string;
+  propagationCount?: number;
+  independentEvidenceCount: number;
 };
 
 export type QueryPlan = {
@@ -123,6 +142,8 @@ export type ResearchSignal = {
   gapMatchScore: number;
   overallScore: number;
   sourceCount: number;
+  independentEvidenceCount: number;
+  propagationCount: number;
   claims: Claim[];
   sources: Array<{
     sourceUrl: string;
@@ -168,8 +189,9 @@ export type ResearchResponse = {
   failures: string[];
   counts: PipelineCounts;
   overview: ResearchOverview;
+  coverage: SourceCoverage;
   fetchedAt: string;
-  dataMode: "DEMO" | "LIVE" | "MIXED";
+  dataMode: "live" | "demo" | "mixed";
   lastCheckedAt?: string;
 };
 

@@ -11,19 +11,38 @@ import {
   Target,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ResearchSignal,
   VerificationStatus,
 } from "@/research/types";
-import { createEmptyKnowledge, sourceCoverageExplanation } from "@/information/filter-engine";
+import { sourceCoverageExplanation } from "@/information/filter-engine";
 import { demoProvider } from "@/information/providers/demo-provider";
+import {
+  applyDefaultIdentity,
+  composeActiveKnowledgeContext,
+  createEmptyFilterKnowledge,
+  normalizeStrings,
+  recordEvidence,
+  updateFilterResearchConfig,
+  updateResearchContext,
+} from "@/information/knowledge-state";
+import {
+  runInformation,
+  selectCurrentInformationRun,
+} from "@/information/run-information";
+import { selectTodayPresentation } from "@/information/today-selection";
 import type {
+  ActiveKnowledgeContext,
+  FilterKnowledgeState,
   FeedbackRecord,
   ExperienceFeedback,
   InformationFilter,
   InformationRun,
-  KnowledgeState,
+  InformationRunPayload,
+  KnowledgeByFilterId,
+  LibraryEntry,
+  PersonalProfile,
   ProviderCoverage,
   SourceScope,
 } from "@/information/types";
@@ -31,7 +50,6 @@ import {
   clearAlphaData,
   loadAlphaSnapshot,
   setAlphaValue,
-  type LibraryEntry,
 } from "@/lib/alpha-storage";
 
 type Page = "today" | "information" | "library" | "settings";
@@ -44,6 +62,8 @@ type Feedback =
   | "monitor"
   | "resolved";
 
+type KnowledgeView = ActiveKnowledgeContext & Pick<FilterKnowledgeState, "evidenceHistory">;
+
 type Connection = {
   id: "x" | "xiaohongshu";
   label: string;
@@ -53,16 +73,17 @@ type Connection = {
     | "not_configured"
     | "unavailable"
     | "error";
-  adapter: "official-api" | "official-oauth" | "local-browser";
-  detail: string;
-  service?: { state: Connection["state"]; detail: string };
-  account?: { state: Connection["state"]; detail: string };
+  capabilities: string[];
+  publicMessage?: string;
 };
 
-const defaultKnowledge: KnowledgeState = {
-  identity: "AI 产品经理与独立创作者",
-  industry: "人工智能与创作者工具",
-  focusAreas: ["Codex", "AI Agent", "大模型更新"],
+const defaultProfile: PersonalProfile = {
+  defaultIdentity: "AI 产品经理与独立创作者",
+};
+
+const defaultFilterKnowledge: FilterKnowledgeState = {
+  researchContextRevision: 1,
+  updatedAt: "",
   currentQuestions: ["哪些能力变化会真实影响普通创作者的工作方式？"],
   knownInformation: ["Codex 可以协助完成多步骤编程任务"],
   informationGaps: ["近期官方能力变化", "对普通创作者的实际影响"],
@@ -70,7 +91,6 @@ const defaultKnowledge: KnowledgeState = {
   trackedEvents: [],
   userJudgements: [],
   evidenceHistory: [],
-  freshnessWindow: "7d",
 };
 
 const navItems: Array<{ id: Page; label: string; icon: typeof Target }> = [
@@ -80,10 +100,10 @@ const navItems: Array<{ id: Page; label: string; icon: typeof Target }> = [
   { id: "settings", label: "设置", icon: Settings },
 ];
 
-function liveResearchParams(filter: InformationFilter, knowledge: KnowledgeState) {
+function liveResearchParams(knowledge: ActiveKnowledgeContext) {
   return new URLSearchParams({
-    identity: knowledge.identity || filter.identity,
-    industry: knowledge.industry || filter.industry,
+    identity: knowledge.identity,
+    industry: knowledge.industry,
     focusAreas: knowledge.focusAreas.join("\n"),
     currentQuestions: knowledge.currentQuestions.join("\n"),
     knownInformation: knowledge.knownInformation.join("\n"),
@@ -91,8 +111,10 @@ function liveResearchParams(filter: InformationFilter, knowledge: KnowledgeState
     trackedEntities: knowledge.trackedEntities.join("\n"),
     trackedEvents: knowledge.trackedEvents.join("\n"),
     userJudgements: knowledge.userJudgements.join("\n"),
-    evidenceHistory: knowledge.evidenceHistory.join("\n"),
-    freshnessWindow: knowledge.freshnessWindow || filter.freshnessWindow,
+    evidenceHistory: "",
+    freshnessWindow: knowledge.freshnessWindow,
+    sourceScope: knowledge.sourceScope,
+    customSources: knowledge.customSources.join("\n"),
   });
 }
 
@@ -500,8 +522,17 @@ function FocusReading({
   );
 }
 
-type FilterDraft = Omit<InformationFilter, "id" | "createdAt" | "updatedAt">;
-type OnboardingDraft = FilterDraft & {
+type OnboardingDraft = {
+  filterName: string;
+  identity: string;
+  industry: string;
+  focusAreas: string[];
+  knownInformation: string[];
+  informationGaps: string[];
+  currentQuestions: string[];
+  freshnessWindow: InformationFilter["freshnessWindow"];
+  sourceScope: SourceScope;
+  customSources?: string[];
   trackedEntities: string[];
   currentJudgement: string;
 };
@@ -515,7 +546,7 @@ const emptyFilterDraft: OnboardingDraft = {
   informationGaps: [],
   currentQuestions: [],
   freshnessWindow: "7d",
-  sourceScope: "all",
+  sourceScope: "hybrid",
   trackedEntities: [],
   currentJudgement: "",
 };
@@ -587,7 +618,7 @@ function FilterBuilder({
               informationGaps: ["Agent 真实任务评测", "AI 生成内容标识", "近期官方能力变化"],
               currentQuestions: ["哪些能力变化会真实影响普通创作者的工作方式？"],
               freshnessWindow: "7d",
-              sourceScope: "all",
+              sourceScope: "hybrid",
             })}
             className="mt-6 min-h-11 rounded-full border border-[#cfd8ff] bg-[#f3f6ff] px-4 py-2.5 text-xs font-black text-[#2359ff]"
           >
@@ -612,8 +643,8 @@ function FilterBuilder({
           </>}
           {step === 3 && <>
             {listInput("informationGaps", "信息缺口", "还缺少哪些证据；每行一项")}
-            <label><span className="text-sm font-black">信息时效范围</span><select value={draft.freshnessWindow} onChange={(event) => setDraft((current) => ({ ...current, freshnessWindow: event.target.value }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="1d">24 小时</option><option value="3d">3 天</option><option value="7d">7 天</option><option value="30d">30 天</option></select></label>
-            <label><span className="text-sm font-black">来源范围</span><select value={draft.sourceScope} onChange={(event) => setDraft((current) => ({ ...current, sourceScope: event.target.value as SourceScope }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="all">全部层级</option><option value="verified">已验证来源</option><option value="official">仅官方</option></select></label>
+            <label><span className="text-sm font-black">信息时效范围</span><select value={draft.freshnessWindow} onChange={(event) => setDraft((current) => ({ ...current, freshnessWindow: event.target.value as InformationFilter["freshnessWindow"] }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="24h">24 小时</option><option value="3d">3 天</option><option value="7d">7 天</option><option value="30d">30 天</option></select></label>
+            <label><span className="text-sm font-black">来源范围</span><select value={draft.sourceScope} onChange={(event) => setDraft((current) => ({ ...current, sourceScope: event.target.value as SourceScope }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="hybrid">国内与全球</option><option value="domestic">国内来源</option><option value="global">全球来源</option><option value="custom">自定义来源</option></select></label>
           </>}
 
           <div className="flex gap-3 pt-1">
@@ -640,6 +671,8 @@ function CoverageBadge({ coverage }: { coverage: ProviderCoverage }) {
       </summary>
       <div className="mt-3 grid gap-2 border-t border-[#eceeea] pt-3 text-[10px] leading-5">
         {coverage.usedProviders.length > 0 && <p><strong>已使用：</strong> {coverage.usedProviders.join(" · ")}</p>}
+        {coverage.zeroResultProviders.length > 0 && <p><strong>已搜索但未命中：</strong> {coverage.zeroResultProviders.join(" · ")}</p>}
+        {coverage.notSearchedProviders.length > 0 && <p><strong>本轮未搜索：</strong> {coverage.notSearchedProviders.join(" · ")}</p>}
         {coverage.unavailableProviders.length > 0 && <p><strong>不可用：</strong> {coverage.unavailableProviders.join(" · ")}</p>}
         {coverage.notConfiguredProviders.length > 0 && <p><strong>未配置：</strong> {coverage.notConfiguredProviders.join(" · ")}</p>}
         {coverage.failedProviders.length > 0 && <p><strong>失败：</strong> {coverage.failedProviders.join(" · ")}</p>}
@@ -651,8 +684,9 @@ function CoverageBadge({ coverage }: { coverage: ProviderCoverage }) {
 
 export default function HomePage() {
   const [page, setPage] = useState<Page>("today");
-  const [knowledge, setKnowledge] = useState<KnowledgeState>(defaultKnowledge);
-  const [response, setResponse] = useState<InformationRun | null>(null);
+  const [profile, setProfile] = useState<PersonalProfile>(defaultProfile);
+  const [knowledgeByFilterId, setKnowledgeByFilterId] = useState<KnowledgeByFilterId>({});
+  const [lastRunByFilterId, setLastRunByFilterId] = useState<Record<string, InformationRun>>({});
   const [filters, setFilters] = useState<InformationFilter[]>([]);
   const [activeFilterId, setActiveFilterId] = useState<string | null>(null);
   const [filterBuilderOpen, setFilterBuilderOpen] = useState(false);
@@ -689,30 +723,124 @@ export default function HomePage() {
     () => filters.find((filter) => filter.id === activeFilterId) || null,
     [activeFilterId, filters],
   );
+  const activeKnowledge = activeFilterId ? knowledgeByFilterId[activeFilterId] ?? null : null;
+  const activeContext = useMemo(
+    () => activeFilter && activeKnowledge
+      ? composeActiveKnowledgeContext(profile, activeFilter, activeKnowledge)
+      : null,
+    [activeFilter, activeKnowledge, profile],
+  );
+  const response = activeContext && activeFilterId
+    ? selectCurrentInformationRun(
+        lastRunByFilterId,
+        activeFilterId,
+        activeContext.researchContextRevision,
+      )
+    : null;
+  const knowledge = useMemo<KnowledgeView>(() => activeContext && activeKnowledge
+    ? { ...activeContext, evidenceHistory: activeKnowledge.evidenceHistory }
+    : {
+        identity: profile.defaultIdentity,
+        industry: "",
+        focusAreas: [],
+        freshnessWindow: "7d",
+        sourceScope: "hybrid",
+        customSources: [],
+        currentQuestions: defaultFilterKnowledge.currentQuestions,
+        knownInformation: defaultFilterKnowledge.knownInformation,
+        informationGaps: defaultFilterKnowledge.informationGaps,
+        trackedEntities: defaultFilterKnowledge.trackedEntities,
+        trackedEvents: defaultFilterKnowledge.trackedEvents,
+        userJudgements: defaultFilterKnowledge.userJudgements,
+        evidenceHistory: defaultFilterKnowledge.evidenceHistory,
+        researchContextRevision: 1,
+      }, [activeContext, activeKnowledge, profile.defaultIdentity]);
+  const currentResearchContextRef = useRef<{ filterId: string | null; researchContextRevision: number }>({
+    filterId: null,
+    researchContextRevision: 0,
+  });
+  useEffect(() => {
+    currentResearchContextRef.current = {
+      filterId: activeFilterId,
+      researchContextRevision: activeContext?.researchContextRevision ?? 0,
+    };
+  }, [activeContext?.researchContextRevision, activeFilterId]);
+
+  const setKnowledge = useCallback((updater: (current: KnowledgeView) => KnowledgeView) => {
+    if (!activeFilter || !activeKnowledge || !activeFilterId) return;
+    const nextView = updater(knowledge);
+    const now = new Date().toISOString();
+    let nextProfile = profile;
+    let nextFilter = activeFilter;
+    let nextKnowledgeByFilterId = knowledgeByFilterId;
+    let nextKnowledge = activeKnowledge;
+
+    if (nextView.identity !== knowledge.identity) {
+      if (activeFilter.identityOverride !== undefined) {
+        const updated = updateFilterResearchConfig(nextFilter, nextKnowledge, { identityOverride: nextView.identity }, now);
+        nextFilter = updated.filter;
+        nextKnowledge = updated.knowledge;
+      } else {
+        const updated = applyDefaultIdentity(profile, filters, nextKnowledgeByFilterId, nextView.identity, now);
+        nextProfile = updated.profile;
+        nextKnowledgeByFilterId = updated.knowledgeByFilterId;
+        nextKnowledge = nextKnowledgeByFilterId[activeFilterId];
+      }
+    }
+
+    const filterUpdate = updateFilterResearchConfig(nextFilter, nextKnowledge, {
+      industry: nextView.industry,
+      focusAreas: nextView.focusAreas,
+      freshnessWindow: nextView.freshnessWindow,
+      sourceScope: nextView.sourceScope,
+      customSources: nextView.customSources,
+    }, now);
+    nextFilter = filterUpdate.filter;
+    nextKnowledge = filterUpdate.knowledge;
+    nextKnowledge = updateResearchContext(nextKnowledge, {
+      currentQuestions: nextView.currentQuestions,
+      knownInformation: nextView.knownInformation,
+      informationGaps: nextView.informationGaps,
+      trackedEntities: nextView.trackedEntities,
+      trackedEvents: nextView.trackedEvents,
+      userJudgements: nextView.userJudgements,
+    }, now);
+    const normalizedEvidence = normalizeStrings(nextView.evidenceHistory);
+    if (normalizedEvidence.join("\n") !== nextKnowledge.evidenceHistory.join("\n")) {
+      nextKnowledge = normalizedEvidence.reduce(
+        (current, evidence) => recordEvidence(current, evidence, now),
+        nextKnowledge,
+      );
+    }
+
+    setProfile(nextProfile);
+    setFilters((current) => current.map((filter) => filter.id === activeFilterId ? nextFilter : filter));
+    setKnowledgeByFilterId({ ...nextKnowledgeByFilterId, [activeFilterId]: nextKnowledge });
+  }, [activeFilter, activeFilterId, activeKnowledge, filters, knowledge, knowledgeByFilterId, profile]);
   const navigate = (nextPage: Page) => {
     window.scrollTo({ top: 0, behavior: "auto" });
     setPage(nextPage);
   };
 
-  const refreshToday = useCallback(async (state: KnowledgeState, filter: InformationFilter) => {
+  const refreshToday = useCallback(async (state: ActiveKnowledgeContext, filter: InformationFilter) => {
     setLoading(true);
     setError("");
     try {
-      const request = await fetch(`/api/signals?${liveResearchParams(filter, state)}`, {
-        cache: "no-store",
+      const result = await runInformation({
+        filterId: filter.id,
+        researchContextRevision: state.researchContextRevision,
+        runLive: async () => {
+          const request = await fetch(`/api/signals?${liveResearchParams(state)}`, { cache: "no-store" });
+          if (!request.ok) throw new Error("Live Web 暂时不可用");
+          return (await request.json()) as InformationRunPayload;
+        },
+        runDemo: () => demoProvider.run({ filter, knowledge: state }),
       });
-      if (!request.ok) throw new Error("Live Web 暂时不可用");
-      const result = (await request.json()) as InformationRun;
-      setResponse(result);
-      await setAlphaValue("lastRun", result);
+      const current = currentResearchContextRef.current;
+      if (current.filterId !== result.filterId || current.researchContextRevision !== result.generatedFromResearchContextRevision) return;
+      setLastRunByFilterId((runs) => ({ ...runs, [result.filterId]: result }));
     } catch (requestError) {
-      try {
-        const fallback = await demoProvider.run({ filter, knowledge: state });
-        setResponse(fallback);
-        await setAlphaValue("lastRun", fallback);
-      } catch {
-        setError(requestError instanceof Error ? requestError.message : "暂时无法完成信息过滤");
-      }
+      setError(requestError instanceof Error ? requestError.message : "暂时无法完成信息过滤");
     } finally {
       setLoading(false);
     }
@@ -726,8 +854,12 @@ export default function HomePage() {
         setFilters(snapshot.filters);
         setActiveFilterId(snapshot.activeFilterId);
         const restoredFilter = snapshot.filters.find((filter) => filter.id === snapshot.activeFilterId);
-        const restoredKnowledge = snapshot.knowledge || (restoredFilter ? createEmptyKnowledge(restoredFilter) : null);
-        if (restoredKnowledge) setKnowledge(restoredKnowledge);
+        const restoredKnowledge = restoredFilter
+          ? snapshot.knowledgeByFilterId[restoredFilter.id] ?? createEmptyFilterKnowledge(new Date().toISOString())
+          : null;
+        setProfile(snapshot.profile);
+        setKnowledgeByFilterId(snapshot.knowledgeByFilterId);
+        setLastRunByFilterId(snapshot.lastRunByFilterId);
         setLibrary(snapshot.library);
         setNotes(snapshot.notes);
         setFeedbackRecords(snapshot.feedback);
@@ -735,11 +867,15 @@ export default function HomePage() {
         const restoredSessionId = snapshot.sessionId || crypto.randomUUID();
         setSessionId(restoredSessionId);
         if (!snapshot.sessionId) await setAlphaValue("sessionId", restoredSessionId);
-        if (snapshot.lastRun) {
-          setResponse(snapshot.lastRun);
-          if (restoredFilter && restoredKnowledge) void refreshToday(restoredKnowledge, restoredFilter);
-        } else if (restoredFilter && restoredKnowledge) {
-          void refreshToday(restoredKnowledge, restoredFilter);
+        if (restoredFilter && restoredKnowledge) {
+          const restoredContext = composeActiveKnowledgeContext(snapshot.profile, restoredFilter, restoredKnowledge);
+          currentResearchContextRef.current = {
+            filterId: restoredFilter.id,
+            researchContextRevision: restoredContext.researchContextRevision,
+          };
+          if (!selectCurrentInformationRun(snapshot.lastRunByFilterId, restoredFilter.id, restoredContext.researchContextRevision)) {
+            void refreshToday(restoredContext, restoredFilter);
+          }
         }
       })
       .catch(() => setError("本地数据暂时无法读取，请检查浏览器是否允许 IndexedDB。"))
@@ -761,8 +897,14 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!hydrated) return;
-    void setAlphaValue("knowledge", knowledge);
-  }, [hydrated, knowledge]);
+    void setAlphaValue("profile", profile);
+    void setAlphaValue("knowledgeByFilterId", knowledgeByFilterId);
+  }, [hydrated, knowledgeByFilterId, profile]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    void setAlphaValue("lastRunByFilterId", lastRunByFilterId);
+  }, [hydrated, lastRunByFilterId]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -791,14 +933,10 @@ export default function HomePage() {
   }, [experienceFeedback, hydrated]);
 
   const signals = useMemo(() => response?.signals || [], [response]);
-  const mustRead = useMemo(
-    () => signals.filter((event) => event.attentionDecision === "MUST_READ").slice(0, 5),
-    [signals],
-  );
-  const worthWatching = useMemo(
-    () => signals.filter((event) => event.attentionDecision === "WORTH_WATCHING").slice(0, 3),
-    [signals],
-  );
+  const todayPresentation = useMemo(() => selectTodayPresentation(signals), [signals]);
+  const mustRead = todayPresentation.mustRead;
+  const worthWatching = todayPresentation.worthWatching;
+  const usableUpdates = todayPresentation.usableUpdates;
   const sortedInformation = useMemo(() => {
     const next = [...signals];
     return next.sort((left, right) => {
@@ -883,54 +1021,78 @@ export default function HomePage() {
       }
       setSelected(null);
     },
-    [saveEvent],
+    [saveEvent, setKnowledge],
   );
 
   const createFilter = useCallback(
     (draft: OnboardingDraft) => {
       const now = new Date().toISOString();
-      const { trackedEntities, currentJudgement, ...filterDraft } = draft;
+      const {
+        trackedEntities,
+        currentJudgement,
+        knownInformation,
+        informationGaps,
+        currentQuestions,
+        identity,
+        ...filterDraft
+      } = draft;
+      const resolvedIdentity = identity.trim();
+      const nextProfile = filters.length === 0 && resolvedIdentity
+        ? { defaultIdentity: resolvedIdentity }
+        : profile;
       const filter: InformationFilter = {
         ...filterDraft,
+        ...(resolvedIdentity && resolvedIdentity !== nextProfile.defaultIdentity
+          ? { identityOverride: resolvedIdentity }
+          : {}),
+        focusAreas: normalizeStrings(filterDraft.focusAreas),
+        customSources: normalizeStrings(filterDraft.customSources ?? []),
         id: crypto.randomUUID(),
         createdAt: now,
         updatedAt: now,
       };
-      const nextKnowledge: KnowledgeState = {
-        ...createEmptyKnowledge(filter),
-        trackedEntities,
+      const nextKnowledge: FilterKnowledgeState = {
+        ...createEmptyFilterKnowledge(now),
+        knownInformation: normalizeStrings(knownInformation),
+        informationGaps: normalizeStrings(informationGaps),
+        currentQuestions: normalizeStrings(currentQuestions),
+        trackedEntities: normalizeStrings(trackedEntities),
         userJudgements: currentJudgement.trim() ? [currentJudgement.trim()] : [],
       };
+      const nextContext = composeActiveKnowledgeContext(nextProfile, filter, nextKnowledge);
+      setProfile(nextProfile);
       setFilters((current) => [...current, filter]);
+      setKnowledgeByFilterId((current) => ({ ...current, [filter.id]: nextKnowledge }));
       setActiveFilterId(filter.id);
-      setKnowledge(nextKnowledge);
-      setResponse(null);
       setFilterBuilderOpen(false);
       setPage("today");
-      void refreshToday(nextKnowledge, filter);
+      currentResearchContextRef.current = {
+        filterId: filter.id,
+        researchContextRevision: nextContext.researchContextRevision,
+      };
+      void refreshToday(nextContext, filter);
     },
-    [refreshToday],
+    [filters.length, profile, refreshToday],
   );
 
   const switchFilter = useCallback(
     (filter: InformationFilter) => {
-      const nextKnowledge: KnowledgeState = {
-        ...knowledge,
-        identity: filter.identity,
-        industry: filter.industry,
-        focusAreas: filter.focusAreas,
-        knownInformation: filter.knownInformation,
-        informationGaps: filter.informationGaps,
-        currentQuestions: filter.currentQuestions,
-        freshnessWindow: filter.freshnessWindow,
-      };
+      const nextKnowledge = knowledgeByFilterId[filter.id] ?? createEmptyFilterKnowledge(new Date().toISOString());
+      const nextContext = composeActiveKnowledgeContext(profile, filter, nextKnowledge);
+      if (!knowledgeByFilterId[filter.id]) {
+        setKnowledgeByFilterId((current) => ({ ...current, [filter.id]: nextKnowledge }));
+      }
       setActiveFilterId(filter.id);
-      setKnowledge(nextKnowledge);
-      setResponse(null);
       setPage("today");
-      void refreshToday(nextKnowledge, filter);
+      currentResearchContextRef.current = {
+        filterId: filter.id,
+        researchContextRevision: nextContext.researchContextRevision,
+      };
+      if (!selectCurrentInformationRun(lastRunByFilterId, filter.id, nextContext.researchContextRevision)) {
+        void refreshToday(nextContext, filter);
+      }
     },
-    [knowledge, refreshToday],
+    [knowledgeByFilterId, lastRunByFilterId, profile, refreshToday],
   );
 
   const submitExperienceFeedback = useCallback(() => {
@@ -971,11 +1133,11 @@ export default function HomePage() {
         <div>
           <p className="text-[11px] font-black uppercase tracking-[.16em] text-[#2359ff]">{todayDate}</p>
           <h1 className="mt-2 text-4xl font-black tracking-[-.055em] text-[#172033] sm:text-5xl">今日</h1>
-          {!loading && response && <p className="mt-3 text-2xl font-black tracking-[-.04em] text-[#172033]">今天只需阅读 {mustRead.length} 条。</p>}
+          {!loading && response && <p className="mt-3 text-2xl font-black tracking-[-.04em] text-[#172033]">今天只需阅读 {todayPresentation.items.length} 条。</p>}
           <p className="mt-3 max-w-xl text-sm leading-6 text-[#737c88]">只保留可能改变你判断、且有证据支持的新变化。</p>
         </div>
         <button
-          onClick={() => activeFilter && void refreshToday(knowledge, activeFilter)}
+          onClick={() => activeFilter && activeContext && void refreshToday(activeContext, activeFilter)}
           disabled={loading}
           aria-label="重新过滤"
           className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-[#dfe3e7] bg-white text-[#657080] disabled:opacity-40"
@@ -997,7 +1159,7 @@ export default function HomePage() {
           <p className="mt-1 text-xs leading-5">{error}</p>
         </section>
       )}
-      {!loading && response && mustRead.length === 0 && worthWatching.length === 0 && <EmptyToday onRefresh={() => activeFilter && void refreshToday(knowledge, activeFilter)} />}
+      {!loading && response && todayPresentation.kind === "caught_up" && <EmptyToday onRefresh={() => activeFilter && activeContext && void refreshToday(activeContext, activeFilter)} />}
       {!loading && mustRead.length > 0 && (
         <>
           <div className="mt-10 flex items-center justify-between gap-4">
@@ -1015,12 +1177,21 @@ export default function HomePage() {
           {response && <CoverageBadge coverage={response.coverage} />}
         </>
       )}
-      {!loading && worthWatching.length > 0 && (
+      {!loading && todayPresentation.kind === "worth_watching" && (
         <section className="mt-10">
           <p className="text-xs font-black uppercase tracking-[.16em] text-[#7d8691]">值得关注</p>
-          <p className="mt-2 text-sm leading-6 text-[#737c88]">近期且高度相关，但证据还不足以作为事实。</p>
+          <p className="mt-2 text-sm leading-6 text-[#737c88]">今天没有达到必读标准的重大变化，但有 {worthWatching.length} 个早期信号值得留意。</p>
           <div className="mt-5 grid gap-4">
             {worthWatching.map((event) => <EventCard key={event.id} event={event} onOpen={() => setSelected(event)} />)}
+          </div>
+        </section>
+      )}
+      {!loading && usableUpdates.length > 0 && (
+        <section className="mt-10">
+          <p className="text-xs font-black uppercase tracking-[.16em] text-[#7d8691]">今日可用更新</p>
+          <p className="mt-2 text-sm leading-6 text-[#737c88]">这些更新来自官方或可信来源，与你的过滤器相关，但暂未达到必读级别。</p>
+          <div className="mt-5 grid gap-4">
+            {usableUpdates.map((event) => <EventCard key={event.id} event={event} onOpen={() => setSelected(event)} />)}
           </div>
         </section>
       )}
@@ -1161,7 +1332,7 @@ export default function HomePage() {
 
   const listField = (
     field: keyof Pick<
-      KnowledgeState,
+      KnowledgeView,
       | "focusAreas"
       | "currentQuestions"
       | "knownInformation"
@@ -1209,12 +1380,12 @@ export default function HomePage() {
 
           <details className={accordionClass}>
             <summary className={summaryClass}><span>我的认知</span><ChevronRight size={18}/></summary>
-            <div className="mt-5 grid gap-5">{listField("focusAreas", "关注领域", "每行一项")}{listField("currentQuestions", "当前问题", "尚未解决的问题")}{listField("knownInformation", "已知信息", "已确认的事实")}{listField("informationGaps", "信息缺口", "仍缺少的证据")}{listField("trackedEntities", "关注实体", "公司、产品、人物")}{listField("trackedEvents", "关注事件", "持续观察的事件")}{listField("userJudgements", "我的判断", "当前判断")}<label><span className="text-sm font-black">信息时效范围</span><select value={knowledge.freshnessWindow} onChange={(event) => setKnowledge((current) => ({ ...current, freshnessWindow: event.target.value }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] bg-white px-4 text-base"><option value="1d">24 小时</option><option value="3d">3 天</option><option value="7d">7 天</option><option value="30d">30 天</option></select></label><button onClick={() => { if (!activeFilter) return; setResponse(null); setPage("today"); void refreshToday(knowledge, activeFilter); }} className="min-h-12 rounded-xl bg-[#2359ff] text-sm font-black text-white">保存并重新判断今日信息</button></div>
+            <div className="mt-5 grid gap-5">{listField("focusAreas", "关注领域", "每行一项")}{listField("currentQuestions", "当前问题", "尚未解决的问题")}{listField("knownInformation", "已知信息", "已确认的事实")}{listField("informationGaps", "信息缺口", "仍缺少的证据")}{listField("trackedEntities", "关注实体", "公司、产品、人物")}{listField("trackedEvents", "关注事件", "持续观察的事件")}{listField("userJudgements", "我的判断", "当前判断")}<label><span className="text-sm font-black">信息时效范围</span><select value={knowledge.freshnessWindow} onChange={(event) => setKnowledge((current) => ({ ...current, freshnessWindow: event.target.value as InformationFilter["freshnessWindow"] }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] bg-white px-4 text-base"><option value="24h">24 小时</option><option value="3d">3 天</option><option value="7d">7 天</option><option value="30d">30 天</option></select></label><button onClick={() => { if (!activeFilter || !activeContext) return; setPage("today"); void refreshToday(activeContext, activeFilter); }} className="min-h-12 rounded-xl bg-[#2359ff] text-sm font-black text-white">保存并重新判断今日信息</button></div>
           </details>
 
           <details className={accordionClass}>
             <summary className={summaryClass}><span>我的过滤器</span><ChevronRight size={18}/></summary>
-            <div className="mt-4 grid gap-2">{filters.map((filter) => <button key={filter.id} onClick={() => switchFilter(filter)} className={`flex min-h-14 items-center justify-between rounded-2xl border p-4 text-left ${filter.id === activeFilterId ? "border-[#9eb2ff] bg-[#f2f5ff]" : "border-[#e4e6e2] bg-white"}`}><span><strong className="block text-sm">{filter.filterName}</strong>{(filter.industry || filter.identity) && <span className="mt-1 block text-xs text-[#7b8490]">{filter.industry || filter.identity}</span>}</span><span className="text-xs font-black text-[#2359ff]">{filter.id === activeFilterId ? "使用中" : "使用"}</span></button>)}<button onClick={() => setFilterBuilderOpen(true)} className="min-h-12 rounded-xl border border-dashed border-[#bfc7d1] text-sm font-black text-[#596473]">＋ 新建过滤器</button></div>
+            <div className="mt-4 grid gap-2">{filters.map((filter) => <button key={filter.id} onClick={() => switchFilter(filter)} className={`flex min-h-14 items-center justify-between rounded-2xl border p-4 text-left ${filter.id === activeFilterId ? "border-[#9eb2ff] bg-[#f2f5ff]" : "border-[#e4e6e2] bg-white"}`}><span><strong className="block text-sm">{filter.filterName}</strong>{(filter.industry || filter.identityOverride || profile.defaultIdentity) && <span className="mt-1 block text-xs text-[#7b8490]">{filter.industry || filter.identityOverride || profile.defaultIdentity}</span>}</span><span className="text-xs font-black text-[#2359ff]">{filter.id === activeFilterId ? "使用中" : "使用"}</span></button>)}<button onClick={() => setFilterBuilderOpen(true)} className="min-h-12 rounded-xl border border-dashed border-[#bfc7d1] text-sm font-black text-[#596473]">＋ 新建过滤器</button></div>
           </details>
 
           <details className={accordionClass}>
@@ -1225,7 +1396,7 @@ export default function HomePage() {
 
           <details className={accordionClass}>
             <summary className={summaryClass}><span>我的数据</span><ChevronRight size={18}/></summary>
-            <p className="mt-4 text-sm leading-6 text-[#68727f]">过滤器、认知状态、资料库、笔记与反馈只保存在当前浏览器。</p>{experienceFeedback.length ? <a href={feedbackExportHref} download={`signal-map-feedback-${sessionId.slice(0, 8) || "alpha"}.json`} className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black">导出反馈 JSON</a> : <span className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black opacity-40">导出反馈 JSON</span>}<button onClick={() => { if (!window.confirm("清除当前设备上的全部 Signal Map Alpha 数据？")) return; void clearAlphaData().then(() => { setFilters([]); setActiveFilterId(null); setKnowledge(defaultKnowledge); setLibrary([]); setNotes({}); setFeedbackRecords([]); setExperienceFeedback([]); setResponse(null); setPage("today"); }); }} className="mt-2 min-h-12 w-full rounded-xl text-sm font-black text-rose-700">清除本地测试数据</button>
+            <p className="mt-4 text-sm leading-6 text-[#68727f]">过滤器、认知状态、资料库、笔记与反馈只保存在当前浏览器。</p>{experienceFeedback.length ? <a href={feedbackExportHref} download={`signal-map-feedback-${sessionId.slice(0, 8) || "alpha"}.json`} className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black">导出反馈 JSON</a> : <span className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black opacity-40">导出反馈 JSON</span>}<button onClick={() => { if (!window.confirm("清除当前设备上的全部 Signal Map Alpha 数据？")) return; void clearAlphaData().then(() => { setFilters([]); setActiveFilterId(null); setProfile(defaultProfile); setKnowledgeByFilterId({}); setLastRunByFilterId({}); setLibrary([]); setNotes({}); setFeedbackRecords([]); setExperienceFeedback([]); setPage("today"); }); }} className="mt-2 min-h-12 w-full rounded-xl text-sm font-black text-rose-700">清除本地测试数据</button>
           </details>
         </div>
 
@@ -1242,7 +1413,7 @@ export default function HomePage() {
           </div>
         </details>
 
-        {testMode && <section className="mt-6 rounded-[22px] border border-[#e3e6e8] bg-white p-5"><p className="text-xs font-black uppercase tracking-[.12em] text-[#2359ff]">Alpha 测试模式</p><p className="mt-2 text-sm text-[#68727f]">测试会话 ID · {sessionId.slice(0, 8)}</p><div className="mt-4 grid gap-2"><button onClick={() => activeFilter && void refreshToday(knowledge, activeFilter)} className="min-h-12 rounded-xl border border-[#dfe3e7] text-sm font-black">重置演示数据</button><button onClick={() => { setActiveFilterId(null); setResponse(null); void setAlphaValue("lastRun", null); }} className="min-h-12 rounded-xl border border-[#dfe3e7] text-sm font-black">重置过滤器</button>{experienceFeedback.length ? <a href={feedbackExportHref} download={`signal-map-feedback-${sessionId.slice(0, 8) || "alpha"}.json`} className="flex min-h-12 items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black">导出反馈</a> : <span className="flex min-h-12 items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black opacity-40">导出反馈</span>}</div></section>}
+        {testMode && <section className="mt-6 rounded-[22px] border border-[#e3e6e8] bg-white p-5"><p className="text-xs font-black uppercase tracking-[.12em] text-[#2359ff]">Alpha 测试模式</p><p className="mt-2 text-sm text-[#68727f]">测试会话 ID · {sessionId.slice(0, 8)}</p><div className="mt-4 grid gap-2"><button onClick={() => activeFilter && activeContext && void refreshToday(activeContext, activeFilter)} className="min-h-12 rounded-xl border border-[#dfe3e7] text-sm font-black">重置演示数据</button><button onClick={() => { setActiveFilterId(null); setLastRunByFilterId({}); void setAlphaValue("lastRunByFilterId", {}); }} className="min-h-12 rounded-xl border border-[#dfe3e7] text-sm font-black">重置过滤器</button>{experienceFeedback.length ? <a href={feedbackExportHref} download={`signal-map-feedback-${sessionId.slice(0, 8) || "alpha"}.json`} className="flex min-h-12 items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black">导出反馈</a> : <span className="flex min-h-12 items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black opacity-40">导出反馈</span>}</div></section>}
       </main>
     );
   };

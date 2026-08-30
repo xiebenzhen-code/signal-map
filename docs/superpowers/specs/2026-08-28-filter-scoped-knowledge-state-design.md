@@ -40,7 +40,9 @@ type InformationFilter = {
   identityOverride?: string;
   industry: string;
   focusAreas: string[];
-  freshnessWindow: "1d" | "3d" | "7d" | "30d";
+  freshnessWindow: "24h" | "3d" | "7d" | "30d";
+  sourceScope: "domestic" | "global" | "hybrid" | "custom";
+  customSources: string[];
   sourceScope: "domestic" | "global" | "hybrid" | "custom";
   customSources?: string[];
   createdAt: string;
@@ -78,7 +80,7 @@ type EvidenceSource = {
 
 ```ts
 type FilterKnowledgeState = {
-  revision: number;
+  researchContextRevision: number;
   updatedAt: string;
   knownInformation: string[];
   informationGaps: string[];
@@ -97,11 +99,19 @@ type KnowledgeByFilterId = Record<string, FilterKnowledgeState>;
 Research receives a derived `ActiveKnowledgeContext`. It is composed on demand and is never persisted as an independent mutable object.
 
 ```ts
-type ActiveKnowledgeContext = PersonalProfile &
-  Pick<InformationFilter, "industry" | "focusAreas" | "freshnessWindow"> &
-  FilterKnowledgeState & {
-    identity: string;
-  };
+type ActiveKnowledgeContext = {
+  identity: string;
+  industry: string;
+  focusAreas: string[];
+  freshnessWindow: "24h" | "3d" | "7d" | "30d";
+  knownInformation: string[];
+  informationGaps: string[];
+  currentQuestions: string[];
+  userJudgements: string[];
+  trackedEntities: string[];
+  trackedEvents: string[];
+  researchContextRevision: number;
+};
 ```
 
 Composition resolves identity as:
@@ -112,6 +122,8 @@ const identity = filter.identityOverride ?? profile.defaultIdentity;
 
 Existing provider and pipeline interfaces may continue to call this composed value `KnowledgeState` during the incremental migration, but storage and page state must not treat it as a separate source of truth.
 
+`evidenceHistory` remains filter-scoped persisted history, but it is not part of `ActiveKnowledgeContext`. The current pipeline only concatenates it with `knownInformation` to suppress rediscovery; because the application also writes evidence history automatically after feedback and research activity, treating it as research context would create a research → evidence write → revision change → immediately stale loop. Evidence affects research only after the user explicitly promotes it into `knownInformation`, `userJudgements`, a question, a gap, or tracking state.
+
 ## Single sources of truth
 
 | Concept | Source of truth |
@@ -119,7 +131,7 @@ Existing provider and pipeline interfaces may continue to call this composed val
 | Default identity | `PersonalProfile.defaultIdentity` |
 | Filter-specific identity | `InformationFilter.identityOverride` |
 | Filter name, industry, focus, freshness, discovery scope | `InformationFilter` |
-| Known information, gaps, questions, judgements, tracking, history, revision | `knowledgeByFilterId[filterId]` |
+| Known information, gaps, questions, judgements, tracking, history, research-context revision | `knowledgeByFilterId[filterId]` |
 | Active selection | `activeFilterId` |
 | Research input | Derived `ActiveKnowledgeContext` |
 | Last result for one filter | `lastRunByFilterId[filterId]` |
@@ -146,15 +158,19 @@ type AlphaSnapshotV2 = {
 };
 ```
 
-Every newly persisted run records its knowledge revision:
+Every newly persisted run records the research-context revision that generated it:
 
 ```ts
 type InformationRun = {
   // existing fields remain unchanged
   filterId: string;
-  generatedFromKnowledgeRevision: number;
+  generatedFromResearchContextRevision: number;
+  dataMode: "live" | "demo" | "mixed";
+  fallbackReason?: string;
 };
 ```
+
+`dataMode` is mandatory and honest. A failed Live run may fall back to Demo only when the returned run is marked `demo` or `mixed` and records a concrete `fallbackReason`. The fallback must never be represented as a complete Live result. Any persisted filter-scoped run with an older uppercase mode is normalized during hydration; the unscoped legacy `lastRun` is still excluded from migration.
 
 The legacy `knowledge` and `lastRun` keys remain readable for recovery and are not deleted. New code stops writing them after migration.
 
@@ -169,14 +185,14 @@ Migration is pure, deterministic, and idempotent.
    - Global `trackedEntities`, `trackedEvents`, `userJudgements`, and `evidenceHistory` are retained here because they belonged to the last active context.
 4. For each inactive filter, initialize its knowledge from only that filter's legacy `knownInformation`, `informationGaps`, and `currentQuestions`.
 5. Do not copy the active filter's tracking, judgement, or evidence history into inactive filters.
-6. Set every migrated `FilterKnowledgeState` to `revision: 1` and use the migration time for `updatedAt`.
+6. Set every migrated `FilterKnowledgeState` to `researchContextRevision: 1` and use the migration time for `updatedAt`.
 7. Normalize each filter into the new query-only representation. A legacy filter identity becomes `identityOverride` only when it differs from `profile.defaultIdentity`.
-8. Map legacy source scopes `official`, `verified`, and `all` to `hybrid`. Those old values mixed trust policy with discovery coverage; verification gates continue to control Fact promotion.
+8. Map legacy source scopes `official`, `verified`, and `all` to `hybrid`, and map legacy freshness `1d` to `24h`. Those old source values mixed trust policy with discovery coverage; verification gates continue to control Fact promotion.
 9. Do not import legacy `lastRun` into `lastRunByFilterId`, because it has no trustworthy filter/revision provenance. Retain the legacy key for recovery and trigger a fresh calculation for the active filter.
 10. Persist `profile`, `knowledgeByFilterId`, empty `lastRunByFilterId`, and `knowledgeSchemaVersion: 2` before normal application writes resume.
 11. Leave the legacy `knowledge` and `lastRun` records untouched as recovery fallbacks.
 
-If there is no active filter, retain the global legacy knowledge in a reserved migration entry until a filter becomes active, rather than discarding it.
+If there is no active filter, retain the global legacy knowledge in a reserved recovery-only entry. It never participates in `ActiveKnowledgeContext` and is never automatically adopted by a later filter. A future Recovery UI may let the user assign it explicitly.
 
 ## Create, edit, and switch behavior
 
@@ -193,10 +209,11 @@ The existing onboarding draft remains a UI concern. Submission splits it into:
 - Default identity edits update `profile.defaultIdentity`; filter-specific identity edits update only `identityOverride`.
 - Industry, focus areas, freshness, and discovery scope edits update the active `InformationFilter`.
 - Known information, gaps, questions, judgements, tracked entities, tracked events, and evidence history update only `knowledgeByFilterId[activeFilterId]`.
-- Every semantic knowledge mutation creates a new object with `revision + 1` and a new `updatedAt`.
-- Any change to an input that materially changes this filter's derived research context also increments that filter's knowledge revision. This includes industry, focus areas, freshness window, source scope, custom sources, and identity override.
-- Changing `profile.defaultIdentity` increments the revision of every filter that does not define `identityOverride`; filters with an override are unaffected.
-- Hydration, read-only composition, navigation, and sorting do not increment revision.
+- `researchContextRevision` increments only when a user-controlled input can change the next research or filtering result: `knownInformation`, `informationGaps`, `currentQuestions`, `userJudgements`, `trackedEntities`, `trackedEvents`, `industry`, `focusAreas`, `freshnessWindow`, `sourceScope`, `customSources`, `identityOverride`, or the effective `defaultIdentity`.
+- Changing `profile.defaultIdentity` increments `researchContextRevision` only for filters without an `identityOverride`; filters with an override are unaffected.
+- System-generated `evidenceHistory`, `lastSeenAt`, research metadata, and run metadata do not increment `researchContextRevision`.
+- Promoting evidence through an explicit user action into known information, a judgement, a question, a gap, an entity, or an event does increment `researchContextRevision` because the promoted value becomes research context.
+- Hydration, read-only composition, navigation, sorting, and automatic evidence recording do not increment `researchContextRevision`.
 
 ### Switch filter
 
@@ -217,20 +234,20 @@ A result is current only when all of the following are true:
 
 ```ts
 run.filterId === activeFilter.id &&
-run.generatedFromKnowledgeRevision === activeKnowledge.revision
+run.generatedFromResearchContextRevision === activeKnowledge.researchContextRevision
 ```
 
 The flow is:
 
-1. A knowledge mutation increments only the active filter knowledge revision.
+1. A qualifying research-context mutation increments only the affected filter's `researchContextRevision`.
 2. The existing result immediately becomes stale because its recorded revision no longer matches.
 3. A stale result is not rendered as current Today information.
 4. The application triggers a new filter/research run with the new `ActiveKnowledgeContext`.
 5. On success, save the result to `lastRunByFilterId[filterId]` with the exact revision used to generate it.
 6. If a newer knowledge mutation occurs while the request is in flight, the returned older revision remains stale and cannot replace the current result.
-7. Demo fallback results follow the same filter ID and revision rules.
+7. Demo fallback results follow the same filter ID and revision rules and carry honest `dataMode` and `fallbackReason` metadata.
 
-Filter query and effective identity changes increment the affected filter knowledge revision before recalculation. The one revision therefore represents the complete effective research context, including knowledge, filter configuration, and resolved identity. `InformationFilter.updatedAt` still records the filter-definition edit time but is not a competing validity source.
+Filter query and effective identity changes increment the affected filter's `researchContextRevision` before recalculation. This revision represents only the complete effective research context, including user-promoted knowledge, filter configuration, and resolved identity; it intentionally excludes system-produced evidence and run bookkeeping. `InformationFilter.updatedAt` still records the filter-definition edit time but is not a competing validity source.
 
 ## Targeted extraction from app/page.tsx
 
@@ -240,10 +257,14 @@ UI components and render functions remain in `app/page.tsx`. Only domain and dat
   - create empty filter knowledge;
   - compose active research context;
   - apply insight feedback to one filter knowledge state;
-  - migrate legacy knowledge into V2 state.
+  - increment research context only for qualifying user-controlled changes.
+- `lib/alpha-migration.ts`
+  - migrate legacy knowledge into V2 state without importing the browser storage adapter;
+  - normalize legacy source scopes and uppercase run modes;
+  - remain pure and idempotent.
 - `information/run-information.ts`
   - run the live source;
-  - fall back to DemoProvider when live research fails;
+  - fall back to DemoProvider when live research fails while recording honest mode and reason metadata;
   - preserve a failure when both sources fail.
 
 `app/page.tsx` remains responsible for UI composition, navigation, modal state, sorting, and invoking these operations.
@@ -251,7 +272,7 @@ UI components and render functions remain in `app/page.tsx`. Only domain and dat
 ## Type ownership corrections
 
 - `PersonalProfile`, `InformationFilter`, `FilterKnowledgeState`, `KnowledgeByFilterId`, and the derived knowledge context belong to `information/types.ts`.
-- `ResearchSignal`, `Claim`, `SourceRole`, verification types, and research response types remain in `research/types.ts`.
+- `ResearchSignal`, `Claim`, `EvidenceSource`, `SourceRole`, verification types, and research response types remain in `research/types.ts`. `sourceRole` belongs to each `EvidenceSource`, not to the aggregate `Claim`.
 - Provider payload and connection contracts remain in `social/providers/types.ts`.
 - `AlphaSnapshotV2` and migration-only legacy persistence shapes remain in `lib/alpha-storage.ts`.
 - `LibraryEntry` is a product/domain concept and moves out of the storage adapter into `information/types.ts`.
@@ -266,8 +287,9 @@ Implementation follows red-green-refactor. Add only high-value tests:
 ### Knowledge isolation and migration
 
 - Updating one filter's known information does not change another filter.
-- Every semantic knowledge mutation increments exactly one revision and updates its timestamp.
-- Changing a filter query input increments only that filter's revision.
+- Every qualifying user research-context mutation increments exactly one `researchContextRevision` and updates its timestamp.
+- Automatic evidence/history/run metadata writes do not increment `researchContextRevision`.
+- Changing a filter query input increments only that filter's `researchContextRevision`.
 - Changing the default identity increments only filters without an identity override.
 - Switching filters composes research context only from the target filter.
 - Feedback updates only the active filter knowledge.
@@ -275,7 +297,7 @@ Implementation follows red-green-refactor. Add only high-value tests:
 - Legacy inactive filters do not receive active judgements or tracking.
 - Migration is idempotent.
 - Settings changes produce the context used by the next Today recalculation.
-- A run generated from an older knowledge revision is stale and cannot replace a newer result.
+- A run generated from an older research-context revision is stale and cannot replace a newer result.
 - A run from another filter is never displayed after switching.
 
 ### Provider and fallback safety
@@ -284,6 +306,7 @@ Implementation follows red-green-refactor. Add only high-value tests:
 - A provider status exception becomes `error` instead of rejecting the entire status request.
 - `not_configured` and `unavailable` remain distinguishable.
 - Live research failure falls back to Demo mode.
+- Live-to-Demo fallback records lowercase `dataMode` and a concrete `fallbackReason`; it never claims complete Live coverage.
 - If both live and Demo fail, the original failure is surfaced without fabricated information.
 
 Existing freshness, evidence validation, Demo-versus-Live, and social verification tests remain unchanged and must continue passing.
@@ -321,14 +344,14 @@ Qodo Skills are installed but cannot fetch organization rules until the runtime 
 
 ## Acceptance criteria
 
-- Every filter has an isolated, revisioned knowledge state.
+- Every filter has an isolated knowledge state with an explicit `researchContextRevision`.
 - Default identity remains reusable and each filter can override it.
 - Switching filters cannot carry knowledge from the previous filter.
 - Switching filters cannot display another filter's cached run.
 - Existing local Alpha data migrates without losing the active user's knowledge.
 - Migration can run repeatedly without changing already migrated data.
 - Today recalculation consumes the newly composed active context.
-- Today results are accepted only when filter ID and knowledge revision both match.
+- Today results are accepted only when filter ID and research-context revision both match.
 - Provider failures do not break the whole Today pipeline.
 - Knip and dependency-cruiser remain clean.
 - `npm run quality` and `npm run build` pass before completion is reported.
