@@ -64,6 +64,18 @@ type Feedback =
 
 type KnowledgeView = ActiveKnowledgeContext & Pick<FilterKnowledgeState, "evidenceHistory">;
 
+type KnowledgeListField = keyof Pick<
+  KnowledgeView,
+  | "focusAreas"
+  | "currentQuestions"
+  | "knownInformation"
+  | "informationGaps"
+  | "trackedEntities"
+  | "trackedEvents"
+  | "userJudgements"
+  | "evidenceHistory"
+>;
+
 type Connection = {
   id: "x" | "xiaohongshu";
   label: string;
@@ -719,6 +731,7 @@ export default function HomePage() {
   const [newQuestion, setNewQuestion] = useState("");
   const [newEntity, setNewEntity] = useState("");
   const [newJudgement, setNewJudgement] = useState("");
+  const [knowledgeDrafts, setKnowledgeDrafts] = useState<Partial<Record<KnowledgeListField, string>>>({});
   const activeFilter = useMemo(
     () => filters.find((filter) => filter.id === activeFilterId) || null,
     [activeFilterId, filters],
@@ -765,6 +778,9 @@ export default function HomePage() {
       researchContextRevision: activeContext?.researchContextRevision ?? 0,
     };
   }, [activeContext?.researchContextRevision, activeFilterId]);
+  useEffect(() => {
+    setKnowledgeDrafts({});
+  }, [activeFilterId]);
 
   const setKnowledge = useCallback((updater: (current: KnowledgeView) => KnowledgeView) => {
     if (!activeFilter || !activeKnowledge || !activeFilterId) return;
@@ -1331,17 +1347,7 @@ export default function HomePage() {
   };
 
   const listField = (
-    field: keyof Pick<
-      KnowledgeView,
-      | "focusAreas"
-      | "currentQuestions"
-      | "knownInformation"
-      | "informationGaps"
-      | "trackedEntities"
-      | "trackedEvents"
-      | "userJudgements"
-      | "evidenceHistory"
-    >,
+    field: KnowledgeListField,
     label: string,
     hint: string,
   ) => (
@@ -1349,8 +1355,16 @@ export default function HomePage() {
       <span className="text-sm font-black">{label}</span>
       <span className="ml-2 text-xs text-[#939aa3]">{hint}</span>
       <textarea
-        value={knowledge[field].join("\n")}
-        onChange={(event) => setKnowledge((current) => ({ ...current, [field]: textToList(event.target.value) }))}
+        value={knowledgeDrafts[field] ?? knowledge[field].join("\n")}
+        onChange={(event) => {
+          const value = event.target.value;
+          setKnowledgeDrafts((current) => ({ ...current, [field]: value }));
+          setKnowledge((current) => ({ ...current, [field]: textToList(value) }));
+        }}
+        onBlur={(event) => {
+          const normalized = textToList(event.target.value).join("\n");
+          setKnowledgeDrafts((current) => ({ ...current, [field]: normalized }));
+        }}
         className="mt-2 min-h-24 w-full resize-none rounded-2xl border border-[#dfe3e7] bg-white p-4 text-base leading-6 outline-none focus:border-[#8facff]"
       />
     </label>
