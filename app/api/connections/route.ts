@@ -1,11 +1,5 @@
-import { socialAccessLayer } from "@/social/providers";
-import { toPublicConnectionStatus } from "@/social/access/public-connection";
+import { handleConnections } from "@/backend/handlers";
 
 export async function GET() {
-  const connections = (await socialAccessLayer.getConnectionStatuses())
-    .map(toPublicConnectionStatus);
-  return Response.json(
-    { connections },
-    { headers: { "Cache-Control": "no-store" } },
-  );
+  return handleConnections();
 }

@@ -3,8 +3,8 @@ import type {
   SocialProfile,
   SocialProviderStatus,
   XiaohongshuConnectionAdapter,
-} from "../../providers/types";
-import { xhsItems, xhsProfile } from "./normalize";
+} from "../../providers/types.ts";
+import { xhsItems, xhsProfile } from "./normalize.ts";
 
 function token() {
   return process.env.XHS_ACCESS_TOKEN?.trim() || "";

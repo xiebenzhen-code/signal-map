@@ -48,6 +48,17 @@ test("Live failure falls back honestly", async () => {
   assert.equal(result.generatedFromResearchContextRevision, 3);
 });
 
+test("auth failure never turns into a Guest Demo research result", async () => {
+  let demoCalls = 0;
+  await assert.rejects(runInformation({
+    filterId: "ai",
+    researchContextRevision: 3,
+    runLive: async () => { throw Object.assign(new Error("Login required"), { status: 401 }); },
+    runDemo: async () => { demoCalls += 1; return payload({ dataMode: "demo" }); },
+  }), /Login required/);
+  assert.equal(demoCalls, 0);
+});
+
 test("an in-flight old revision fails completion validation", async () => {
   let currentRevision = 3;
   const pending = Promise.resolve(run());

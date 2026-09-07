@@ -41,6 +41,12 @@ module.exports = {
       to: { path: "^(app|components)/" },
     },
     {
+      name: "no-backend-to-ui",
+      severity: "error",
+      from: { path: "^backend/" },
+      to: { path: "^(app|components)/" },
+    },
+    {
       name: "no-app-to-social-implementations",
       severity: "error",
       comment: "UI imports the social access contract, not concrete providers or adapters.",

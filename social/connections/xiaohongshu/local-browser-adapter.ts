@@ -3,8 +3,8 @@ import type {
   SocialProfile,
   SocialProviderStatus,
   XiaohongshuConnectionAdapter,
-} from "../../providers/types";
-import { isLoggedIn, xhsItems, xhsProfile } from "./normalize";
+} from "../../providers/types.ts";
+import { isLoggedIn, xhsItems, xhsProfile } from "./normalize.ts";
 
 function serviceBase() {
   const parsed = new URL(

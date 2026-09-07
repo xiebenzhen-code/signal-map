@@ -44,6 +44,9 @@ export async function runInformation(options: RunInformationOptions): Promise<In
   try {
     return stamp(await options.runLive(), options);
   } catch (liveError) {
+    if (liveError && typeof liveError === "object" && "status" in liveError && [401, 403].includes(Number(liveError.status))) {
+      throw liveError;
+    }
     try {
       return {
         ...stamp(await options.runDemo(), options),

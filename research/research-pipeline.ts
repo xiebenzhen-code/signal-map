@@ -7,7 +7,7 @@ import {
   resolveFreshness,
   validateTimestamp,
 } from "../information/freshness.ts";
-import { planQuery } from "./query-planner";
+import { planQuery } from "./query-planner.ts";
 import {
   selectBoundedCandidates,
   type CandidateEligibilityAudit,
@@ -20,25 +20,25 @@ import {
   discoverOfficialGithubReleases,
   discoverOfficialUpdatePages,
 } from "./github-discovery.ts";
-import { classifySource } from "./source-classifier";
-import { describesRecentChange } from "./recent-signal";
+import { classifySource } from "./source-classifier.ts";
+import { describesRecentChange } from "./recent-signal.ts";
 import {
   assessNoveltyAttribution,
   type NoveltyClusterMember,
 } from "./novelty-attribution.ts";
-import { translateSignalsForPresentation } from "./translation";
+import { translateSignalsForPresentation } from "./translation.ts";
 import { buildSourceCoverage, type SourceExecutionOutcome } from "./source-coverage.ts";
 import type {
   PipelineCounts,
   PipelineProgress,
-  QueryPlan,
   ResearchCandidate,
   ResearchInput,
   ResearchResponse,
   ResearchSignal,
+  QueryPlan,
   SourceType,
   VerificationStatus,
-} from "./types";
+} from "./types.ts";
 
 type ProgressHandler = (progress: PipelineProgress) => void | Promise<void>;
 
@@ -460,6 +460,12 @@ export async function runResearchPipeline(
   input: ResearchInput,
   onProgress?: ProgressHandler,
   debug?: ResearchPipelineDebug,
+  sourceSelection?: {
+    primarySourceType?: string;
+    fallbackSourceTypes?: string[];
+    allowedProviderIds?: string[];
+    reason?: string;
+  },
 ): Promise<ResearchResponse> {
   const progress: PipelineProgress[] = [];
   const failures: string[] = [];
@@ -472,7 +478,32 @@ export async function runResearchPipeline(
     await onProgress?.(event);
   };
 
-  const plan = planQuery(input);
+  const plan = {
+    ...planQuery(input),
+    selectedSourceType: sourceSelection?.primarySourceType,
+    fallbackSourceTypes: sourceSelection?.fallbackSourceTypes,
+    sourceSelectionReason: sourceSelection?.reason,
+  };
+  const allowedProviders = sourceSelection?.allowedProviderIds
+    ? new Set(sourceSelection.allowedProviderIds)
+    : undefined;
+  const canExecute = (providerId: string) => !allowedProviders || allowedProviders.has(providerId);
+  const emptySearchResult = () => ({
+    scanned: 0,
+    attempted: 0,
+    successful: 0,
+    failed: 0,
+    items: [] as ResearchCandidate[],
+  });
+  const sourceHint = plan.selectedSourceType === "OFFICIAL"
+    ? " official documentation changelog announcement"
+    : plan.selectedSourceType === "PRIMARY"
+      ? " primary document filing technical specification"
+      : plan.selectedSourceType === "INDEPENDENT_MEDIA"
+        ? " independent coverage analysis"
+        : plan.selectedSourceType === "GENERAL_WEB"
+          ? " web coverage"
+          : "";
   await emit({
     stage: "planning",
     label: "正在理解需求并扩展中英文搜索词",
@@ -489,11 +520,17 @@ export async function runResearchPipeline(
   const domains = primaryDomains(plan);
   const primaryQueries = plan.searchCombinations
     .slice(0, 5)
-    .map((query) => `${query} ${domains}`);
+    .map((query) => `${query}${sourceHint} ${domains}`);
   const [primaryResult, githubReleaseResult, officialUpdatePageResult] = await Promise.all([
-    searchQueries(primaryQueries, "primary", plan, failures, windowDays),
-    discoverOfficialGithubReleases(plan.entities),
-    discoverOfficialUpdatePages(plan.entities),
+    canExecute("primary-web-search")
+      ? searchQueries(primaryQueries, "primary", plan, failures, windowDays)
+      : Promise.resolve(emptySearchResult()),
+    canExecute("github-releases")
+      ? discoverOfficialGithubReleases(plan.entities)
+      : Promise.resolve({ items: [], outcome: { source: "GitHub Releases", execution: "not_searched" as const, searched: false, resultCount: 0 }, failure: undefined }),
+    canExecute("official-update-pages")
+      ? discoverOfficialUpdatePages(plan.entities)
+      : Promise.resolve({ items: [], outcome: { source: "Official Update Pages", execution: "not_searched" as const, searched: false, resultCount: 0 }, failure: undefined }),
   ]);
   if (githubReleaseResult.failure) failures.push(githubReleaseResult.failure);
   if (officialUpdatePageResult.failure) failures.push(officialUpdatePageResult.failure);
@@ -526,15 +563,11 @@ export async function runResearchPipeline(
     counts,
   });
   const mediaQueries = plan.searchCombinations.slice(0, 4).map(
-    (query) => `${query} (Reuters OR Bloomberg OR \"Financial Times\" OR WSJ OR CNBC)`,
+    (query) => `${query}${sourceHint} (Reuters OR Bloomberg OR \"Financial Times\" OR WSJ OR CNBC)`,
   );
-  const trustedMediaResult = await searchQueries(
-    mediaQueries,
-    "trusted_media",
-    plan,
-    failures,
-    windowDays,
-  );
+  const trustedMediaResult = canExecute("trusted-media")
+    ? await searchQueries(mediaQueries, "trusted_media", plan, failures, windowDays)
+    : emptySearchResult();
   const trustedMedia = trustedMediaResult.items;
   sourceOutcomes.push(webSearchOutcome("Trusted Media", trustedMediaResult));
   scanned += trustedMediaResult.scanned;
@@ -556,13 +589,9 @@ export async function runResearchPipeline(
     (query) =>
       `${query} (TechCrunch OR "The Verge" OR "Ars Technica" OR VentureBeat OR InfoQ OR 机器之心 OR 量子位 OR 36氪)`,
   );
-  const industryMediaResult = await searchQueries(
-    industryQueries,
-    "industry_media",
-    plan,
-    failures,
-    windowDays,
-  );
+  const industryMediaResult = canExecute("industry-media")
+    ? await searchQueries(industryQueries, "industry_media", plan, failures, windowDays)
+    : emptySearchResult();
   const industryMedia = industryMediaResult.items;
   sourceOutcomes.push(webSearchOutcome("Industry Media", industryMediaResult));
   scanned += industryMediaResult.scanned;
@@ -576,20 +605,16 @@ export async function runResearchPipeline(
     (query) =>
       `${query} (site:reddit.com OR site:github.com OR site:news.ycombinator.com OR site:stackoverflow.com OR site:dev.to)`,
   );
-  const communityWebResult = await searchQueries(
-    communityWebQueries,
-    "social",
-    plan,
-    failures,
-    windowDays,
-  );
+  const communityWebResult = canExecute("public-web")
+    ? await searchQueries(communityWebQueries, "social", plan, failures, windowDays)
+    : emptySearchResult();
   sourceOutcomes.push(webSearchOutcome("Public Web Community", communityWebResult));
   scanned += communityWebResult.scanned;
 
   const trustedClaims = [...trustedMedia, ...industryMedia]
     .filter((item) => resolveFreshness(item).ageHours !== undefined)
     .slice(0, 3);
-  const trustedReverseResult = trustedClaims.length
+  const trustedReverseResult = trustedClaims.length && canExecute("reverse-primary")
     ? await searchQueries(
         trustedClaims.map((item) => `${item.title.slice(0, 140)} ${domains}`),
         "primary",
@@ -607,8 +632,12 @@ export async function runResearchPipeline(
   });
   const socialQuery = plan.searchCombinations.slice(0, 3).join(" OR ");
   const [socialAccess, redditResult] = await Promise.all([
-    socialAccessLayer.search({ query: socialQuery, industry: input.industry, maxSearchesPerProvider: 1 }),
-    Promise.allSettled([redditSearch(socialQuery)]),
+    canExecute("social-access")
+      ? socialAccessLayer.search({ query: socialQuery, industry: input.industry, maxSearchesPerProvider: 1 })
+      : Promise.resolve({ items: [] as LiveItem[], outcomes: [], statuses: [] }),
+    canExecute("reddit")
+      ? Promise.allSettled([redditSearch(socialQuery)])
+      : Promise.resolve([{ status: "fulfilled", value: [] as LiveItem[] }] as const),
   ]);
   const reddit =
     redditResult[0].status === "fulfilled" ? redditResult[0].value : [];
@@ -661,13 +690,13 @@ export async function runResearchPipeline(
     const reverseQueries = social.representatives
       .slice(0, 3)
       .map((item) => `${item.title.slice(0, 120)} ${domains}`);
-    const reverseResult = await searchQueries(
+    const reverseResult = canExecute("reverse-primary") ? await searchQueries(
       reverseQueries,
       "primary",
       plan,
       failures,
       windowDays,
-    );
+    ) : emptySearchResult();
     reversePrimary = unique([...reversePrimary, ...reverseResult.items]);
     scanned += reverseResult.scanned;
   }
@@ -1337,6 +1366,41 @@ export async function runResearchPipeline(
   }
 
   const coverage = buildSourceCoverage(sourceOutcomes);
+  const sourceOutcomesForAgent = coverage.outcomes.map((outcome) => {
+    const source = outcome.source.toLowerCase();
+    const sourceType = source.includes("social") || source.includes("reddit") || source.includes("community")
+      ? "SOCIAL_SIGNAL"
+      : source.includes("trusted") || source.includes("industry")
+        ? "INDEPENDENT_MEDIA"
+        : source.includes("github") || source.includes("official")
+          ? "OFFICIAL"
+          : "PRIMARY";
+    const providerId = source.includes("github")
+      ? "github-releases"
+      : source.includes("official update")
+        ? "official-update-pages"
+        : source.includes("trusted")
+          ? "trusted-media"
+          : source.includes("industry")
+            ? "industry-media"
+            : source.includes("reddit")
+              ? "reddit"
+              : source.includes("community")
+                ? "public-web"
+                : source.includes("social")
+                  ? "social-access"
+                  : "primary-web-search";
+    return {
+      sourceType,
+      providerId,
+      executed: outcome.searched,
+      resultCount: outcome.resultCount,
+      newEvidenceCount: outcome.resultCount,
+      newClaimCount: 0,
+      reliabilityGain: sourceType === "OFFICIAL" ? 90 : sourceType === "PRIMARY" ? 80 : 60,
+      conflictReduction: 0,
+    };
+  });
   return {
     signals: presentation.signals,
     status: coverage.outcomes.map((outcome) => ({
@@ -1353,5 +1417,6 @@ export async function runResearchPipeline(
     fetchedAt: new Date().toISOString(),
     dataMode: "live",
     lastCheckedAt: new Date().toISOString(),
+    sourceOutcomes: sourceOutcomesForAgent,
   };
 }

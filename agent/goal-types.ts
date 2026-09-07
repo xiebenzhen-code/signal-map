@@ -1,0 +1,62 @@
+export type GoalStatus = "active" | "waiting" | "blocked" | "completed" | "abandoned";
+export type GoalTransition = {
+  goalId: string;
+  previousStatus: GoalStatus;
+  newStatus: GoalStatus;
+  completedCriteria: string[];
+  remainingCriteria: string[];
+  selectedNextTasks: string[];
+  blockingReason?: string;
+  relatedAgentRunIds: string[];
+  timestamp: string;
+};
+export type GoalTaskMetadata = {
+  taskId: string;
+  objective: string;
+  type: string;
+  status: string;
+  resultSummary?: string;
+  failureReason?: string;
+  supportingEvidenceIds?: string[];
+};
+export type ResumeCondition = {
+  type: "TIME" | "POLL" | "EVENT" | "MANUAL";
+  reason: string;
+  target: string;
+  nextCheckAt?: string;
+  expiresAt?: string;
+};
+export type GoalWatchMetadata = {
+  resumeCondition: ResumeCondition;
+  lastCheckedAt?: string;
+  nextCheckAt?: string;
+  consecutiveNoChangeCount: number;
+  lastTriggerAt?: string;
+  watchStatus: "waiting" | "ready" | "expired" | "error";
+  lastCheckOutcome?: "not_checked" | "no_change" | "condition_met" | "temporary_failure" | "permanent_failure" | "expired" | "event_ignored";
+  leaseOwner?: string;
+  leaseExpiresAt?: string;
+  schedulerLastRunAt?: string;
+  schedulerFailureCount?: number;
+  schedulerLastErrorSummary?: string;
+};
+export type Goal = {
+  id: string;
+  userId: string;
+  filterId: string;
+  objective: string;
+  status: GoalStatus;
+  successCriteria: string[];
+  openQuestions: string[];
+  taskIds: string[];
+  completedTaskIds: string[];
+  taskMetadata?: GoalTaskMetadata[];
+  completedCriteria: string[];
+  remainingCriteria: string[];
+  currentSummary?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  lastTransition?: GoalTransition;
+  watch?: GoalWatchMetadata;
+};

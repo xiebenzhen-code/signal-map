@@ -1,9 +1,9 @@
-import { localBrowserAdapter } from "../connections/xiaohongshu/local-browser-adapter";
-import { officialOAuthAdapter } from "../connections/xiaohongshu/official-oauth-adapter";
+import { localBrowserAdapter } from "../connections/xiaohongshu/local-browser-adapter.ts";
+import { officialOAuthAdapter } from "../connections/xiaohongshu/official-oauth-adapter.ts";
 import type {
   SocialProvider,
   XiaohongshuConnectionAdapter,
-} from "./types";
+} from "./types.ts";
 
 function connection(): XiaohongshuConnectionAdapter {
   return process.env.XHS_CONNECTION_ADAPTER === "oauth"

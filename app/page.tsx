@@ -31,6 +31,7 @@ import {
   runInformation,
   selectCurrentInformationRun,
 } from "@/information/run-information";
+import { createResearchRequest } from "@/information/research-request";
 import { selectTodayPresentation } from "@/information/today-selection";
 import type {
   ActiveKnowledgeContext,
@@ -112,24 +113,6 @@ const navItems: Array<{ id: Page; label: string; icon: typeof Target }> = [
   { id: "settings", label: "设置", icon: Settings },
 ];
 
-function liveResearchParams(knowledge: ActiveKnowledgeContext) {
-  return new URLSearchParams({
-    identity: knowledge.identity,
-    industry: knowledge.industry,
-    focusAreas: knowledge.focusAreas.join("\n"),
-    currentQuestions: knowledge.currentQuestions.join("\n"),
-    knownInformation: knowledge.knownInformation.join("\n"),
-    informationGaps: knowledge.informationGaps.join("\n"),
-    trackedEntities: knowledge.trackedEntities.join("\n"),
-    trackedEvents: knowledge.trackedEvents.join("\n"),
-    userJudgements: knowledge.userJudgements.join("\n"),
-    evidenceHistory: "",
-    freshnessWindow: knowledge.freshnessWindow,
-    sourceScope: knowledge.sourceScope,
-    customSources: knowledge.customSources.join("\n"),
-  });
-}
-
 const feedbackLabels: Record<Feedback, string> = {
   changed_view: "改变了我的看法",
   added_context: "补充了有用背景",
@@ -166,7 +149,11 @@ function unique(values: string[]) {
 }
 
 function textToList(value: string) {
-  return unique(value.split(/[\n,，；;]/));
+  return unique(value.split(/\r?\n/));
+}
+
+function textToDraftLines(value: string) {
+  return value.split(/\r?\n/);
 }
 
 function reliabilityLabel(score: number) {
@@ -185,8 +172,8 @@ function EventCard({
   compact?: boolean;
 }) {
   return (
-    <article className="rounded-[24px] border border-[#e6e8e5] bg-white p-5 shadow-[0_8px_30px_rgba(28,36,50,.035)] sm:p-6">
-      <div className="flex items-center justify-between gap-3 text-xs font-black">
+    <article className="signal-event-card sm:p-6">
+      <div className="signal-card-kicker flex items-center justify-between gap-3">
         <span className="text-[#2359ff]">
           {eventStatusLabels[event.eventStatus]}
           {event.dataOrigin === "demo" ? " · 演示数据" : ""}
@@ -194,11 +181,11 @@ function EventCard({
         <span className="shrink-0 text-[#7d8691]">{event.time}</span>
       </div>
 
-      <h3 className="mt-4 text-[19px] font-black leading-7 tracking-[-.035em] text-[#142035] sm:text-[22px] sm:leading-8">
+      <h3 className="signal-event-title mt-4 text-[20px] leading-7 sm:text-[23px] sm:leading-8">
         {event.title}
       </h3>
-      <div className="mt-4 rounded-2xl bg-[#f6f7f4] p-4">
-        <p className="text-[10px] font-black uppercase tracking-[.12em] text-[#8a929d]">
+      <div className="signal-why mt-4 rounded-xl p-4">
+        <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[#68727f]">
           为什么值得关注
         </p>
         <p className="mt-2 text-sm font-semibold leading-6 text-[#4f5968]">
@@ -206,7 +193,7 @@ function EventCard({
         </p>
       </div>
 
-      <div className="mt-5 flex items-center justify-between gap-4 border-t border-[#eceeea] pt-4 text-xs text-[#68727f]">
+      <div className="signal-card-meta mt-5 flex items-center justify-between gap-4 border-t pt-4 text-xs text-[#68727f]">
         <span className="font-black text-[#172033]">{reliabilityLabel(event.reliabilityScore)}</span>
         <span>{event.sourceCount} 个来源</span>
       </div>
@@ -214,7 +201,7 @@ function EventCard({
       {!compact && (
         <button
           onClick={onOpen}
-          className="mt-4 flex min-h-12 w-full items-center justify-between rounded-xl bg-[#172033] px-4 text-sm font-black text-white"
+          className="signal-primary-action mt-4 flex min-h-12 w-full items-center justify-between rounded-xl px-4 text-sm font-semibold"
         >
           查看证据与判断依据
           <ChevronRight size={15} />
@@ -223,7 +210,7 @@ function EventCard({
       {compact && (
         <button
           onClick={onOpen}
-          className="mt-3 min-h-11 text-sm font-black text-[#2359ff]"
+          className="signal-inline-action mt-3 min-h-11 text-sm font-semibold"
         >
           查看事件证据 →
         </button>
@@ -234,7 +221,7 @@ function EventCard({
 
 function EmptyToday({ onRefresh }: { onRefresh: () => void }) {
   return (
-    <section className="mt-14 rounded-[30px] border border-[#e6e8e5] bg-white px-6 py-14 text-center sm:px-10">
+    <section className="signal-empty mt-14 rounded-[28px] border px-6 py-14 text-center sm:px-10">
       <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-emerald-50 text-emerald-700">
         <Check size={22} />
       </div>
@@ -581,7 +568,8 @@ function FilterBuilder({
       <span className="text-xs font-black text-[#172033]">{label}</span>
       <textarea
         value={draft[field].join("\n")}
-        onChange={(event) => setDraft((current) => ({ ...current, [field]: textToList(event.target.value) }))}
+        onChange={(event) => setDraft((current) => ({ ...current, [field]: textToDraftLines(event.target.value) }))}
+        onBlur={(event) => setDraft((current) => ({ ...current, [field]: textToList(event.target.value) }))}
         placeholder={placeholder}
         className="mt-2 min-h-24 w-full resize-none rounded-2xl border border-[#dde2e7] bg-white p-4 text-base leading-6 outline-none focus:border-[#7e9cff]"
       />
@@ -589,28 +577,28 @@ function FilterBuilder({
   );
 
   return (
-    <main className="min-h-screen bg-[#fbfbf8] px-4 pb-10 pt-7 text-[#172033] sm:px-6">
+    <main className="signal-onboarding min-h-screen px-4 pb-10 pt-7 text-[#172033] sm:px-6">
       <section className="mx-auto max-w-[620px]">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <span className="grid h-10 w-10 place-items-center rounded-2xl bg-[#2359ff] text-[11px] font-black text-white">SM</span>
+            <span className="signal-mark grid h-10 w-10 place-items-center rounded-xl text-[11px] font-bold text-white">SM</span>
             <div>
-              <p className="text-[9px] font-black uppercase tracking-[.16em] text-[#2359ff]">先建立过滤器</p>
-              <p className="text-sm font-black">Signal Map</p>
+              <p className="signal-eyebrow">先建立过滤器</p>
+              <p className="text-sm font-semibold">Signal Map</p>
             </div>
           </div>
           {onCancel && <button onClick={onCancel} className="text-xs font-bold text-[#727b87]">取消</button>}
         </div>
 
         <div className="mt-9 flex items-center justify-between">
-          <p className="text-[11px] font-black uppercase tracking-[.14em] text-[#2359ff]">第 {step + 1} 步，共 4 步</p>
+          <p className="signal-eyebrow">第 {step + 1} 步，共 4 步</p>
           <p className="text-xs font-bold text-[#858e99]">{["身份", "关注重点", "已有认知", "信息缺口"][step]}</p>
         </div>
         <div className="mt-3 grid grid-cols-4 gap-2" aria-label={`引导进度：第 ${step + 1} 步，共 4 步`}>
           {[0, 1, 2, 3].map((index) => <span key={index} className={`h-1.5 rounded-full ${index <= step ? "bg-[#2359ff]" : "bg-[#e3e6e8]"}`} />)}
         </div>
 
-        <h1 className="mt-8 text-[36px] font-black leading-[1.06] tracking-[-.055em] sm:text-5xl">
+        <h1 className="signal-display mt-8 text-[38px] leading-[1.04] sm:text-5xl">
           {["先从你是谁开始。", "你正在关注什么？", "你已经知道什么？", "最后，告诉我缺什么。"][step]}
         </h1>
         <p className="mt-4 text-sm leading-6 text-[#707986]">
@@ -638,7 +626,7 @@ function FilterBuilder({
           </button>
         )}
 
-        <div className="mt-7 grid gap-5 rounded-[28px] border border-[#e2e5e8] bg-[#f5f6f3] p-5 sm:p-7">
+        <div className="signal-onboarding-form mt-7 grid gap-5 rounded-[22px] border p-5 sm:p-7">
           {step === 0 && <>
             <label><span className="text-sm font-black">过滤器名称</span><input value={draft.filterName} onChange={(event) => setDraft((current) => ({ ...current, filterName: event.target.value }))} placeholder="例如：我的 AI 产品雷达" className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none focus:border-[#7e9cff]" /></label>
             <label><span className="text-sm font-black">你的身份</span><input value={draft.identity} onChange={(event) => setDraft((current) => ({ ...current, identity: event.target.value }))} placeholder="你是谁 / 正在做什么" className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none focus:border-[#7e9cff]" /></label>
@@ -731,7 +719,7 @@ export default function HomePage() {
   const [newQuestion, setNewQuestion] = useState("");
   const [newEntity, setNewEntity] = useState("");
   const [newJudgement, setNewJudgement] = useState("");
-  const [knowledgeDrafts, setKnowledgeDrafts] = useState<Partial<Record<KnowledgeListField, string>>>({});
+  const [knowledgeDrafts, setKnowledgeDrafts] = useState<Record<string, string>>({});
   const activeFilter = useMemo(
     () => filters.find((filter) => filter.id === activeFilterId) || null,
     [activeFilterId, filters],
@@ -778,10 +766,6 @@ export default function HomePage() {
       researchContextRevision: activeContext?.researchContextRevision ?? 0,
     };
   }, [activeContext?.researchContextRevision, activeFilterId]);
-  useEffect(() => {
-    setKnowledgeDrafts({});
-  }, [activeFilterId]);
-
   const setKnowledge = useCallback((updater: (current: KnowledgeView) => KnowledgeView) => {
     if (!activeFilter || !activeKnowledge || !activeFilterId) return;
     const nextView = updater(knowledge);
@@ -846,8 +830,10 @@ export default function HomePage() {
         filterId: filter.id,
         researchContextRevision: state.researchContextRevision,
         runLive: async () => {
-          const request = await fetch(`/api/signals?${liveResearchParams(state)}`, { cache: "no-store" });
-          if (!request.ok) throw new Error("Live Web 暂时不可用");
+          if (new URLSearchParams(window.location.search).get("demo") === "true") return demoProvider.run({ filter, knowledge: state });
+          const { url, ...requestInit } = createResearchRequest(state);
+          const request = await fetch(url, requestInit);
+          if (!request.ok) throw Object.assign(new Error(request.status === 401 || request.status === 403 ? "请先使用 Alpha 测试账号登录" : "Live Web 暂时不可用"), { status: request.status });
           return (await request.json()) as InformationRunPayload;
         },
         runDemo: () => demoProvider.run({ filter, knowledge: state }),
@@ -1136,8 +1122,8 @@ export default function HomePage() {
   }).format(new Date());
 
   const renderToday = () => (
-    <main className="mx-auto max-w-[760px] px-4 pb-32 pt-8 sm:px-6 sm:pt-12">
-      <button onClick={() => navigate("settings")} className="flex min-h-14 w-full items-center justify-between rounded-2xl border border-[#e1e5e8] bg-white px-4 text-left">
+    <main className="signal-page mx-auto max-w-[760px] px-4 pb-32 pt-8 sm:px-6 sm:pt-12">
+      <button onClick={() => navigate("settings")} className="signal-filter-switch flex min-h-14 w-full items-center justify-between rounded-xl border px-4 text-left">
         <span>
           <span className="block text-[10px] font-black uppercase tracking-[.12em] text-[#7b8490]">当前过滤器</span>
           <span className="mt-1 block text-sm font-black text-[#172033]">{activeFilter?.filterName}</span>
@@ -1147,23 +1133,23 @@ export default function HomePage() {
 
       <div className="mt-8 flex items-start justify-between gap-4">
         <div>
-          <p className="text-[11px] font-black uppercase tracking-[.16em] text-[#2359ff]">{todayDate}</p>
-          <h1 className="mt-2 text-4xl font-black tracking-[-.055em] text-[#172033] sm:text-5xl">今日</h1>
-          {!loading && response && <p className="mt-3 text-2xl font-black tracking-[-.04em] text-[#172033]">今天只需阅读 {todayPresentation.items.length} 条。</p>}
+          <p className="signal-eyebrow">{todayDate}</p>
+          <h1 className="signal-display mt-2 text-5xl sm:text-6xl">今日</h1>
+          {!loading && response && <p className="mt-3 text-[22px] font-semibold tracking-[-.045em] text-[#172033]">今天只需阅读 {todayPresentation.items.length} 条。</p>}
           <p className="mt-3 max-w-xl text-sm leading-6 text-[#737c88]">只保留可能改变你判断、且有证据支持的新变化。</p>
         </div>
         <button
           onClick={() => activeFilter && activeContext && void refreshToday(activeContext, activeFilter)}
           disabled={loading}
           aria-label="重新过滤"
-          className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-[#dfe3e7] bg-white text-[#657080] disabled:opacity-40"
+          className="signal-icon-button grid h-11 w-11 shrink-0 place-items-center rounded-full border disabled:opacity-40"
         >
           <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
         </button>
       </div>
 
       {loading && (
-        <section className="mt-12 rounded-[28px] border border-[#e5e7e4] bg-white p-8 text-center">
+          <section className="signal-empty mt-12 rounded-[28px] border p-8 text-center">
           <Clock3 className="mx-auto animate-pulse text-[#2359ff]" size={24} />
           <p className="mt-4 text-sm font-black">正在比较你的认知状态与新证据…</p>
           <p className="mt-2 text-xs text-[#7b8490]">先验证，后判断；没有可靠证据就不生成事实。</p>
@@ -1239,9 +1225,9 @@ export default function HomePage() {
       ) : null;
 
     return (
-      <main className="mx-auto max-w-[760px] px-4 pb-32 pt-8 sm:px-6 sm:pt-12">
-        <p className="text-[10px] font-black uppercase tracking-[.18em] text-[#2359ff]">筛选后的事件 · 不是信息流</p>
-        <h1 className="mt-2 text-4xl font-black tracking-[-.055em]">信息</h1>
+    <main className="signal-page mx-auto max-w-[760px] px-4 pb-32 pt-8 sm:px-6 sm:pt-12">
+        <p className="signal-eyebrow">筛选后的事件 · 不是信息流</p>
+        <h1 className="signal-display mt-2 text-5xl">信息</h1>
         <p className="mt-3 text-sm leading-6 text-[#737c88]">只展示经过聚合、验证和认知比较后仍具有价值的事件。</p>
 
         {response && (
@@ -1308,9 +1294,9 @@ export default function HomePage() {
       clear("");
     };
     return (
-      <main className="mx-auto max-w-[760px] px-4 pb-32 pt-8 sm:px-6 sm:pt-12">
-        <p className="text-[11px] font-black uppercase tracking-[.16em] text-[#2359ff]">个人认知记忆</p>
-        <h1 className="mt-2 text-4xl font-black tracking-[-.055em]">资料库</h1>
+      <main className="signal-page mx-auto max-w-[760px] px-4 pb-32 pt-8 sm:px-6 sm:pt-12">
+        <p className="signal-eyebrow">个人认知记忆</p>
+        <h1 className="signal-display mt-2 text-5xl">资料库</h1>
         <p className="mt-3 text-sm leading-6 text-[#737c88]">保存证据、跟踪事件，并维护你自己的问题与判断。</p>
 
         <div className="mt-7 grid grid-cols-4 rounded-2xl bg-[#eceeea] p-1">
@@ -1350,25 +1336,29 @@ export default function HomePage() {
     field: KnowledgeListField,
     label: string,
     hint: string,
-  ) => (
-    <label className="block">
-      <span className="text-sm font-black">{label}</span>
-      <span className="ml-2 text-xs text-[#939aa3]">{hint}</span>
-      <textarea
-        value={knowledgeDrafts[field] ?? knowledge[field].join("\n")}
-        onChange={(event) => {
-          const value = event.target.value;
-          setKnowledgeDrafts((current) => ({ ...current, [field]: value }));
-          setKnowledge((current) => ({ ...current, [field]: textToList(value) }));
-        }}
-        onBlur={(event) => {
-          const normalized = textToList(event.target.value).join("\n");
-          setKnowledgeDrafts((current) => ({ ...current, [field]: normalized }));
-        }}
-        className="mt-2 min-h-24 w-full resize-none rounded-2xl border border-[#dfe3e7] bg-white p-4 text-base leading-6 outline-none focus:border-[#8facff]"
-      />
-    </label>
-  );
+  ) => {
+    const draftKey = `${activeFilterId ?? "inactive"}:${field}`;
+
+    return (
+      <label className="block">
+        <span className="text-sm font-black">{label}</span>
+        <span className="ml-2 text-xs text-[#939aa3]">{hint}</span>
+        <textarea
+          value={knowledgeDrafts[draftKey] ?? knowledge[field].join("\n")}
+          onChange={(event) => {
+            const value = event.target.value;
+            setKnowledgeDrafts((current) => ({ ...current, [draftKey]: value }));
+            setKnowledge((current) => ({ ...current, [field]: textToList(value) }));
+          }}
+          onBlur={(event) => {
+            const normalized = textToList(event.target.value).join("\n");
+            setKnowledgeDrafts((current) => ({ ...current, [draftKey]: normalized }));
+          }}
+          className="mt-2 min-h-24 w-full resize-none rounded-2xl border border-[#dfe3e7] bg-white p-4 text-base leading-6 outline-none focus:border-[#8facff]"
+        />
+      </label>
+    );
+  };
 
   const renderSettings = () => {
     const sourceRows = [
@@ -1378,12 +1368,12 @@ export default function HomePage() {
       ["X", connections.find((item) => item.id === "x")?.state === "connected" ? "已连接" : "未配置"],
       ["小红书", connections.find((item) => item.id === "xiaohongshu")?.state === "connected" ? "已连接" : connections.find((item) => item.id === "xiaohongshu")?.state === "login_required" ? "需要登录" : "不可用"],
     ];
-    const accordionClass = "rounded-[22px] border border-[#e3e6e8] bg-white p-5";
-    const summaryClass = "flex min-h-11 cursor-pointer list-none items-center justify-between text-base font-black";
+    const accordionClass = "signal-accordion";
+    const summaryClass = "signal-accordion-summary";
     return (
-      <main className="mx-auto max-w-[760px] px-4 pb-32 pt-8 sm:px-6 sm:pt-12">
-        <p className="text-[11px] font-black uppercase tracking-[.16em] text-[#2359ff]">默认仅本地保存</p>
-        <h1 className="mt-2 text-4xl font-black tracking-[-.055em]">设置</h1>
+      <main className="signal-page mx-auto max-w-[760px] px-4 pb-32 pt-8 sm:px-6 sm:pt-12">
+        <p className="signal-eyebrow">默认仅本地保存</p>
+        <h1 className="signal-display mt-2 text-5xl">设置</h1>
         <p className="mt-3 text-sm leading-6 text-[#737c88]">管理你的过滤器、认知状态和本地测试数据。</p>
 
         <div className="mt-8 grid gap-3">
@@ -1434,7 +1424,7 @@ export default function HomePage() {
 
   if (!hydrated) {
     return (
-      <div className="grid min-h-screen place-items-center bg-[#fbfbf8] text-[#172033]">
+      <div className="signal-shell grid min-h-screen place-items-center text-[#172033]">
         <div className="text-center">
           <RefreshCw className="mx-auto animate-spin text-[#2359ff]" size={20} />
           <p className="mt-3 text-xs font-black">正在恢复本地认知状态…</p>
@@ -1453,14 +1443,14 @@ export default function HomePage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#fbfbf8] text-[#172033]">
-      <header className="sticky top-0 z-30 border-b border-[#e6e8e5] bg-[#fbfbf8]/92 backdrop-blur-xl">
+    <div className="signal-shell text-[#172033]">
+      <header className="signal-topbar sticky top-0 z-30 border-b backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 sm:px-6">
           <button onClick={() => navigate("today")} className="flex items-center gap-3">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#2359ff] text-[10px] font-black text-white">SM</span>
-            <span className="text-sm font-black tracking-[-.02em]">Signal Map</span>
+            <span className="signal-mark grid h-9 w-9 place-items-center rounded-lg text-[10px] font-bold text-white">SM</span>
+            <span className="text-sm font-semibold tracking-[-.02em]">Signal Map</span>
           </button>
-          <nav className="hidden items-center gap-1 rounded-full border border-[#e0e3e6] bg-white p-1 sm:flex">
+          <nav className="signal-desktop-nav hidden items-center gap-1 rounded-full border p-1 sm:flex">
             {navItems.map(({ id, label }) => (
               <button key={id} onClick={() => navigate(id)} className={`min-h-11 rounded-full px-4 text-xs font-black ${page === id ? "bg-[#172033] text-white" : "text-[#747d88]"}`}>
                 {label}
@@ -1476,7 +1466,7 @@ export default function HomePage() {
       {page === "library" && renderLibrary()}
       {page === "settings" && renderSettings()}
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-[#e1e4e7] bg-white/96 px-2 pb-[max(.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl sm:hidden">
+      <nav className="signal-bottom-nav fixed inset-x-0 bottom-0 z-40 border-t px-2 pb-[max(.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl sm:hidden">
         <div className="grid grid-cols-4">
           {navItems.map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => navigate(id)} className={`grid min-h-12 place-items-center gap-1 py-1 text-[10px] font-bold ${page === id ? "text-[#2359ff]" : "text-[#8b929c]"}`}>

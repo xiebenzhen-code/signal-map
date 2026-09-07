@@ -40,7 +40,11 @@ browser-profile/
 .vercel
 next-env.d.ts
 /dist/
+/dist-api/
+/dist-edgeone-drop/
 /.wrangler/
 /outputs/
 /work/
+.edgeone/
+cyber-rx-dist.zip
 *.tsbuildinfo

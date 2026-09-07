@@ -15,7 +15,7 @@ export type VerificationStatus =
 
 type SourceRole = "discovery" | "verification";
 
-type EvidenceSource = {
+export type EvidenceSource = {
   sourceUrl: string;
   publisher: string;
   publishedAt?: string;
@@ -57,6 +57,9 @@ export type QueryPlan = {
   searchCombinations: string[];
   retrievalWindows: Array<"24h" | "3d" | "7d" | "30d">;
   requestedFreshnessWindow: "24h" | "3d" | "7d" | "30d";
+  selectedSourceType?: string;
+  fallbackSourceTypes?: string[];
+  sourceSelectionReason?: string;
 };
 
 export type PipelineCounts = {
@@ -193,6 +196,18 @@ export type ResearchResponse = {
   fetchedAt: string;
   dataMode: "live" | "demo" | "mixed";
   lastCheckedAt?: string;
+  sourceOutcomes?: ResearchSourceOutcome[];
+};
+
+type ResearchSourceOutcome = {
+  sourceType: string;
+  providerId: string;
+  executed: boolean;
+  resultCount: number;
+  newEvidenceCount: number;
+  newClaimCount: number;
+  reliabilityGain: number;
+  conflictReduction: number;
 };
 
 export type ResearchInput = {
@@ -207,4 +222,6 @@ export type ResearchInput = {
   userJudgements: string;
   evidenceHistory: string;
   freshnessWindow: string;
+  sourceScope?: string;
+  customSources?: string;
 };

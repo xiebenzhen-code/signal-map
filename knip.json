@@ -2,14 +2,21 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": [
     "app/**/*.{ts,tsx}",
+    "agent/**/*.ts",
+    "backend/**/*.ts",
+    "scripts/**/*.{mjs,ts}",
     "tests/**/*.test.ts",
     "vite.config.ts"
   ],
   "project": [
     "app/**/*.{ts,tsx,css}",
+    "auth/**/*.ts",
+    "agent/**/*.ts",
+    "backend/**/*.ts",
     "information/**/*.ts",
     "lib/**/*.ts",
     "research/**/*.ts",
+    "scripts/**/*.{mjs,ts}",
     "social/**/*.ts",
     "tests/**/*.ts"
   ],

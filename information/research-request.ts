@@ -1,0 +1,25 @@
+import type { ActiveKnowledgeContext } from "./types.ts";
+
+export function createResearchRequest(knowledge: ActiveKnowledgeContext): RequestInit & { url: string } {
+  return {
+    url: "/api/signals",
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify({
+      identity: knowledge.identity,
+      industry: knowledge.industry,
+      focusAreas: knowledge.focusAreas,
+      currentQuestions: knowledge.currentQuestions,
+      knownInformation: knowledge.knownInformation,
+      informationGaps: knowledge.informationGaps,
+      trackedEntities: knowledge.trackedEntities,
+      trackedEvents: knowledge.trackedEvents,
+      userJudgements: knowledge.userJudgements,
+      evidenceHistory: "",
+      freshnessWindow: knowledge.freshnessWindow,
+      sourceScope: knowledge.sourceScope,
+      customSources: knowledge.customSources,
+    }),
+  };
+}

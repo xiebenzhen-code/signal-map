@@ -95,7 +95,7 @@ test("duplicate sources are removed before event clustering", () => {
   const result = runFilterEngine({
     filter: filter({ focusAreas: ["Codex"] }),
     knowledge: knowledge(),
-  });
+  }, undefined, regressionNow);
   const event = result.signals.find((signal) => signal.id === "demo-codex-workflow-update");
   assert.ok(event);
   assert.equal(event.sourceCount, 2);
@@ -106,11 +106,11 @@ test("known information lowers novelty enough to remove duplicate attention", ()
   const unknown = runFilterEngine({
     filter: filter({ focusAreas: ["Codex"] }),
     knowledge: knowledge(),
-  });
+  }, undefined, regressionNow);
   const known = runFilterEngine({
     filter: filter({ focusAreas: ["Codex"] }),
     knowledge: knowledge({ knownInformation: ["Codex 更新多步骤任务协作与可审查结果"] }),
-  });
+  }, undefined, regressionNow);
   const freshEvent = unknown.signals.find((signal) => signal.id === "demo-codex-workflow-update");
   const knownEvent = known.signals.find((signal) => signal.id === "demo-codex-workflow-update");
   assert.ok(freshEvent);
@@ -133,6 +133,7 @@ test("an information gap improves relevance", () => {
   const withoutGap = runFilterEngine(
     { filter: filter(), knowledge: knowledge() },
     dataset,
+    regressionNow,
   );
   const withGap = runFilterEngine(
     {
@@ -140,6 +141,7 @@ test("an information gap improves relevance", () => {
       knowledge: knowledge({ informationGaps: ["AI 生成内容标识"] }),
     },
     dataset,
+    regressionNow,
   );
   const baseline = withoutGap.signals[0];
   const matched = withGap.signals[0];
