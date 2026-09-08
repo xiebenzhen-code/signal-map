@@ -174,6 +174,13 @@ export async function handleConnections() {
   );
 }
 
+export function handleRuntimeStatus() {
+  return Response.json({
+    databaseUrlPresent: Boolean(process.env.DATABASE_URL),
+    deepseekApiKeyPresent: Boolean(process.env.DEEPSEEK_API_KEY),
+  }, { headers: { "Cache-Control": "no-store" } });
+}
+
 export const handleResearchPlan = withSession(async (request: Request) => {
   if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
   if (!await resolveAuthContext(request)) return Response.json({ error: "Unauthorized" }, { status: 401 });
