@@ -1,5 +1,6 @@
 import type { LiveItem } from "../social/providers/index.ts";
 import type { SourceCoverage } from "./source-coverage.ts";
+import type { IntentClassification, IntentMappedOutput, SourceProfile } from "../intent/types.ts";
 
 export type SourceType =
   | "primary"
@@ -197,6 +198,10 @@ export type ResearchResponse = {
   dataMode: "live" | "demo" | "mixed";
   lastCheckedAt?: string;
   sourceOutcomes?: ResearchSourceOutcome[];
+  intent?: IntentClassification;
+  sourceProfile?: SourceProfile;
+  outputMode?: SourceProfile["outputMode"];
+  intentOutput?: IntentMappedOutput;
 };
 
 type ResearchSourceOutcome = {

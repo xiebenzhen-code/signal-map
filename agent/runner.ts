@@ -7,6 +7,9 @@ import { persistResearchRecords, updateKnowledgeFromChanges } from "./knowledge-
 import { createResearchPlan } from "./query-planner.ts";
 import { chooseResearchStrategy } from "./research-policy.ts";
 import { selectSource } from "./source-selector.ts";
+import { classifyIntent } from "../intent/classifier.ts";
+import { mapIntentOutput } from "../intent/output-mapping.ts";
+import { sourceProfileForIntent } from "../intent/source-profiles.ts";
 import type { AgentRunOptions, AgentRunResult, AgentState, AgentStep, AgentTraceEntry, ResearchStrategy, SourceOutcome } from "./types.ts";
 
 const now = () => new Date().toISOString();
@@ -96,6 +99,14 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     : null;
   const relatedKnowledge = persistedKnowledge.map((record) => record.text);
   add("RETRIEVE", "completed", { query: options.userQuery ?? options.input.currentQuestions }, relatedKnowledge.join("\n") || "none");
+  const intent = classifyIntent({
+    userQuery: (options.userQuery ?? options.input.currentQuestions) || options.input.industry,
+    filterContext: options.input,
+    relatedKnowledge,
+    currentGoal: options.currentGoal,
+  });
+  const sourceProfile = sourceProfileForIntent(intent.primaryIntent);
+  add("INTENT", "completed", { query: options.userQuery ?? options.input.currentQuestions }, { intent, sourceProfile }, intent.reason);
 
   const researchInput = {
     ...options.input,
@@ -108,9 +119,10 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
   const bootstrapSelection = selectSource({
     strategy: bootstrapStrategy,
     availableSourceCapabilities: options.availableSourceCapabilities,
+    sourceProfile,
   });
   add("SOURCE_SELECTOR", "completed", { round: 1, strategy: bootstrapStrategy }, bootstrapSelection, bootstrapSelection.reason);
-  let plan = createResearchPlan(researchInput, 1, maxQueries, relatedKnowledge, bootstrapStrategy, bootstrapSelection);
+  let plan = createResearchPlan(researchInput, 1, maxQueries, relatedKnowledge, bootstrapStrategy, bootstrapSelection, intent, sourceProfile);
   plan = await applyModelPlanning({
     plan,
     adapter: options.modelAdapter,
@@ -142,11 +154,16 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
         reason: selectedPlan.sourceSelectionReason,
       })))(researchInput, currentPlan, round);
       response = await executeResearch(plan);
+      response.intent = intent;
+      response.sourceProfile = sourceProfile;
+      response.outputMode = sourceProfile.outputMode;
+      response.intentOutput = mapIntentOutput(response, sourceProfile);
       if (!response.signals.length && plan.fallbackSourceTypes?.length) {
-        const fallbackSelection = selectSource({
-          strategy: plan.strategy ?? "INITIAL",
-          availableSourceCapabilities: options.availableSourceCapabilities,
-          previousSourceOutcomes: [
+          const fallbackSelection = selectSource({
+            strategy: plan.strategy ?? "INITIAL",
+            availableSourceCapabilities: options.availableSourceCapabilities,
+            sourceProfile,
+            previousSourceOutcomes: [
             ...previousSourceOutcomes,
             {
               sourceType: plan.selectedSourceType!,
@@ -160,7 +177,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
           ],
         });
         if (fallbackSelection.primarySourceType && fallbackSelection.primarySourceType !== plan.selectedSourceType) {
-          plan = createResearchPlan(researchInput, round, maxQueries, relatedKnowledge, plan.strategy, fallbackSelection);
+          plan = createResearchPlan(researchInput, round, maxQueries, relatedKnowledge, plan.strategy, fallbackSelection, intent, sourceProfile);
           plan = await applyModelPlanning({
             plan,
             adapter: options.modelAdapter,
@@ -171,6 +188,10 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
           });
           add("SOURCE_SELECTOR", "completed", { round, fallback: true }, fallbackSelection, "首选来源无有效结果，执行 fallback 来源");
           response = await executeResearch(plan);
+          response.intent = intent;
+          response.sourceProfile = sourceProfile;
+          response.outputMode = sourceProfile.outputMode;
+          response.intentOutput = mapIntentOutput(response, sourceProfile);
         }
       }
     } catch (error) {
@@ -211,6 +232,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       strategy: policy.strategy,
       availableSourceCapabilities: options.availableSourceCapabilities,
       previousSourceOutcomes,
+      sourceProfile,
     });
     add("SOURCE_SELECTOR", policy.strategy === "STOP" ? "skipped" : "completed", { round, strategy: policy.strategy }, sourceSelection, sourceSelection.reason);
     trace[trace.length - 1].selectedSourceType = sourceSelection.primarySourceType;
@@ -283,7 +305,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
         return { status: "failed", rounds, response, plan, evaluation, knowledgeChanges: allKnowledgeChanges, attention: [], steps, trace };
       }
     }
-    plan = createResearchPlan(researchInput, round + 1, maxQueries, relatedKnowledge, policy.strategy, sourceSelection);
+    plan = createResearchPlan(researchInput, round + 1, maxQueries, relatedKnowledge, policy.strategy, sourceSelection, intent, sourceProfile);
     plan = await applyModelPlanning({
       plan,
       adapter: options.modelAdapter,

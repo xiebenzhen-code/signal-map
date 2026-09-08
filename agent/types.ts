@@ -1,4 +1,5 @@
 import type { ResearchInput, ResearchResponse, ResearchSignal } from "../research/types.ts";
+import type { IntentClassification, SourceProfile } from "../intent/types.ts";
 import type {
   AuthenticatedFilterContext,
   ClaimRepository,
@@ -10,6 +11,7 @@ import type {
 
 export type AgentState =
   | "UNDERSTAND"
+  | "INTENT"
   | "RETRIEVE"
   | "PLAN"
   | "RESEARCH"
@@ -134,6 +136,8 @@ export type AgentTraceEntry = {
   fallbackSourceTypes?: SourceSelectionType[];
   sourceSelectionReason?: string;
   sourceOutcome?: SourceOutcome;
+  intent?: IntentClassification;
+  sourceProfile?: SourceProfile;
   timestamp: string;
 };
 
@@ -171,6 +175,7 @@ export type AgentRunOptions = {
   maxEvidenceItems?: number;
   maxExecutionTimeMs?: number;
   availableSourceCapabilities?: SourceCapability[];
+  currentGoal?: { type?: string; objective?: string };
   modelAdapter?: {
     status: "configured" | "not_configured" | "error";
     planResearch(input: {

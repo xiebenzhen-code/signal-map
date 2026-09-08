@@ -331,7 +331,7 @@ test("source selection reaches the next research plan and preserves fallback int
         : response([signal()]);
     },
   });
-  assert.equal(plans[0].selected, "GENERAL_WEB");
+  assert.equal(plans[0].selected, "OFFICIAL");
   assert.equal(plans[1].selected, "OFFICIAL");
 });
 
@@ -349,8 +349,8 @@ test("empty primary execution triggers an ordered fallback execution", async () 
     },
   });
   assert.equal(calls, 2);
-  assert.equal(selected[0], "GENERAL_WEB");
-  assert.equal(selected[1], "GENERAL_WEB");
-  assert.equal(selected[2], "OFFICIAL");
+  assert.equal(selected[0], "OFFICIAL");
+  assert.equal(selected[1], "OFFICIAL");
+  assert.equal(selected[2], "PRIMARY");
   assert.equal(result.status, "completed");
 });
