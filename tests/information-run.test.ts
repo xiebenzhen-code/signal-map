@@ -48,6 +48,16 @@ test("Live failure falls back honestly", async () => {
   assert.equal(result.generatedFromResearchContextRevision, 3);
 });
 
+test("production research errors do not silently substitute fixed demo results", async () => {
+  let calls = 0;
+  await assert.rejects(runInformation({
+    filterId: "ai", researchContextRevision: 3, allowDemoFallback: false,
+    runLive: async () => { throw new Error("Search unavailable"); },
+    runDemo: async () => { calls += 1; return payload({ dataMode: "demo" }); },
+  }), /Search unavailable/);
+  assert.equal(calls, 0);
+});
+
 test("auth failure never turns into a Guest Demo research result", async () => {
   let demoCalls = 0;
   await assert.rejects(runInformation({

@@ -301,6 +301,9 @@ export const handleAuthLogin = withSession(async (request: Request) => {
     ? await client.auth.signUp({ email, password })
     : await client.auth.signInWithPassword({ email, password });
   if (error) {
+    if (error.code === "email_not_confirmed") return Response.json({ error: "邮箱尚未验证，请完成注册验证后登录。", code: "email_not_confirmed" }, { status: 401 });
+    if (error.status === 429) return Response.json({ error: "尝试过于频繁，请稍后重试。", code: "rate_limited" }, { status: 429 });
+    if (error.code === "signup_disabled") return Response.json({ error: "当前站点尚未开放注册，请联系站点管理员创建测试账户。", code: "signup_disabled" }, { status: 403 });
     return Response.json({ error: action === "signup" ? "注册失败，请检查邮箱是否已注册或稍后重试" : "登录失败，请检查邮箱和密码" }, { status: action === "signup" ? 400 : 401 });
   }
   if (action === "signup" && data.user && !data.session) {

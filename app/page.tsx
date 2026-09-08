@@ -835,8 +835,10 @@ export default function HomePage() {
       const result = await runInformation({
         filterId: filter.id,
         researchContextRevision: state.researchContextRevision,
-        localOnly: !session.user,
+        localOnly: explicitDemo,
+        allowDemoFallback: false,
         runLive: async () => {
+          if (!session.user) throw new Error("尚未执行实时检索。请通过右上角登录 / 注册进入研究；不会使用演示样本替代实时消息。");
           const { url, ...requestInit } = createResearchRequest(state);
           const request = await fetch(url, requestInit);
           if (!request.ok) throw Object.assign(new Error(request.status === 401 || request.status === 403 ? "请先使用 Alpha 测试账号登录" : "Live Web 暂时不可用"), { status: request.status });
@@ -867,7 +869,7 @@ export default function HomePage() {
           : null;
         setProfile(snapshot.profile);
         setKnowledgeByFilterId(snapshot.knowledgeByFilterId);
-        setLastRunByFilterId(snapshot.lastRunByFilterId);
+        setLastRunByFilterId({});
         setLibrary(snapshot.library);
         setNotes(snapshot.notes);
         setFeedbackRecords(snapshot.feedback);
@@ -881,9 +883,7 @@ export default function HomePage() {
             filterId: restoredFilter.id,
             researchContextRevision: restoredContext.researchContextRevision,
           };
-          if (!selectCurrentInformationRun(snapshot.lastRunByFilterId, restoredFilter.id, restoredContext.researchContextRevision)) {
-            void refreshToday(restoredContext, restoredFilter);
-          }
+          void refreshToday(restoredContext, restoredFilter);
         }
       })
       .catch(() => setError("本地数据暂时无法读取，请检查浏览器是否允许 IndexedDB。"))
@@ -1165,9 +1165,10 @@ export default function HomePage() {
         <section className="mt-10 rounded-2xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-800">
           <p className="font-black">本次过滤未完成</p>
           <p className="mt-1 text-xs leading-5">{error}</p>
+          <a href="/control" className="mt-4 inline-flex min-h-11 items-center rounded-xl bg-[#2457ff] px-5 font-semibold text-white">登录 / 注册</a>
         </section>
       )}
-      {!loading && response && todayPresentation.kind === "caught_up" && <EmptyToday onRefresh={() => activeFilter && activeContext && void refreshToday(activeContext, activeFilter)} />}
+      {!loading && !error && response && todayPresentation.kind === "caught_up" && <EmptyToday onRefresh={() => activeFilter && activeContext && void refreshToday(activeContext, activeFilter)} />}
       {!loading && mustRead.length > 0 && (
         <>
           <div className="mt-10 flex items-center justify-between gap-4">

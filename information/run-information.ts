@@ -25,6 +25,7 @@ type RunInformationOptions = {
   filterId: string;
   researchContextRevision: number;
   localOnly?: boolean;
+  allowDemoFallback?: boolean;
   runLive: () => Promise<InformationRunPayload>;
   runDemo: () => Promise<InformationRunPayload>;
 };
@@ -51,6 +52,7 @@ export async function runInformation(options: RunInformationOptions): Promise<In
   try {
     return stamp(await options.runLive(), options);
   } catch (liveError) {
+    if (options.allowDemoFallback === false) throw liveError;
     if (liveError && typeof liveError === "object" && "status" in liveError && [401, 403].includes(Number(liveError.status))) {
       throw liveError;
     }
