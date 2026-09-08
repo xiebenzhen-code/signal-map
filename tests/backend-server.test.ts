@@ -164,13 +164,14 @@ test("runtime status exposes configuration presence without secret values", asyn
   process.env.DATABASE_URL = "postgresql://secret-value";
   process.env.DEEPSEEK_API_KEY = "deepseek-secret-value";
   try {
-    const response = await handleRuntimeStatus(async () => true);
+    const response = await handleRuntimeStatus(async () => ({ ok: true, errorCode: null }));
     assert.equal(response.status, 200);
     const text = await response.text();
     assert.deepEqual(JSON.parse(text), {
       databaseUrlPresent: true,
       deepseekApiKeyPresent: true,
       databaseConnectionOk: true,
+      databaseConnectionErrorCode: null,
     });
     assert.equal(text.includes("postgresql://secret-value"), false);
     assert.equal(text.includes("deepseek-secret-value"), false);

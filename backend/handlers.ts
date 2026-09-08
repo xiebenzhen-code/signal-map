@@ -175,20 +175,25 @@ export async function handleConnections() {
 }
 
 async function pingConfiguredDatabase() {
-  if (!databaseConfigured()) return false;
+  if (!databaseConfigured()) return { ok: false, errorCode: "not_configured" };
   try {
     await getPostgresPool().query("SELECT 1");
-    return true;
-  } catch {
-    return false;
+    return { ok: true, errorCode: null };
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error
+      ? String(error.code)
+      : error instanceof Error ? error.name : "unknown";
+    return { ok: false, errorCode: code };
   }
 }
 
 export async function handleRuntimeStatus(databasePing = pingConfiguredDatabase) {
+  const database = await databasePing();
   return Response.json({
     databaseUrlPresent: Boolean(process.env.DATABASE_URL),
     deepseekApiKeyPresent: Boolean(process.env.DEEPSEEK_API_KEY),
-    databaseConnectionOk: await databasePing(),
+    databaseConnectionOk: database.ok,
+    databaseConnectionErrorCode: database.errorCode,
   }, { headers: { "Cache-Control": "no-store" } });
 }
 
