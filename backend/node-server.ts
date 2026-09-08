@@ -65,7 +65,7 @@ export async function handleBackendRequest(request: Request) {
   } else if (url.pathname === "/api/connections") {
     response = await handleConnections();
   } else if (url.pathname === "/api/runtime/status") {
-    response = handleRuntimeStatus();
+    response = await handleRuntimeStatus();
   } else if (url.pathname === "/api/research/plan") {
     response = await handleResearchPlan(request);
   } else if (url.pathname === "/api/research/agent") {

@@ -13,7 +13,7 @@ import {
   runGoalControlAction,
   type ControlRepository,
 } from "./control-plane.ts";
-import { createPostgresRepository, databaseConfigured } from "./postgres.ts";
+import { createPostgresRepository, databaseConfigured, getPostgresPool } from "./postgres.ts";
 import { InMemorySignalRepository } from "../information/repositories/in-memory.ts";
 import type { AgentRunOptions } from "../agent/types.ts";
 import { socialAccessLayer, type SocialProvider } from "../social/providers/index.ts";
@@ -174,10 +174,21 @@ export async function handleConnections() {
   );
 }
 
-export function handleRuntimeStatus() {
+async function pingConfiguredDatabase() {
+  if (!databaseConfigured()) return false;
+  try {
+    await getPostgresPool().query("SELECT 1");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function handleRuntimeStatus(databasePing = pingConfiguredDatabase) {
   return Response.json({
     databaseUrlPresent: Boolean(process.env.DATABASE_URL),
     deepseekApiKeyPresent: Boolean(process.env.DEEPSEEK_API_KEY),
+    databaseConnectionOk: await databasePing(),
   }, { headers: { "Cache-Control": "no-store" } });
 }
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { handleBackendRequest } from "../backend/node-server.ts";
+import { handleRuntimeStatus } from "../backend/handlers.ts";
 
 type QueryPlanResponse = {
   queryPlan: {
@@ -163,12 +164,13 @@ test("runtime status exposes configuration presence without secret values", asyn
   process.env.DATABASE_URL = "postgresql://secret-value";
   process.env.DEEPSEEK_API_KEY = "deepseek-secret-value";
   try {
-    const response = await handleBackendRequest(new Request("https://signal.benzhenlab.com/api/runtime/status"));
+    const response = await handleRuntimeStatus(async () => true);
     assert.equal(response.status, 200);
     const text = await response.text();
     assert.deepEqual(JSON.parse(text), {
       databaseUrlPresent: true,
       deepseekApiKeyPresent: true,
+      databaseConnectionOk: true,
     });
     assert.equal(text.includes("postgresql://secret-value"), false);
     assert.equal(text.includes("deepseek-secret-value"), false);
