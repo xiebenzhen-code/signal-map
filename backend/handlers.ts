@@ -13,7 +13,7 @@ import {
   runGoalControlAction,
   type ControlRepository,
 } from "./control-plane.ts";
-import { createPostgresRepository, databaseConfigured, getPostgresPool } from "./postgres.ts";
+import { createPostgresRepository, databaseConfigured } from "./postgres.ts";
 import { InMemorySignalRepository } from "../information/repositories/in-memory.ts";
 import type { AgentRunOptions } from "../agent/types.ts";
 import { socialAccessLayer, type SocialProvider } from "../social/providers/index.ts";
@@ -172,29 +172,6 @@ export async function handleConnections() {
     { connections },
     { headers: { "Cache-Control": "no-store" } },
   );
-}
-
-async function pingConfiguredDatabase() {
-  if (!databaseConfigured()) return { ok: false, errorCode: "not_configured" };
-  try {
-    await getPostgresPool().query("SELECT 1");
-    return { ok: true, errorCode: null };
-  } catch (error) {
-    const code = error && typeof error === "object" && "code" in error
-      ? String(error.code)
-      : error instanceof Error ? error.name : "unknown";
-    return { ok: false, errorCode: code };
-  }
-}
-
-export async function handleRuntimeStatus(databasePing = pingConfiguredDatabase) {
-  const database = await databasePing();
-  return Response.json({
-    databaseUrlPresent: Boolean(process.env.DATABASE_URL),
-    deepseekApiKeyPresent: Boolean(process.env.DEEPSEEK_API_KEY),
-    databaseConnectionOk: database.ok,
-    databaseConnectionErrorCode: database.errorCode,
-  }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export const handleResearchPlan = withSession(async (request: Request) => {

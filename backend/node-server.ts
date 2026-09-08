@@ -15,7 +15,6 @@ import {
   handleResearchAgent,
   handleResearchPlan,
   handleResearchStream,
-  handleRuntimeStatus,
   handleSignals,
   handleSocialPost,
   handleSocialProfile,
@@ -64,8 +63,6 @@ export async function handleBackendRequest(request: Request) {
     response = await handleAuthMe(request);
   } else if (url.pathname === "/api/connections") {
     response = await handleConnections();
-  } else if (url.pathname === "/api/runtime/status") {
-    response = await handleRuntimeStatus();
   } else if (url.pathname === "/api/research/plan") {
     response = await handleResearchPlan(request);
   } else if (url.pathname === "/api/research/agent") {

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { handleBackendRequest } from "../backend/node-server.ts";
-import { handleRuntimeStatus } from "../backend/handlers.ts";
 
 type QueryPlanResponse = {
   queryPlan: {
@@ -156,27 +155,4 @@ test("standalone backend rejects unknown routes and providers", async () => {
     new Request("http://localhost/api/social/unknown/posts/1"),
   );
   assert.equal(unknownProvider.status, 404);
-});
-
-test("runtime status exposes configuration presence without secret values", async () => {
-  const databaseUrl = process.env.DATABASE_URL;
-  const deepseekKey = process.env.DEEPSEEK_API_KEY;
-  process.env.DATABASE_URL = "postgresql://secret-value";
-  process.env.DEEPSEEK_API_KEY = "deepseek-secret-value";
-  try {
-    const response = await handleRuntimeStatus(async () => ({ ok: true, errorCode: null }));
-    assert.equal(response.status, 200);
-    const text = await response.text();
-    assert.deepEqual(JSON.parse(text), {
-      databaseUrlPresent: true,
-      deepseekApiKeyPresent: true,
-      databaseConnectionOk: true,
-      databaseConnectionErrorCode: null,
-    });
-    assert.equal(text.includes("postgresql://secret-value"), false);
-    assert.equal(text.includes("deepseek-secret-value"), false);
-  } finally {
-    if (databaseUrl === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = databaseUrl;
-    if (deepseekKey === undefined) delete process.env.DEEPSEEK_API_KEY; else process.env.DEEPSEEK_API_KEY = deepseekKey;
-  }
 });
