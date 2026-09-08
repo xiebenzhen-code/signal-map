@@ -290,15 +290,21 @@ export const handleControlNotificationRead = withSession(async (request: Request
 export const handleAuthLogin = withSession(async (request: Request) => {
   if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
   const body = await bodyRecord(request);
-  if (body.action && body.action !== "login") return Response.json({ error: "Alpha 不开放注册" }, { status: 403 });
+  const action = body.action === "signup" ? "signup" : "login";
+  if (body.action && !["login", "signup"].includes(String(body.action))) return Response.json({ error: "不支持的认证操作" }, { status: 400 });
   const email = fieldValue(body.email ?? body.loginName);
   const password = typeof body.password === "string" ? body.password : "";
   if (!email || !email.includes("@") || password.length < 6) return Response.json({ error: "请输入邮箱和至少 6 位密码" }, { status: 400 });
   const { client } = requestSession(request);
   if (!client) return Response.json({ error: "Supabase Auth 尚未配置" }, { status: 503 });
-  const { data, error } = await client.auth.signInWithPassword({ email, password });
+  const { data, error } = action === "signup"
+    ? await client.auth.signUp({ email, password })
+    : await client.auth.signInWithPassword({ email, password });
   if (error) {
-    return Response.json({ error: "登录失败，请检查邮箱和密码" }, { status: 401 });
+    return Response.json({ error: action === "signup" ? "注册失败，请检查邮箱是否已注册或稍后重试" : "登录失败，请检查邮箱和密码" }, { status: action === "signup" ? 400 : 401 });
+  }
+  if (action === "signup" && data.user && !data.session) {
+    return Response.json({ user: null, status: "verification_required" }, { headers: { "Cache-Control": "no-store" } });
   }
   if (!data.session || !data.user || data.user.is_anonymous) return Response.json({ error: "无法建立账号会话" }, { status: 401 });
   return Response.json({ user: { id: data.user.id, mode: "authenticated" } }, { headers: { "Cache-Control": "no-store" } });

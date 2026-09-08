@@ -24,6 +24,7 @@ export function selectCurrentInformationRun(
 type RunInformationOptions = {
   filterId: string;
   researchContextRevision: number;
+  localOnly?: boolean;
   runLive: () => Promise<InformationRunPayload>;
   runDemo: () => Promise<InformationRunPayload>;
 };
@@ -41,6 +42,12 @@ function stamp(payload: InformationRunPayload, options: RunInformationOptions): 
 }
 
 export async function runInformation(options: RunInformationOptions): Promise<InformationRun> {
+  if (options.localOnly) {
+    return {
+      ...stamp(await options.runDemo(), options),
+      dataMode: "demo",
+    };
+  }
   try {
     return stamp(await options.runLive(), options);
   } catch (liveError) {

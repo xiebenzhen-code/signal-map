@@ -80,7 +80,10 @@ const emptyState: DashboardState = {
 
 async function readJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { ...init, cache: "no-store", credentials: "same-origin" });
-  if (!response.ok) throw new Error(`Request failed: ${path}`);
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(body?.error ?? `Request failed: ${path}`);
+  }
   return response.json() as Promise<T>;
 }
 
@@ -120,19 +123,23 @@ export default function ControlDashboard() {
     }
   }
 
-  async function login() {
+  async function authenticate(action: "login" | "signup") {
     setStatus("loading");
     setState(emptyState);
     try {
-      await readJson("/api/auth/login", {
+      const result = await readJson<{ user: CurrentUser; status?: string }>("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: loginName.trim(), password }),
+        body: JSON.stringify({ email: loginName.trim(), password, action }),
       });
       setPassword("");
+      if (result.status === "verification_required") {
+        setStatus("注册成功，请先完成邮箱验证再登录");
+        return;
+      }
       await load();
-    } catch {
-      setStatus("登录失败，请检查测试账号或服务配置");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : action === "signup" ? "注册失败" : "登录失败");
     }
   }
 
@@ -201,10 +208,12 @@ export default function ControlDashboard() {
           <div className="control-login">
             <input value={loginName} onChange={(event) => setLoginName(event.target.value)} placeholder="邮箱" type="email" />
             <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="密码（至少 6 位）" type="password" />
-            <button className="control-secondary" disabled={status === "loading"} onClick={() => void login()}>登录</button>
-            <Link className="control-secondary" href="/?demo=true">Guest Demo（仅本地演示）</Link>
+            <button className="control-secondary" disabled={status === "loading"} onClick={() => void authenticate("login")}>登录</button>
+            <button className="control-secondary" disabled={status === "loading"} onClick={() => void authenticate("signup")}>注册</button>
+            <Link className="control-secondary" href="/">无需登录，先体验</Link>
           </div>
         ) : null}
+        {!user ? <p>账户仅用于保存长期 Knowledge、RAG Memory、跨 Session 与跨设备状态；未登录体验只保存在当前浏览器。</p> : null}
         <button className="control-secondary" onClick={() => void load()}>刷新状态</button>
         {user ? <button className="control-secondary" onClick={() => void logout()}>Logout</button> : null}
         <span className="control-status">{status === "ready" ? "已连接" : status === "loading" ? "加载中" : status === "signed_out" ? "未登录" : status === "error" ? "加载失败" : status}</span>

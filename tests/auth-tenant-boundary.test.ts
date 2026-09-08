@@ -167,12 +167,28 @@ test("guest query and client userId cannot authenticate private APIs", async () 
   assert.equal(auth, null);
 });
 
-test("Alpha login rejects signup before calling Supabase", async () => {
+test("Alpha signup creates an authenticated Supabase session", async (t) => {
+  const keys = ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"] as const;
+  const previous = keys.map((key) => process.env[key]);
+  t.after(() => keys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; }));
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://auth-fixture.supabase.co";
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "test-publishable-key";
+  t.mock.method(globalThis, "fetch", async (target: string) => {
+    assert.equal(String(target), "https://auth-fixture.supabase.co/auth/v1/signup");
+    return Response.json({
+      user: { id: "new-user", aud: "authenticated", app_metadata: {}, user_metadata: {}, created_at: now },
+      access_token: "fixture-access-token",
+      refresh_token: "fixture-refresh-token",
+      token_type: "bearer",
+      expires_in: 3600,
+    });
+  });
   const response = await handleBackendRequest(new Request("https://signal.benzhenlab.com/api/auth/login", {
-    method: "POST", headers: { "Content-Type": "application/json" },
+    method: "POST", headers: { Origin: "https://signal.benzhenlab.com", "Content-Type": "application/json" },
     body: JSON.stringify({ email: "fixture@example.com", password: "fixture-password", action: "signup" }),
   }));
-  assert.equal(response.status, 403);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json() as { user?: { id: string } }).user?.id, "new-user");
 });
 
 test("Agent API never falls back to guest when no database or auth exists", async () => {

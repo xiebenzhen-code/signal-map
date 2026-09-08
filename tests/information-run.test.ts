@@ -59,6 +59,19 @@ test("auth failure never turns into a Guest Demo research result", async () => {
   assert.equal(demoCalls, 0);
 });
 
+test("public local mode never calls the authenticated Research API", async () => {
+  let liveCalls = 0;
+  const result = await runInformation({
+    filterId: "ai",
+    researchContextRevision: 3,
+    localOnly: true,
+    runLive: async () => { liveCalls += 1; return payload(); },
+    runDemo: async () => payload({ dataMode: "demo" }),
+  });
+  assert.equal(liveCalls, 0);
+  assert.equal(result.dataMode, "demo");
+});
+
 test("an in-flight old revision fails completion validation", async () => {
   let currentRevision = 3;
   const pending = Promise.resolve(run());

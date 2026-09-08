@@ -826,11 +826,17 @@ export default function HomePage() {
     setLoading(true);
     setError("");
     try {
+      const explicitDemo = new URLSearchParams(window.location.search).get("demo") === "true";
+      const session = explicitDemo
+        ? { user: null }
+        : await fetch("/api/auth/me", { cache: "no-store", credentials: "same-origin" })
+          .then(async (response) => response.ok ? response.json() as Promise<{ user: { id: string } | null }> : { user: null })
+          .catch(() => ({ user: null }));
       const result = await runInformation({
         filterId: filter.id,
         researchContextRevision: state.researchContextRevision,
+        localOnly: !session.user,
         runLive: async () => {
-          if (new URLSearchParams(window.location.search).get("demo") === "true") return demoProvider.run({ filter, knowledge: state });
           const { url, ...requestInit } = createResearchRequest(state);
           const request = await fetch(url, requestInit);
           if (!request.ok) throw Object.assign(new Error(request.status === 401 || request.status === 403 ? "请先使用 Alpha 测试账号登录" : "Live Web 暂时不可用"), { status: request.status });
