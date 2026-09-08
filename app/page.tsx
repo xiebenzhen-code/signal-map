@@ -1381,6 +1381,7 @@ export default function HomePage() {
         <p className="signal-eyebrow">默认仅本地保存</p>
         <h1 className="signal-display mt-2 text-5xl">设置</h1>
         <p className="mt-3 text-sm leading-6 text-[#737c88]">管理你的过滤器、认知状态和本地测试数据。</p>
+        <a href="/control" className="mt-5 flex min-h-12 items-center justify-center rounded-xl border border-[#cfd8ff] bg-[#f4f6ff] text-sm font-black text-[#2359ff]">登录 / 注册，开启长期记忆</a>
 
         <div className="mt-8 grid gap-3">
           <details className={accordionClass}>
@@ -1463,7 +1464,7 @@ export default function HomePage() {
               </button>
             ))}
           </nav>
-          <span className="text-[9px] font-bold text-[#939aa3]">守住你的注意力。</span>
+          <a href="/control" className="rounded-full border border-[#dfe3e7] px-3 py-2 text-[10px] font-black text-[#596473]">登录 / 注册</a>
         </div>
       </header>
 
