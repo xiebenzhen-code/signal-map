@@ -1215,12 +1215,11 @@ export async function runResearchPipeline(
       signal.verificationStatus !== "unverified" &&
       signal.verificationStatus !== "conflicting" &&
       signal.eventStatus !== "SIGNAL" &&
+      signal.eventStatus !== "BACKGROUND" &&
       signal.timestampStatus === "valid" &&
       describesRecentChange(signal.originalTitle || signal.title, signal.originalSummary || signal.summary) &&
       (trackedEntityTerms.length === 0 ||
         signal.entityMatches.length > 0 ||
-        (signal.gapMatchScore >= 80 && signal.judgementImpactScore >= 80)) &&
-      (signal.eventStatus !== "BACKGROUND" ||
         (signal.gapMatchScore >= 80 && signal.judgementImpactScore >= 80));
     const repeatsEntity = signal.entityMatches.some((entity) =>
       selectedEntities.has(entity),

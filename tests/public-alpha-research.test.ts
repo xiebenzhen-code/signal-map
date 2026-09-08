@@ -4,6 +4,8 @@ import test from "node:test";
 import { resolveResearchIdentity } from "../auth/request-identity.ts";
 import { handleBackendRequest } from "../backend/node-server.ts";
 import { runResearchPipeline } from "../research/research-pipeline.ts";
+import { executeResearch } from "../research/research-service.ts";
+import { InMemorySignalRepository } from "../information/repositories/in-memory.ts";
 import type { ResearchInput } from "../research/types.ts";
 
 const input: ResearchInput = {
@@ -64,4 +66,61 @@ test("anonymous signals use the real pipeline and never substitute demo records"
   assert.equal(body.dataMode, "live");
   assert.deepEqual(body.signals, []);
   assert.ok(response.headers.getSetCookie().some((cookie) => cookie.startsWith("signal_map_guest=") && /HttpOnly/i.test(cookie)));
+});
+
+test("background evidence outside a 24h window cannot become must read", async (t) => {
+  const publishedAt = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+  t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => {
+    const url = new URL(String(target));
+    if (url.hostname === "api.github.com") {
+      return Response.json({
+        id: 1,
+        name: "Codex workflow update",
+        tag_name: "v-test",
+        html_url: "https://github.com/openai/codex/releases/tag/v-test",
+        body: "A major Codex workflow change with new agent behavior and release details.",
+        published_at: publishedAt,
+      });
+    }
+    return emptyNetworkResponse(target);
+  });
+  const result = await runResearchPipeline(input);
+  const background = result.signals.find((signal) => signal.eventStatus === "BACKGROUND");
+  assert.ok(background);
+  assert.notEqual(background.attentionDecision, "MUST_READ");
+});
+
+test("authenticated main research enters the existing persistent Agent loop", async (t) => {
+  t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => {
+    const url = new URL(String(target));
+    if (url.hostname === "api.github.com") {
+      return Response.json({
+        id: 2,
+        name: "Codex current workflow release",
+        tag_name: "v-current",
+        html_url: "https://github.com/openai/codex/releases/tag/v-current",
+        body: "Codex adds a new documented agent workflow for developers.",
+        published_at: new Date().toISOString(),
+      });
+    }
+    return emptyNetworkResponse(target);
+  });
+  const repository = new InMemorySignalRepository();
+  const context = { authenticatedUserId: "account-a", filterId: "filter-a" };
+  await repository.saveFilter(context, {
+    id: context.filterId,
+    userId: context.authenticatedUserId,
+    name: "AI tools",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  const result = await executeResearch({
+    identity: { id: context.authenticatedUserId, mode: "authenticated" },
+    input,
+    context,
+    repository,
+  });
+  assert.equal(result.dataMode, "live");
+  assert.ok((await repository.listPersonalKnowledge(context)).length > 0);
+  assert.ok(await repository.getLatestRunMetadata(context));
 });

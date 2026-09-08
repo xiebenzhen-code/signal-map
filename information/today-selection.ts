@@ -54,7 +54,8 @@ function byUsableUpdatePriority(left: ResearchSignal, right: ResearchSignal) {
 
 export function selectTodayPresentation(events: ResearchSignal[]): TodayPresentation {
   const mustRead = uniqueEvents(
-    events.filter((event) => event.attentionDecision === "MUST_READ"),
+    events.filter((event) =>
+      event.attentionDecision === "MUST_READ" && event.eventStatus !== "BACKGROUND"),
   ).slice(0, 5);
   const worthWatching = uniqueEvents(
     events.filter((event) => event.attentionDecision === "WORTH_WATCHING"),

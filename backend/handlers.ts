@@ -116,7 +116,8 @@ function providerId(value: string): ProviderId | null {
 export const handleSignals = withSession(async (request: Request) => {
   if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
   const identity = await resolveResearchIdentity(request);
-  const input = await researchInput(request);
+  const body = await bodyRecord(request);
+  const input = inputFromRecord(body);
   if (!input.industry) {
     return Response.json(
       { error: "Query Planner 缺少行业或自然语言需求。" },
@@ -134,7 +135,22 @@ export const handleSignals = withSession(async (request: Request) => {
     let candidateSelectionAudit: CandidateSelectionAudit[] = [];
     let eligibilityFunnel: EligibilityAuditFunnel | undefined;
 
-    const result = await executeResearch({ identity, input, debug: includeEligibilityAudit
+    let context: AgentRunOptions["context"];
+    let repository: AgentRunOptions["repository"];
+    if (identity.mode === "authenticated") {
+      const persistentRepository = agentRepository();
+      context = {
+        authenticatedUserId: identity.id,
+        filterId: filterIdFromRequest(request, identity.id, body),
+      };
+      if (!await ensureFilter(persistentRepository, context, {
+        createIfMissing: context.filterId === `account-${identity.id}`,
+      })) return Response.json({ error: "Forbidden" }, { status: 403 });
+      repository = persistentRepository;
+    }
+
+    const result = await executeResearch({ identity, input, context, repository,
+      modelAdapter: createEnvironmentModelAdapter(), debug: includeEligibilityAudit
       ? {
           onCandidateSelectionAudit: (audit) => { candidateSelectionAudit = audit; },
           onEligibilityAudit: (audit) => { eligibilityFunnel = audit; },
