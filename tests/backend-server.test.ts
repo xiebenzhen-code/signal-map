@@ -67,7 +67,10 @@ test("standalone backend refuses GET signals requests", async () => {
   assert.match(body.error, /Method not allowed/);
 });
 
-test("standalone backend allows POST signal runs without URL query state", async () => {
+test("standalone backend accepts anonymous POST signal runs without URL query state", async (t) => {
+  const prior = process.env.SIGNAL_MAP_GUEST_SECRET;
+  process.env.SIGNAL_MAP_GUEST_SECRET = "test-only-guest-signing-secret";
+  t.after(() => { if (prior === undefined) delete process.env.SIGNAL_MAP_GUEST_SECRET; else process.env.SIGNAL_MAP_GUEST_SECRET = prior; });
   const response = await handleBackendRequest(
     new Request("http://localhost/api/signals", {
       method: "POST",
@@ -77,7 +80,7 @@ test("standalone backend allows POST signal runs without URL query state", async
   );
 
   assert.notEqual(response.status, 405);
-  assert.equal(response.status, 401);
+  assert.equal(response.status, 400);
 });
 
 test("standalone backend allows POST research stream requests", async () => {

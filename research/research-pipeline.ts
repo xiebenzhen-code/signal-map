@@ -87,6 +87,10 @@ function xmlValue(block: string, tag: string) {
   return match ? decodeXml(match[1]) : "";
 }
 
+function xmlAttribute(block: string, tag: string, attribute: string) {
+  return block.match(new RegExp(`<${tag}[^>]*\\s${attribute}=["']([^"']+)["']`, "i"))?.[1] || "";
+}
+
 async function googleNews(query: string): Promise<LiveItem[]> {
   const retrievedAt = new Date().toISOString();
   const mostlyEnglish = (query.match(/[A-Za-z]/g)?.length || 0) > query.length / 3;
@@ -107,11 +111,13 @@ async function googleNews(query: string): Promise<LiveItem[]> {
     .map((match) => {
       const block = match[1];
       const publisher = xmlValue(block, "source") || "Google News";
+      const publisherUrl = xmlAttribute(block, "source", "url");
       return {
         title: xmlValue(block, "title"),
         url: xmlValue(block, "link"),
         snippet: xmlValue(block, "description"),
         source: publisher,
+        publisherUrl: publisherUrl || undefined,
         publishedAt: xmlValue(block, "pubDate"),
         firstSeenAt: retrievedAt,
         retrievedAt,
@@ -287,7 +293,7 @@ async function searchQueries(
   failures: string[],
   requestedFreshnessDays: number,
 ) {
-  const windows = [1, 3, 7, 30];
+  const windows = [requestedFreshnessDays];
   const discovered: LiveItem[] = [];
   let failed = 0;
   let attempted = 0;
@@ -320,10 +326,10 @@ async function searchQueries(
       discovered
       .filter((item) => {
         const result = resolveFreshness(item);
-        const recent = result.ageHours === undefined || result.ageHours <= 30 * 24;
+        const recent = result.ageHours === undefined || result.ageHours <= requestedFreshnessDays * 24;
         return (
           recent &&
-          classifySource(item.source, item.url) === expected &&
+          classifySource(item.source, item.publisherUrl || item.url) === expected &&
           relevant(item, plan)
         );
       })
@@ -674,7 +680,7 @@ export async function runResearchPipeline(
         const itemFreshness = resolveFreshness(item);
         return (
           relevant(item, plan) &&
-          (itemFreshness.ageHours === undefined || itemFreshness.ageHours <= 30 * 24)
+          (itemFreshness.ageHours === undefined || itemFreshness.ageHours <= windowDays * 24)
         );
       })
       .map((item) => ({ ...item, sourceType: "social" as const }));

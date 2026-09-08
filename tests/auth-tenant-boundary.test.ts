@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { resolveAuthContext } from "../auth/session.ts";
+import { mapAuthError } from "../auth/auth-error.ts";
 import { getControlGoals, getControlKnowledge, getControlNotifications } from "../backend/control-plane.ts";
 import { handleBackendRequest } from "../backend/node-server.ts";
 import type { Goal } from "../agent/goal-types.ts";
@@ -13,6 +14,16 @@ import { runSchedulerTick } from "../scheduler/watch-runner.ts";
 const now = "2026-09-07T10:00:00.000Z";
 const userA: AuthenticatedFilterContext = { authenticatedUserId: "user-a", filterId: "filter-a" };
 const userB: AuthenticatedFilterContext = { authenticatedUserId: "user-b", filterId: "filter-b" };
+
+test("auth errors remain actionable without exposing provider details", () => {
+  assert.deepEqual(mapAuthError({ code: "user_already_exists", status: 422 }, "signup"), {
+    status: 409, code: "user_exists", error: "该邮箱已注册，请直接登录。",
+  });
+  assert.equal(mapAuthError({ code: "invalid_credentials", status: 400 }, "login").code, "invalid_credentials");
+  assert.equal(mapAuthError({ code: "weak_password", status: 400 }, "signup").code, "password_policy");
+  assert.equal(mapAuthError({ code: "over_email_send_rate_limit", status: 429 }, "signup").code, "rate_limited");
+  assert.equal(mapAuthError({ code: "unexpected_failure", status: 503 }, "login").code, "provider_unavailable");
+});
 
 function goal(context: AuthenticatedFilterContext, id: string): Goal {
   return {

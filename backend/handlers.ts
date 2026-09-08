@@ -4,6 +4,9 @@ import type { EligibilityAuditFunnel } from "../research/research-pipeline.ts";
 import { runTaskPlannedAgent } from "../agent/task-runner.ts";
 import { createEnvironmentModelAdapter } from "../agent/model-adapter.ts";
 import { requestSession, resolveAuthContext, withSession } from "../auth/session.ts";
+import { resolveResearchIdentity } from "../auth/request-identity.ts";
+import { mapAuthError } from "../auth/auth-error.ts";
+import { executeResearch } from "../research/research-service.ts";
 import {
   getControlAgentRuns,
   getControlGoals,
@@ -112,7 +115,7 @@ function providerId(value: string): ProviderId | null {
 
 export const handleSignals = withSession(async (request: Request) => {
   if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
-  if (!await resolveAuthContext(request)) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const identity = await resolveResearchIdentity(request);
   const input = await researchInput(request);
   if (!input.industry) {
     return Response.json(
@@ -122,7 +125,6 @@ export const handleSignals = withSession(async (request: Request) => {
   }
 
   try {
-    const { runResearchPipeline } = await import("../research/research-pipeline.ts");
     const params = new URL(request.url).searchParams;
     const includeEligibilityAudit =
       process.env.NODE_ENV !== "production" &&
@@ -132,14 +134,14 @@ export const handleSignals = withSession(async (request: Request) => {
     let candidateSelectionAudit: CandidateSelectionAudit[] = [];
     let eligibilityFunnel: EligibilityAuditFunnel | undefined;
 
-    const result = await runResearchPipeline(input, undefined, includeEligibilityAudit
+    const result = await executeResearch({ identity, input, debug: includeEligibilityAudit
       ? {
           onCandidateSelectionAudit: (audit) => { candidateSelectionAudit = audit; },
           onEligibilityAudit: (audit) => { eligibilityFunnel = audit; },
         }
-      : undefined);
+      : undefined });
 
-    return Response.json(auditOnly
+    const response = Response.json(auditOnly
       ? {
           overview: result.overview,
           debug: {
@@ -154,7 +156,12 @@ export const handleSignals = withSession(async (request: Request) => {
         : result, {
       headers: { "Cache-Control": "no-store" },
     });
-  } catch {
+    if (identity.mode === "anonymous" && identity.setCookie) response.headers.append("Set-Cookie", identity.setCookie);
+    return response;
+  } catch (error) {
+    if (error && typeof error === "object" && "status" in error && Number(error.status) === 429) {
+      return Response.json({ error: "查询过于频繁，请稍后再试。" }, { status: 429 });
+    }
     return Response.json(
       {
         error: "Research Pipeline 未能完成。",
@@ -301,10 +308,8 @@ export const handleAuthLogin = withSession(async (request: Request) => {
     ? await client.auth.signUp({ email, password })
     : await client.auth.signInWithPassword({ email, password });
   if (error) {
-    if (error.code === "email_not_confirmed") return Response.json({ error: "邮箱尚未验证，请完成注册验证后登录。", code: "email_not_confirmed" }, { status: 401 });
-    if (error.status === 429) return Response.json({ error: "尝试过于频繁，请稍后重试。", code: "rate_limited" }, { status: 429 });
-    if (error.code === "signup_disabled") return Response.json({ error: "当前站点尚未开放注册，请联系站点管理员创建测试账户。", code: "signup_disabled" }, { status: 403 });
-    return Response.json({ error: action === "signup" ? "注册失败，请检查邮箱是否已注册或稍后重试" : "登录失败，请检查邮箱和密码" }, { status: action === "signup" ? 400 : 401 });
+    const mapped = mapAuthError(error, action);
+    return Response.json({ error: mapped.error, code: mapped.code }, { status: mapped.status });
   }
   if (action === "signup" && data.user && !data.session) {
     return Response.json({ user: null, status: "verification_required" }, { headers: { "Cache-Control": "no-store" } });

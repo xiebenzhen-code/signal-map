@@ -71,6 +71,10 @@ test("a tracked product entity discovers its official changelog without a benchm
 
 test("community and developer pages classify as social discovery, not primary evidence", () => {
   assert.equal(
+    classifySource("Community.OpenAI.com", "https://community.openai.com/t/example/1"),
+    "social",
+  );
+  assert.equal(
     classifySource("GitHub Discussions", "https://github.com/openai/codex/discussions/1"),
     "social",
   );

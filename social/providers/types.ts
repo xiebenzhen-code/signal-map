@@ -4,6 +4,7 @@ export type LiveItem = {
   url: string;
   snippet: string;
   source: string;
+  publisherUrl?: string;
   publishedAt?: string;
   eventOccurredAt?: string;
   firstSeenAt?: string;
