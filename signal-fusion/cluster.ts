@@ -29,7 +29,8 @@ export function sourceRoleForEvidence(evidence: FusionEvidence): SourceRole {
   const value = `${evidence.publisher} ${evidence.sourceUrl}`.toLowerCase();
   if (evidence.sourceType === "primary" || evidence.sourceTier === "S") return "PRIMARY";
   if (evidence.sourceType === "trusted_media") return "AUTHORITATIVE_MEDIA";
-  if (/github|huggingface|arxiv|hacker news|news\.ycombinator|product hunt|stackoverflow|dev\.to/.test(value)) {
+  if (/product hunt/.test(value)) return "EARLY_SIGNAL";
+  if (/github|huggingface|arxiv|hacker news|news\.ycombinator|stackoverflow|dev\.to/.test(value)) {
     return "TECH_COMMUNITY";
   }
   if (evidence.sourceType === "social" || evidence.sourceTier === "C") return "EARLY_SIGNAL";

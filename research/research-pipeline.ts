@@ -20,8 +20,10 @@ import {
   discoverOfficialGithubReleases,
   discoverOfficialUpdatePages,
 } from "./github-discovery.ts";
+import { resolveCompanySources } from "../source-registry/resolver.ts";
 import { classifySource } from "./source-classifier.ts";
 import { describesRecentChange } from "./recent-signal.ts";
+import { buildFilteringSummary } from "./filtering-summary.ts";
 import {
   assessNoveltyAttribution,
   type NoveltyClusterMember,
@@ -91,6 +93,17 @@ function xmlValue(block: string, tag: string) {
 
 function xmlAttribute(block: string, tag: string, attribute: string) {
   return block.match(new RegExp(`<${tag}[^>]*\\s${attribute}=["']([^"']+)["']`, "i"))?.[1] || "";
+}
+
+function htmlPublishedAt(html: string) {
+  const raw =
+    html.match(/<meta[^>]+property=["']article:published_time["'][^>]+content=["']([^"']+)["']/i)?.[1] ||
+    html.match(/<meta[^>]+name=["']date["'][^>]+content=["']([^"']+)["']/i)?.[1] ||
+    html.match(/<time[^>]+datetime=["']([^"']+)["']/i)?.[1] ||
+    "";
+  if (!raw) return undefined;
+  const time = new Date(raw).getTime();
+  return Number.isFinite(time) ? new Date(time).toISOString() : undefined;
 }
 
 async function googleNews(query: string): Promise<LiveItem[]> {
@@ -221,39 +234,122 @@ async function hackerNewsSearch(query: string): Promise<LiveItem[]> {
 
 async function huggingFaceSearch(query: string): Promise<LiveItem[]> {
   const retrievedAt = new Date().toISOString();
-  const params = new URLSearchParams({
-    search: query,
-    sort: "lastModified",
-    direction: "-1",
-    limit: "8",
-  });
-  const response = await fetch(`https://huggingface.co/api/models?${params}`, {
+  const fetchCollection = async (type: "models" | "spaces" | "datasets") => {
+    const params = new URLSearchParams({
+      search: query,
+      sort: type === "models" ? "lastModified" : "lastModified",
+      direction: "-1",
+      limit: "6",
+    });
+    const response = await fetch(`https://huggingface.co/api/${type}?${params}`, {
     headers: { "User-Agent": "SignalMapResearch/0.4" },
     signal: AbortSignal.timeout(10000),
   });
-  if (!response.ok) throw new Error(`Hugging Face returned ${response.status}`);
-  const payload = (await response.json()) as Array<{
+    if (!response.ok) throw new Error(`Hugging Face ${type} returned ${response.status}`);
+    return (await response.json()) as Array<{
     id: string;
     author?: string;
     lastModified?: string;
+      createdAt?: string;
     pipeline_tag?: string;
+      tags?: string[];
     downloads?: number;
     likes?: number;
   }>;
-  return payload.map((model) => ({
-    id: model.id,
-    title: `Hugging Face model update: ${model.id}`,
-    url: `https://huggingface.co/${model.id}`,
-    snippet: `${model.pipeline_tag || "model"} · ${model.downloads || 0} downloads · ${model.likes || 0} likes`,
-    source: "Hugging Face",
-    publishedAt: model.lastModified,
+  };
+  const settled = await Promise.allSettled([
+    fetchCollection("models"),
+    fetchCollection("spaces"),
+    fetchCollection("datasets"),
+  ]);
+  return settled.flatMap((result, index) => {
+    if (result.status !== "fulfilled") return [];
+    const type = (["model", "space", "dataset"] as const)[index];
+    return result.value.map((item) => ({
+      id: `hf-${type}-${item.id}`,
+      title: `Hugging Face ${type} signal: ${item.id}`,
+      url: `https://huggingface.co/${type === "dataset" ? "datasets/" : type === "space" ? "spaces/" : ""}${item.id}`,
+      snippet: `${item.pipeline_tag || type} · ${(item.tags || []).slice(0, 5).join(", ")} · ${item.downloads || 0} downloads · ${item.likes || 0} likes`,
+      source: `Hugging Face · ${type}`,
+      publishedAt: item.lastModified || item.createdAt,
     firstSeenAt: retrievedAt,
     retrievedAt,
     dataOrigin: "live",
     channel: "社区",
     authority: 66,
     origin: "community",
+    } satisfies LiveItem));
+  });
+}
+
+async function productHuntSearch(query: string): Promise<LiveItem[]> {
+  const retrievedAt = new Date().toISOString();
+  const response = await fetch(`https://www.producthunt.com/search?q=${encodeURIComponent(query)}`, {
+    headers: { "User-Agent": "SignalMapResearch/0.4" },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!response.ok) throw new Error(`Product Hunt returned ${response.status}`);
+  const html = await response.text();
+  const links = [...html.matchAll(/href=["'](\/products\/[^"']+)["'][^>]*>([\s\S]{0,240}?)<\/a>/gi)];
+  const seen = new Set<string>();
+  return links.flatMap((match) => {
+    const path = match[1].split("?")[0];
+    if (seen.has(path)) return [];
+    seen.add(path);
+    const title = decodeXml(match[2] || "").replace(/\s+/g, " ").trim();
+    const productName = title || path.split("/").filter(Boolean).pop()?.replace(/-/g, " ") || "Product Hunt product";
+    return [{
+      id: `product-hunt-${path}`,
+      title: `Product Hunt signal: ${productName}`,
+      url: `https://www.producthunt.com${path}`,
+      snippet: `Product discovery / startup signal from Product Hunt: ${productName}`,
+      source: "Product Hunt",
+      publishedAt: undefined,
+      firstSeenAt: retrievedAt,
+      retrievedAt,
+      dataOrigin: "live",
+      channel: "社区",
+      authority: 55,
+      origin: "community",
+    } satisfies LiveItem];
+  }).slice(0, 8);
+}
+
+async function companyRegistrySearch(plan: QueryPlan): Promise<LiveItem[]> {
+  const retrievedAt = new Date().toISOString();
+  const profiles = resolveCompanySources({ entities: plan.entities, query: plan.originalNeed });
+  const pages = profiles.flatMap((profile) => [
+    ...profile.changelogUrls.map((url) => ({ url, publisher: `${profile.company} · Changelog` })),
+    ...profile.newsroomUrls.map((url) => ({ url, publisher: `${profile.company} · Newsroom` })),
+    ...profile.docsUrls.map((url) => ({ url, publisher: `${profile.company} · Docs` })),
+  ]).slice(0, 8);
+  const settled = await Promise.allSettled(pages.map(async (page) => {
+    const response = await fetch(page.url, {
+      headers: { "User-Agent": "SignalMapResearch/0.4" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`Company registry returned ${response.status}`);
+    const html = await response.text();
+    const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1];
+    const publishedAt = htmlPublishedAt(html);
+    return {
+      id: `company-registry-${encodeURIComponent(page.url)}`,
+      title: decodeXml(title || `${page.publisher} updates`),
+      url: page.url,
+      snippet: decodeXml(html).slice(0, 500) || `${page.publisher} official source`,
+      source: page.publisher,
+      publishedAt,
+      eventOccurredAt: publishedAt,
+      firstSeenAt: retrievedAt,
+      retrievedAt,
+      dataOrigin: "live",
+      channel: "官方",
+      authority: 95,
+      origin: "official",
+    } satisfies LiveItem;
   }));
+  return settled.flatMap((result) => result.status === "fulfilled" && result.value ? [result.value] : []);
 }
 
 async function arxivSearch(query: string): Promise<LiveItem[]> {
@@ -680,10 +776,13 @@ export async function runResearchPipeline(
   const primaryQueries = plan.searchCombinations
     .slice(0, 5)
     .map((query) => `${query}${sourceHint} ${domains}`);
-  const [primaryResult, githubReleaseResult, officialUpdatePageResult] = await Promise.all([
+  const [primaryResult, companyRegistryResult, githubReleaseResult, officialUpdatePageResult] = await Promise.all([
     canExecute("primary-web-search")
       ? searchQueries(primaryQueries, "primary", plan, failures, windowDays)
       : Promise.resolve(emptySearchResult()),
+    canExecute("company-registry")
+      ? searchDirectProvider("Company Source Registry", () => companyRegistrySearch(plan), "primary", plan, failures)
+      : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "Company Source Registry", execution: "not_searched" as const, searched: false, resultCount: 0 } }),
     canExecute("github-releases")
       ? discoverOfficialGithubReleases(plan.entities)
       : Promise.resolve({ items: [], outcome: { source: "GitHub Releases", execution: "not_searched" as const, searched: false, resultCount: 0 }, failure: undefined }),
@@ -694,6 +793,7 @@ export async function runResearchPipeline(
   if (githubReleaseResult.failure) failures.push(githubReleaseResult.failure);
   if (officialUpdatePageResult.failure) failures.push(officialUpdatePageResult.failure);
   const primary = unique([
+    ...companyRegistryResult.items,
     ...officialUpdatePageResult.items
       .filter((item) => relevant(item, plan))
       .map((item) => ({ ...item, sourceType: "primary" as const })),
@@ -703,9 +803,10 @@ export async function runResearchPipeline(
     ...primaryResult.items,
   ]);
   sourceOutcomes.push(webSearchOutcome("Primary Sources", primaryResult));
+  sourceOutcomes.push(companyRegistryResult.outcome);
   sourceOutcomes.push(githubReleaseResult.outcome);
   sourceOutcomes.push(officialUpdatePageResult.outcome);
-  scanned += primaryResult.scanned;
+  scanned += primaryResult.scanned + companyRegistryResult.items.length;
   counts = { ...counts, candidates: primary.length, primary: primary.length };
   if (!primary.length) {
     failures.push("Primary Sources: 扩展查询未命中可识别的监管文件、公司 IR 或官方公告，已继续搜索可信媒体。");
@@ -767,7 +868,10 @@ export async function runResearchPipeline(
   sourceOutcomes.push(webSearchOutcome("General Web", generalWebResult));
   scanned += generalWebResult.scanned;
 
-  const [hackerNewsResult, huggingFaceResult, arxivResult] = await Promise.all([
+  const [productHuntResult, hackerNewsResult, huggingFaceResult, arxivResult] = await Promise.all([
+    canExecute("product-hunt")
+      ? searchDirectProvider("Product Hunt", () => productHuntSearch(plan.searchCombinations[0] || plan.originalNeed), "social", plan, failures)
+      : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "Product Hunt", execution: "not_searched" as const, searched: false, resultCount: 0 } }),
     canExecute("hacker-news")
       ? searchDirectProvider("Hacker News", () => hackerNewsSearch(plan.searchCombinations[0] || plan.originalNeed), "social", plan, failures)
       : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "Hacker News", execution: "not_searched" as const, searched: false, resultCount: 0 } }),
@@ -778,14 +882,14 @@ export async function runResearchPipeline(
       ? searchDirectProvider("arXiv", () => arxivSearch(plan.searchCombinations[0] || plan.originalNeed), "primary", plan, failures)
       : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "arXiv", execution: "not_searched" as const, searched: false, resultCount: 0 } }),
   ]);
-  sourceOutcomes.push(hackerNewsResult.outcome, huggingFaceResult.outcome, arxivResult.outcome);
-  scanned += hackerNewsResult.items.length + huggingFaceResult.items.length + arxivResult.items.length;
+  sourceOutcomes.push(productHuntResult.outcome, hackerNewsResult.outcome, huggingFaceResult.outcome, arxivResult.outcome);
+  scanned += productHuntResult.items.length + hackerNewsResult.items.length + huggingFaceResult.items.length + arxivResult.items.length;
   counts = {
     ...counts,
-    candidates: counts.candidates + generalWebResult.items.length + hackerNewsResult.items.length + huggingFaceResult.items.length + arxivResult.items.length,
+    candidates: counts.candidates + generalWebResult.items.length + productHuntResult.items.length + hackerNewsResult.items.length + huggingFaceResult.items.length + arxivResult.items.length,
     primary: counts.primary + arxivResult.items.length,
     industryMedia: counts.industryMedia + generalWebResult.items.length + huggingFaceResult.items.length,
-    social: counts.social + hackerNewsResult.items.length,
+    social: counts.social + productHuntResult.items.length + hackerNewsResult.items.length,
   };
 
   const communityWebQueries = plan.searchCombinations.slice(0, 3).map(
@@ -917,6 +1021,7 @@ export async function runResearchPipeline(
     ...industryMedia,
     ...huggingFaceResult.items,
     ...generalWebResult.items,
+    ...productHuntResult.items,
     ...hackerNewsResult.items,
     ...social.representatives,
   ]);
@@ -1561,6 +1666,12 @@ export async function runResearchPipeline(
         )
       : 0,
   };
+  const filteringSummary = buildFilteringSummary({
+    retrievedCount: candidates.length,
+    clusteredCount: eventClusters.length,
+    allSignals,
+    displayedSignals: signals,
+  });
 
   if (debug?.onEligibilityAudit) {
     const preliminaryIgnoreFailureCounts: Partial<Record<PreliminaryEligibilityFailure, number>> = {};
@@ -1591,18 +1702,22 @@ export async function runResearchPipeline(
   const coverage = buildSourceCoverage(sourceOutcomes);
   const sourceOutcomesForAgent = coverage.outcomes.map((outcome) => {
     const source = outcome.source.toLowerCase();
-    const sourceType = source.includes("social") || source.includes("reddit") || source.includes("community") || source.includes("hacker news")
+    const sourceType = source.includes("social") || source.includes("reddit") || source.includes("community") || source.includes("hacker news") || source.includes("product hunt")
       ? "SOCIAL_SIGNAL"
       : source.includes("trusted") || source.includes("industry")
         ? "INDEPENDENT_MEDIA"
       : source.includes("general web")
           ? "GENERAL_WEB"
-        : source.includes("github") || source.includes("official")
+        : source.includes("github") || source.includes("official") || source.includes("company source")
           ? "OFFICIAL"
           : source.includes("hugging face")
             ? "GENERAL_WEB"
         : "PRIMARY";
-    const providerId = source.includes("github")
+    const providerId = source.includes("company source")
+      ? "company-registry"
+      : source.includes("product hunt")
+        ? "product-hunt"
+        : source.includes("github")
       ? "github-releases"
       : source.includes("official update")
         ? "official-update-pages"
@@ -1649,6 +1764,7 @@ export async function runResearchPipeline(
     counts,
     overview,
     coverage,
+    filteringSummary,
     fetchedAt: new Date().toISOString(),
     dataMode: "live",
     lastCheckedAt: new Date().toISOString(),

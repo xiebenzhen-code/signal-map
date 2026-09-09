@@ -56,6 +56,7 @@ export type InformationRunPayload = {
   signals: ResearchSignal[];
   overview: ResearchOverview;
   coverage: ProviderCoverage;
+  filteringSummary?: import("../research/types.ts").FilteringSummary;
   failures: string[];
   fetchedAt: string;
   dataMode: DataMode;

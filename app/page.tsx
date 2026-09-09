@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  FilteringSummary,
   ResearchSignal,
   VerificationStatus,
 } from "@/research/types";
@@ -160,6 +161,44 @@ function reliabilityLabel(score: number) {
   if (score >= 85) return "高可靠性";
   if (score >= 70) return "中等可靠性";
   return "低可靠性";
+}
+
+function FilteringSummaryCard({ summary }: { summary?: FilteringSummary }) {
+  if (!summary) return null;
+  const reasons = [
+    [summary.filteredReasons.duplicate, "重复传播"],
+    [summary.filteredReasons.insufficientVerification, "证据不足"],
+    [summary.filteredReasons.lowReliability, "可靠性偏低"],
+    [summary.filteredReasons.stale, "时间过旧"],
+    [summary.filteredReasons.background, "仅作背景"],
+    [summary.filteredReasons.lowNovelty, "新信息不足"],
+    [summary.filteredReasons.unresolvedConflict, "冲突未解决"],
+    [summary.filteredReasons.lowActionability, "行动价值低"],
+    [summary.filteredReasons.noInformationGain, "无明显信息增量"],
+  ].filter(([count]) => Number(count) > 0).slice(0, 3);
+  return (
+    <section className="mt-8 rounded-[24px] border border-[#dfe3e7] bg-white/75 p-5 text-sm leading-6 text-[#596473]">
+      <p className="text-xs font-black uppercase tracking-[.14em] text-[#2359ff]">过滤说明</p>
+      <p className="mt-2 font-semibold text-[#172033]">{summary.summaryText}</p>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {[
+          [`检索 ${summary.retrievedCount}`, "条"],
+          [`聚合 ${summary.clusteredCount}`, "个信号"],
+          [`展示 ${summary.displayedCount}`, "个"],
+        ].map(([label, suffix]) => (
+          <span key={label} className="rounded-full bg-[#f3f4f1] px-3 py-1 text-xs font-bold text-[#596473]">{label}{suffix}</span>
+        ))}
+        {reasons.map(([count, label]) => (
+          <span key={String(label)} className="rounded-full bg-[#fff4e6] px-3 py-1 text-xs font-bold text-[#8a5a00]">{label} {count}</span>
+        ))}
+      </div>
+      {summary.strongestHiddenSignal && (
+        <p className="mt-3 text-xs text-[#737c88]">
+          最强隐藏信号：{summary.strongestHiddenSignal.signalType} · {summary.strongestHiddenSignal.independentSourceCount} 个独立来源 · 原因 {summary.strongestHiddenSignal.reason}
+        </p>
+      )}
+    </section>
+  );
 }
 
 function EventCard({
@@ -1162,6 +1201,7 @@ export default function HomePage() {
           <a href="/control" className="mt-4 inline-flex min-h-11 items-center rounded-xl bg-[#2457ff] px-5 font-semibold text-white">登录 / 注册</a>
         </section>
       )}
+      {!loading && !error && response && <FilteringSummaryCard summary={response.filteringSummary} />}
       {!loading && !error && response && todayPresentation.kind === "caught_up" && <EmptyToday onRefresh={() => activeFilter && activeContext && void refreshToday(activeContext, activeFilter)} />}
       {!loading && mustRead.length > 0 && (
         <>
@@ -1247,6 +1287,7 @@ export default function HomePage() {
           </div>
         )}
         {response && <CoverageBadge coverage={response.coverage} />}
+        {response && <FilteringSummaryCard summary={response.filteringSummary} />}
 
         <label className="mt-6 block sm:hidden">
           <span className="text-xs font-black text-[#6f7884]">事件排序</span>

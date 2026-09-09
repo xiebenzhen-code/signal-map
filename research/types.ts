@@ -193,6 +193,41 @@ export type ResearchOverview = {
   novelInformationRate: number;
 };
 
+export type FilteringReason =
+  | "STALE"
+  | "DUPLICATE"
+  | "LOW_RELIABILITY"
+  | "INSUFFICIENT_VERIFICATION"
+  | "BACKGROUND_ONLY"
+  | "LOW_NOVELTY"
+  | "UNRESOLVED_CONFLICT"
+  | "LOW_ACTIONABILITY"
+  | "NO_INFORMATION_GAIN";
+
+export type FilteringSummary = {
+  retrievedCount: number;
+  clusteredCount: number;
+  displayedCount: number;
+  filteredReasons: {
+    stale: number;
+    duplicate: number;
+    lowReliability: number;
+    insufficientVerification: number;
+    background: number;
+    lowNovelty: number;
+    unresolvedConflict: number;
+    lowActionability?: number;
+    noInformationGain?: number;
+  };
+  strongestHiddenSignal?: {
+    signalType: SignalClassification;
+    reason: FilteringReason;
+    evidenceCount: number;
+    independentSourceCount: number;
+  };
+  summaryText: string;
+};
+
 export type ResearchResponse = {
   signals: ResearchSignal[];
   status: Array<{ name: string; ok: boolean; state?: string }>;
@@ -202,6 +237,7 @@ export type ResearchResponse = {
   counts: PipelineCounts;
   overview: ResearchOverview;
   coverage: SourceCoverage;
+  filteringSummary?: FilteringSummary;
   fetchedAt: string;
   dataMode: "live" | "demo" | "mixed";
   lastCheckedAt?: string;

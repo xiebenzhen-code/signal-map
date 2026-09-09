@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildSignalCluster } from "../signal-fusion/cluster.ts";
+import { buildSignalCluster, sourceRoleForEvidence } from "../signal-fusion/cluster.ts";
 import { fuseSignal } from "../signal-fusion/fusion.ts";
 import { runResearchPipeline } from "../research/research-pipeline.ts";
+import { buildFilteringSummary } from "../research/filtering-summary.ts";
 import type { FusionEvidence } from "../signal-fusion/types.ts";
-import type { ResearchInput } from "../research/types.ts";
+import type { ResearchInput, ResearchSignal } from "../research/types.ts";
 
 const baseEvidence = (overrides: Partial<FusionEvidence> = {}): FusionEvidence => ({
   evidenceId: overrides.evidenceId ?? "e1",
@@ -44,6 +45,19 @@ test("single social signal remains EARLY_SIGNAL", () => {
     baseEvidence({ sourceUrl: "https://reddit.com/r/ai/comments/1", publisher: "Reddit", sourceType: "social", sourceTier: "C", verificationStatus: "unverified", reliabilityScore: 35 }),
   ]);
   assert.equal(result.signalType, "EARLY_SIGNAL");
+});
+
+test("Product Hunt is treated as an early signal source", () => {
+  const evidence = baseEvidence({
+    sourceUrl: "https://www.producthunt.com/products/example-ai-video-tool",
+    publisher: "Product Hunt",
+    sourceType: "social",
+    sourceTier: "C",
+    verificationStatus: "unverified",
+    reliabilityScore: 45,
+  });
+  assert.equal(sourceRoleForEvidence(evidence), "EARLY_SIGNAL");
+  assert.equal(fuseSignal([evidence]).signalType, "EARLY_SIGNAL");
 });
 
 test("multi-role repeated independent evidence can be TREND", () => {
@@ -119,4 +133,197 @@ test("pipeline output carries fusion context and direct provider candidates", as
   assert.equal(typeof result.signals[0].signalType, "string");
   assert.ok(result.signals[0].signalCluster);
   assert.equal(result.signals[0].independentEvidenceCount >= 1, true);
+});
+
+test("Product Hunt adapter enters the pipeline but does not create a standalone FACT", async (t) => {
+  t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => {
+    const url = String(target);
+    if (url.includes("producthunt.com")) {
+      return new Response(`<html><body><a href="/products/neon-video-agent">Neon Video Agent</a></body></html>`);
+    }
+    return new Response("", { status: 404 });
+  });
+  const result = await runResearchPipeline(baseInput({
+    currentQuestions: "最近有什么新的 AI 视频工具？",
+    focusAreas: "AI video tools",
+    informationGaps: "new product discovery",
+    trackedEntities: "AI video tools",
+  }), undefined, undefined, {
+    primarySourceType: "GENERAL_WEB",
+    fallbackSourceTypes: [],
+    allowedProviderIds: ["product-hunt"],
+    reason: "test",
+  });
+  assert.equal(result.sourceOutcomes?.some((outcome) => outcome.providerId === "product-hunt" && outcome.executed && outcome.resultCount > 0), true);
+  assert.equal(result.filteringSummary?.retrievedCount, 1);
+  const signalType = result.signals[0]?.signalType ?? result.filteringSummary?.strongestHiddenSignal?.signalType;
+  assert.equal(signalType, "EARLY_SIGNAL");
+});
+
+test("Hugging Face native adapter retrieves models, spaces, and datasets", async (t) => {
+  t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => {
+    const url = new URL(String(target));
+    if (url.pathname === "/api/models") {
+      return Response.json([{ id: "video/model-a", author: "video", lastModified: new Date().toISOString(), pipeline_tag: "text-to-video", tags: ["video"], downloads: 120, likes: 8 }]);
+    }
+    if (url.pathname === "/api/spaces") {
+      return Response.json([{ id: "video/space-a", author: "video", lastModified: new Date().toISOString(), tags: ["video"], likes: 5 }]);
+    }
+    if (url.pathname === "/api/datasets") {
+      return Response.json([{ id: "video/dataset-a", author: "video", lastModified: new Date().toISOString(), tags: ["video"], downloads: 50 }]);
+    }
+    return new Response("", { status: 404 });
+  });
+  const result = await runResearchPipeline(baseInput({
+    currentQuestions: "最近 Hugging Face 有什么值得关注的视频模型或 Space？",
+    focusAreas: "Hugging Face video model Space",
+    informationGaps: "native Hugging Face activity",
+    trackedEntities: "Hugging Face",
+  }), undefined, undefined, {
+    primarySourceType: "GENERAL_WEB",
+    fallbackSourceTypes: [],
+    allowedProviderIds: ["huggingface"],
+    reason: "test",
+  });
+  assert.equal(result.sourceOutcomes?.some((outcome) => outcome.providerId === "huggingface" && outcome.executed && outcome.resultCount >= 3), true);
+  assert.equal(result.filteringSummary?.retrievedCount, 3);
+  assert.equal(result.sourceOutcomes?.some((outcome) => outcome.providerId === "arxiv" && outcome.executed), false);
+});
+
+test("Company Source Registry executes official company sources before general web", async (t) => {
+  const fetched: string[] = [];
+  t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => {
+    const url = String(target);
+    fetched.push(url);
+    if (url.includes("docs.anthropic.com") || url.includes("anthropic.com")) {
+      return new Response(`<html><head><title>Claude Code changelog</title><meta property="article:published_time" content="${new Date().toISOString()}"></head><body>Claude Code release notes and product updates</body></html>`);
+    }
+    return new Response("", { status: 404 });
+  });
+  const result = await runResearchPipeline(baseInput({
+    currentQuestions: "Claude Code 最近有什么变化？",
+    focusAreas: "Claude Code",
+    informationGaps: "official changelog",
+    trackedEntities: "Claude Code, Anthropic",
+  }), undefined, undefined, {
+    primarySourceType: "OFFICIAL",
+    fallbackSourceTypes: ["GENERAL_WEB"],
+    allowedProviderIds: ["company-registry"],
+    reason: "test",
+  });
+  assert.equal(result.sourceOutcomes?.some((outcome) => outcome.providerId === "company-registry" && outcome.executed), true);
+  assert.equal(fetched.some((url) => url.includes("news.google.com")), false);
+});
+
+const baseSignal = (overrides: Partial<ResearchSignal> = {}): ResearchSignal => ({
+  id: overrides.id ?? "signal-1",
+  category: "匹配",
+  channel: overrides.channel ?? "混合",
+  title: overrides.title ?? "Signal",
+  summary: overrides.summary ?? "Signal summary",
+  time: overrides.time ?? "1小时前",
+  truth: overrides.truth ?? 70,
+  baseUseful: overrides.baseUseful ?? 60,
+  lead: overrides.lead ?? 60,
+  tags: overrides.tags ?? [],
+  action: overrides.action ?? "review",
+  why: overrides.why ?? "why",
+  official: overrides.official ?? [],
+  social: overrides.social ?? [],
+  sourceType: overrides.sourceType ?? "industry_media",
+  sourceTier: overrides.sourceTier ?? "B",
+  sourceUrl: overrides.sourceUrl ?? "https://example.com/signal",
+  publisher: overrides.publisher ?? "Example",
+  publishedAt: overrides.publishedAt ?? new Date().toISOString(),
+  firstSeenAt: overrides.firstSeenAt ?? new Date().toISOString(),
+  retrievedAt: overrides.retrievedAt ?? new Date().toISOString(),
+  timestampStatus: overrides.timestampStatus ?? "valid",
+  dataOrigin: "live",
+  confidence: overrides.confidence ?? 0.7,
+  verificationStatus: overrides.verificationStatus ?? "verified",
+  relevanceScore: overrides.relevanceScore ?? 75,
+  reliabilityScore: overrides.reliabilityScore ?? 75,
+  freshnessScore: overrides.freshnessScore ?? 75,
+  noveltyScore: overrides.noveltyScore ?? 75,
+  judgementImpactScore: overrides.judgementImpactScore ?? 60,
+  gapMatchScore: overrides.gapMatchScore ?? 60,
+  overallScore: overrides.overallScore ?? 70,
+  sourceCount: overrides.sourceCount ?? 1,
+  independentEvidenceCount: overrides.independentEvidenceCount ?? 1,
+  propagationCount: overrides.propagationCount ?? 1,
+  signalType: overrides.signalType ?? "FACT",
+  duplicateRatio: overrides.duplicateRatio,
+  confirmationGain: overrides.confirmationGain ?? true,
+  claims: overrides.claims ?? [],
+  sources: overrides.sources ?? [],
+  section: overrides.section ?? "all",
+  gapMatches: overrides.gapMatches ?? [],
+  questionMatches: overrides.questionMatches ?? [],
+  entityMatches: overrides.entityMatches ?? [],
+  whyItMatters: overrides.whyItMatters ?? "matters",
+  eventStatus: overrides.eventStatus ?? "NEW",
+  informationType: overrides.informationType ?? "FACT",
+  knowledgeStatus: overrides.knowledgeStatus ?? "NOVEL",
+  attentionDecision: overrides.attentionDecision ?? "LIBRARY_ONLY",
+});
+
+test("FilteringSummary explains zero-result filtering and strongest hidden early signal", () => {
+  const summary = buildFilteringSummary({
+    retrievedCount: 12,
+    clusteredCount: 3,
+    allSignals: [
+      baseSignal({
+        id: "hidden-social",
+        signalType: "EARLY_SIGNAL",
+        informationType: "SIGNAL",
+        reliabilityScore: 35,
+        verificationStatus: "unverified",
+        independentEvidenceCount: 1,
+        overallScore: 68,
+      }),
+      baseSignal({ id: "stale", timestampStatus: "missing", freshnessScore: 0, overallScore: 20 }),
+    ],
+    displayedSignals: [],
+  });
+  assert.equal(summary.retrievedCount, 12);
+  assert.equal(summary.displayedCount, 0);
+  assert.equal(summary.filteredReasons.lowReliability, 1);
+  assert.equal(summary.filteredReasons.stale, 1);
+  assert.equal(summary.strongestHiddenSignal?.signalType, "EARLY_SIGNAL");
+  assert.match(summary.summaryText, /检索到 12 条信息/);
+});
+
+test("FilteringSummary reports duplicate, low verification, and non-zero displayed counts without chain-of-thought", () => {
+  const visible = baseSignal({ id: "visible" });
+  const summary = buildFilteringSummary({
+    retrievedCount: 4,
+    clusteredCount: 3,
+    allSignals: [
+      visible,
+      baseSignal({ id: "known", knowledgeStatus: "KNOWN" }),
+      baseSignal({ id: "unverified", verificationStatus: "unverified", reliabilityScore: 70 }),
+      baseSignal({ id: "conflict", verificationStatus: "conflicting", signalType: "CONFLICT" }),
+    ],
+    displayedSignals: [visible],
+  });
+  assert.equal(summary.displayedCount, 1);
+  assert.equal(summary.filteredReasons.duplicate, 1);
+  assert.equal(summary.filteredReasons.insufficientVerification, 1);
+  assert.equal(summary.filteredReasons.unresolvedConflict, 1);
+  assert.doesNotMatch(JSON.stringify(summary), /chain[- ]?of[- ]?thought|internal thought/i);
+});
+
+const baseInput = (overrides: Partial<ResearchInput> = {}): ResearchInput => ({
+  identity: "AI product builder",
+  industry: "AI developer tools",
+  focusAreas: "AI tools",
+  currentQuestions: "AI tools updates",
+  knownInformation: "",
+  informationGaps: "new evidence",
+  trackedEntities: "AI tools",
+  trackedEvents: "",
+  userJudgements: "",
+  evidenceHistory: "",
+  freshnessWindow: "7d",
+  ...overrides,
 });
