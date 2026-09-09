@@ -49,6 +49,28 @@ function sourceOutcomesFromResponse(response: ResearchResponse): SourceOutcome[]
   }));
 }
 
+function mergeResponseSourceOutcomes(previous: ResearchResponse | undefined, next: ResearchResponse) {
+  if (!previous?.sourceOutcomes?.length) return next;
+  const merged = new Map<string, NonNullable<ResearchResponse["sourceOutcomes"]>[number]>();
+  for (const outcome of [...previous.sourceOutcomes, ...(next.sourceOutcomes ?? [])]) {
+    const key = `${outcome.sourceType}:${outcome.providerId}`;
+    const current = merged.get(key);
+    merged.set(key, current
+      ? {
+          ...outcome,
+          executed: current.executed || outcome.executed,
+          resultCount: current.resultCount + outcome.resultCount,
+          newEvidenceCount: current.newEvidenceCount + outcome.newEvidenceCount,
+          newClaimCount: current.newClaimCount + outcome.newClaimCount,
+          reliabilityGain: Math.max(current.reliabilityGain, outcome.reliabilityGain),
+          conflictReduction: Math.max(current.conflictReduction, outcome.conflictReduction),
+        }
+      : outcome);
+  }
+  next.sourceOutcomes = [...merged.values()];
+  return next;
+}
+
 async function applyModelPlanning(options: {
   plan: AgentRunResult["plan"];
   adapter: AgentRunOptions["modelAdapter"];
@@ -159,6 +181,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       response.outputMode = sourceProfile.outputMode;
       response.intentOutput = mapIntentOutput(response, sourceProfile);
       if (!response.signals.length && plan.fallbackSourceTypes?.length) {
+        const firstAttemptResponse = response;
         const fallbackSelection = selectSource({
           strategy: plan.strategy ?? "INITIAL",
           availableSourceCapabilities: plan.fallbackSourceTypes.map((type) => ({
@@ -195,6 +218,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
           });
           add("SOURCE_SELECTOR", "completed", { round, fallback: true }, fallbackSelection, "首选来源无有效结果，执行 fallback 来源");
           response = await executeResearch(plan);
+          response = mergeResponseSourceOutcomes(firstAttemptResponse, response);
           response.intent = intent;
           response.sourceProfile = sourceProfile;
           response.outputMode = sourceProfile.outputMode;
