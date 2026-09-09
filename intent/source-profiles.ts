@@ -93,7 +93,7 @@ const profiles: Record<ResearchIntent, SourceProfile> = {
   },
   TOOL_DISCOVERY: {
     intent: "TOOL_DISCOVERY",
-    preferredSourceTypes: ["OFFICIAL", "GITHUB", "PRODUCT_DIRECTORY", "COMMUNITY"],
+    preferredSourceTypes: ["PRODUCT_DIRECTORY", "COMMUNITY", "OFFICIAL", "GITHUB"],
     requiredSignals: ["availability", "real usability", "maintenance", "adoption"],
     rankingDimensions: ["Actionability", "Reliability", "Novelty", "Relevance"],
     freshnessRequirement: "recent",

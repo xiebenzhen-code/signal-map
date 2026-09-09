@@ -125,6 +125,9 @@ test("intent profile influences source selection without replacing SourceSelecto
 
   assert.equal(selectSource({ strategy: "INITIAL", sourceProfile: policy }).primarySourceType, "PRIMARY");
   assert.equal(selectSource({ strategy: "INITIAL", sourceProfile: job }).primarySourceType, "GENERAL_WEB");
+  const tools = selectSource({ strategy: "INITIAL", sourceProfile: sourceProfileForIntent("TOOL_DISCOVERY") });
+  assert.equal(tools.primarySourceType, "GENERAL_WEB");
+  assert.equal(tools.allowedProviderIds.includes("product-hunt"), true);
   assert.equal(selectSource({ strategy: "VERIFY_CONFLICT", sourceProfile: sourceProfileForIntent("AIGC_OPPORTUNITY") }).primarySourceType, "OFFICIAL");
 });
 
