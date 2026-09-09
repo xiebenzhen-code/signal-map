@@ -1,6 +1,7 @@
 import type { LiveItem } from "../social/providers/index.ts";
 import type { SourceCoverage } from "./source-coverage.ts";
 import type { IntentClassification, IntentMappedOutput, SourceProfile } from "../intent/types.ts";
+import type { SignalClassification, SignalCluster, SourceRole as FusionSourceRole } from "../signal-fusion/types.ts";
 
 export type SourceType =
   | "primary"
@@ -148,6 +149,13 @@ export type ResearchSignal = {
   sourceCount: number;
   independentEvidenceCount: number;
   propagationCount: number;
+  signalType?: SignalClassification;
+  signalCluster?: SignalCluster;
+  sourceRoles?: FusionSourceRole[];
+  sourceRoleDiversity?: number;
+  duplicateRatio?: number;
+  confirmationGain?: boolean;
+  primaryEvidenceIds?: string[];
   claims: Claim[];
   sources: Array<{
     sourceUrl: string;

@@ -28,6 +28,8 @@ import {
 } from "./novelty-attribution.ts";
 import { translateSignalsForPresentation } from "./translation.ts";
 import { buildSourceCoverage, type SourceExecutionOutcome } from "./source-coverage.ts";
+import { fuseSignal } from "../signal-fusion/fusion.ts";
+import type { FusionEvidence } from "../signal-fusion/types.ts";
 import type {
   PipelineCounts,
   PipelineProgress,
@@ -173,6 +175,153 @@ async function redditSearch(query: string): Promise<LiveItem[]> {
     authority: 52,
     origin: "reddit",
   }));
+}
+
+async function hackerNewsSearch(query: string): Promise<LiveItem[]> {
+  const retrievedAt = new Date().toISOString();
+  const params = new URLSearchParams({
+    query,
+    tags: "story",
+    hitsPerPage: "8",
+  });
+  const response = await fetch(`https://hn.algolia.com/api/v1/search_by_date?${params}`, {
+    headers: { "User-Agent": "SignalMapResearch/0.4" },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!response.ok) throw new Error(`Hacker News returned ${response.status}`);
+  const payload = (await response.json()) as {
+    hits?: Array<{
+      objectID: string;
+      title?: string;
+      story_title?: string;
+      url?: string;
+      story_url?: string;
+      created_at?: string;
+      points?: number;
+      author?: string;
+    }>;
+  };
+  return (payload.hits || [])
+    .map((hit) => ({
+      id: hit.objectID,
+      title: hit.title || hit.story_title || "",
+      url: hit.url || hit.story_url || `https://news.ycombinator.com/item?id=${hit.objectID}`,
+      snippet: `${hit.points || 0} points · ${hit.author || "HN"} · Hacker News discussion`,
+      source: "Hacker News",
+      publishedAt: hit.created_at,
+      firstSeenAt: retrievedAt,
+      retrievedAt,
+      dataOrigin: "live",
+      channel: "社区",
+      authority: 58,
+      origin: "hn",
+    } satisfies LiveItem))
+    .filter((item) => item.title && item.url);
+}
+
+async function huggingFaceSearch(query: string): Promise<LiveItem[]> {
+  const retrievedAt = new Date().toISOString();
+  const params = new URLSearchParams({
+    search: query,
+    sort: "lastModified",
+    direction: "-1",
+    limit: "8",
+  });
+  const response = await fetch(`https://huggingface.co/api/models?${params}`, {
+    headers: { "User-Agent": "SignalMapResearch/0.4" },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!response.ok) throw new Error(`Hugging Face returned ${response.status}`);
+  const payload = (await response.json()) as Array<{
+    id: string;
+    author?: string;
+    lastModified?: string;
+    pipeline_tag?: string;
+    downloads?: number;
+    likes?: number;
+  }>;
+  return payload.map((model) => ({
+    id: model.id,
+    title: `Hugging Face model update: ${model.id}`,
+    url: `https://huggingface.co/${model.id}`,
+    snippet: `${model.pipeline_tag || "model"} · ${model.downloads || 0} downloads · ${model.likes || 0} likes`,
+    source: "Hugging Face",
+    publishedAt: model.lastModified,
+    firstSeenAt: retrievedAt,
+    retrievedAt,
+    dataOrigin: "live",
+    channel: "社区",
+    authority: 66,
+    origin: "community",
+  }));
+}
+
+async function arxivSearch(query: string): Promise<LiveItem[]> {
+  const retrievedAt = new Date().toISOString();
+  const params = new URLSearchParams({
+    search_query: `all:${query}`,
+    start: "0",
+    max_results: "8",
+    sortBy: "submittedDate",
+    sortOrder: "descending",
+  });
+  const response = await fetch(`https://export.arxiv.org/api/query?${params}`, {
+    headers: { "User-Agent": "SignalMapResearch/0.4" },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!response.ok) throw new Error(`arXiv returned ${response.status}`);
+  const xml = await response.text();
+  return [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/gi)].map((match) => {
+    const block = match[1];
+    return {
+      title: xmlValue(block, "title"),
+      url: xmlValue(block, "id"),
+      snippet: xmlValue(block, "summary"),
+      source: "arXiv",
+      publishedAt: xmlValue(block, "published") || xmlValue(block, "updated"),
+      firstSeenAt: retrievedAt,
+      retrievedAt,
+      dataOrigin: "live",
+      channel: "官方",
+      authority: 82,
+      origin: "official",
+    } satisfies LiveItem;
+  }).filter((item) => item.title && item.url);
+}
+
+async function searchDirectProvider(
+  source: string,
+  search: () => Promise<LiveItem[]>,
+  sourceType: SourceType,
+  plan: QueryPlan,
+  failures: string[],
+) {
+  try {
+    const items = unique((await search())
+      .filter((item) => relevant(item, plan))
+      .map((item) => ({ ...item, sourceType })));
+    return {
+      items,
+      outcome: {
+        source,
+        execution: items.length ? "searched_with_results" as const : "searched_no_results" as const,
+        searched: true,
+        resultCount: items.length,
+      },
+    };
+  } catch {
+    failures.push(`${source}: 请求失败或超时。`);
+    return {
+      items: [] as ResearchCandidate[],
+      outcome: {
+        source,
+        execution: "failed" as const,
+        searched: true,
+        resultCount: 0,
+        failureCode: "upstream_error" as const,
+      },
+    };
+  }
 }
 
 function primaryDomains(plan: QueryPlan) {
@@ -617,10 +766,26 @@ export async function runResearchPipeline(
     : emptySearchResult();
   sourceOutcomes.push(webSearchOutcome("General Web", generalWebResult));
   scanned += generalWebResult.scanned;
+
+  const [hackerNewsResult, huggingFaceResult, arxivResult] = await Promise.all([
+    canExecute("hacker-news")
+      ? searchDirectProvider("Hacker News", () => hackerNewsSearch(plan.searchCombinations[0] || plan.originalNeed), "social", plan, failures)
+      : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "Hacker News", execution: "not_searched" as const, searched: false, resultCount: 0 } }),
+    canExecute("huggingface")
+      ? searchDirectProvider("Hugging Face", () => huggingFaceSearch(plan.searchCombinations[0] || plan.originalNeed), "industry_media", plan, failures)
+      : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "Hugging Face", execution: "not_searched" as const, searched: false, resultCount: 0 } }),
+    canExecute("arxiv")
+      ? searchDirectProvider("arXiv", () => arxivSearch(plan.searchCombinations[0] || plan.originalNeed), "primary", plan, failures)
+      : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "arXiv", execution: "not_searched" as const, searched: false, resultCount: 0 } }),
+  ]);
+  sourceOutcomes.push(hackerNewsResult.outcome, huggingFaceResult.outcome, arxivResult.outcome);
+  scanned += hackerNewsResult.items.length + huggingFaceResult.items.length + arxivResult.items.length;
   counts = {
     ...counts,
-    candidates: counts.candidates + generalWebResult.items.length,
-    industryMedia: counts.industryMedia + generalWebResult.items.length,
+    candidates: counts.candidates + generalWebResult.items.length + hackerNewsResult.items.length + huggingFaceResult.items.length + arxivResult.items.length,
+    primary: counts.primary + arxivResult.items.length,
+    industryMedia: counts.industryMedia + generalWebResult.items.length + huggingFaceResult.items.length,
+    social: counts.social + hackerNewsResult.items.length,
   };
 
   const communityWebQueries = plan.searchCombinations.slice(0, 3).map(
@@ -738,7 +903,7 @@ export async function runResearchPipeline(
     primaryOutcome.resultCount = allPrimary.length;
     delete primaryOutcome.failureCode;
   }
-  counts = { ...counts, primary: allPrimary.length };
+  counts = { ...counts, primary: allPrimary.length + arxivResult.items.length };
   await emit({
     stage: "social",
     label: `社交媒体线索 ${social.representatives.length} 条 · 已尝试反向查证`,
@@ -747,9 +912,12 @@ export async function runResearchPipeline(
 
   const candidates = unique([
     ...allPrimary,
+    ...arxivResult.items,
     ...trustedMedia,
     ...industryMedia,
+    ...huggingFaceResult.items,
     ...generalWebResult.items,
+    ...hackerNewsResult.items,
     ...social.representatives,
   ]);
   await emit({
@@ -835,14 +1003,24 @@ export async function runResearchPipeline(
           .filter((candidate) => candidate.sourceType === "social" && candidate.socialEvidenceChain)
           .map((candidate) => [candidate.socialEvidenceChain!.evidenceChainId, candidate.socialEvidenceChain!] as const),
       );
-      const nonSocialSourceCount = new Set(
-        ordered
-          .filter((candidate) => candidate.sourceType !== "social")
-          .map((candidate) => candidate.url),
-      ).size;
-      const independentEvidenceCount = nonSocialSourceCount + socialChains.size;
+      const fusionEvidenceBase: FusionEvidence[] = ordered.map((candidate, index) => ({
+        evidenceId: `${stableEventId(candidate.title)}-${index}`,
+        entity: plan.entities[0],
+        topic: plan.coreKeywords[0] || plan.originalNeed,
+        claim: candidate.title,
+        sourceUrl: candidate.url,
+        publisher: candidate.source,
+        publishedAt: isoDate(candidate.publishedAt),
+        sourceType: candidate.sourceType,
+        sourceTier: sourceTier(candidate.sourceType),
+        verificationStatus: conflicting ? "conflicting" : checks[index].status,
+        upstreamSource: candidate.socialEvidenceChain?.canonicalSourceUrl,
+      }));
+      const preliminaryFusion = fuseSignal(fusionEvidenceBase);
+      const independentEvidenceCount = preliminaryFusion.independentSourceCount;
       const propagationCount = [...socialChains.values()]
-        .reduce((total, chain) => total + chain.propagationCount, 0);
+        .reduce((total, chain) => total + chain.propagationCount, 0) +
+        preliminaryFusion.cluster.duplicateCount;
       const relevanceScore = clamp(
         Math.max(...ordered.map((candidate) => usefulness(candidate, plan))) +
           Math.min(12, gapMatches.length * 4) +
@@ -912,7 +1090,14 @@ export async function runResearchPipeline(
       });
       const knownMatches = noveltyAttribution.knownMatches;
       const alreadyKnown = knownMatches.length > 0;
-      const noveltyScore = noveltyAttribution.noveltyScore;
+      const noveltyScore = preliminaryFusion.signalType === "NOISE"
+        ? Math.min(noveltyAttribution.noveltyScore, 25)
+        : noveltyAttribution.noveltyScore;
+      const fusion = fuseSignal(fusionEvidenceBase.map((evidence) => ({
+        ...evidence,
+        reliabilityScore,
+        noveltyScore,
+      })));
       const gapMatchScore = clamp(
         gapMatches.length || questionMatches.length
           ? 55 + gapMatches.length * 18 + questionMatches.length * 14
@@ -1056,6 +1241,7 @@ export async function runResearchPipeline(
               ? `涉及正在跟踪的实体：${entityMatches.join("、")}`
               : "与当前关注领域匹配",
         `${independentEvidenceCount} 条独立证据链`,
+        `融合判断：${fusion.signalType}（${fusion.reason}）`,
         verificationStatus === "verified"
           ? "包含 Primary Source"
           : verificationStatus === "partially_verified"
@@ -1184,6 +1370,13 @@ export async function runResearchPipeline(
         sourceCount: independentEvidenceCount,
         independentEvidenceCount,
         propagationCount,
+        signalType: fusion.signalType,
+        signalCluster: fusion.cluster,
+        sourceRoles: fusion.cluster.sourceRoles,
+        sourceRoleDiversity: fusion.sourceRoleDiversity,
+        duplicateRatio: fusion.duplicateRatio,
+        confirmationGain: fusion.confirmationGain,
+        primaryEvidenceIds: fusion.primaryEvidenceIds,
         claims,
         sources,
         section:
@@ -1198,9 +1391,9 @@ export async function runResearchPipeline(
         whyItMatters,
         eventStatus,
         informationType:
-          verificationStatus === "verified"
+          fusion.signalType === "FACT" || verificationStatus === "verified"
             ? "FACT"
-            : eventStatus === "SIGNAL"
+            : fusion.signalType === "EARLY_SIGNAL" || eventStatus === "SIGNAL"
               ? "SIGNAL"
               : "INTERPRETATION",
         knowledgeStatus,
@@ -1398,15 +1591,17 @@ export async function runResearchPipeline(
   const coverage = buildSourceCoverage(sourceOutcomes);
   const sourceOutcomesForAgent = coverage.outcomes.map((outcome) => {
     const source = outcome.source.toLowerCase();
-    const sourceType = source.includes("social") || source.includes("reddit") || source.includes("community")
+    const sourceType = source.includes("social") || source.includes("reddit") || source.includes("community") || source.includes("hacker news")
       ? "SOCIAL_SIGNAL"
       : source.includes("trusted") || source.includes("industry")
         ? "INDEPENDENT_MEDIA"
-        : source.includes("general web")
+      : source.includes("general web")
           ? "GENERAL_WEB"
         : source.includes("github") || source.includes("official")
           ? "OFFICIAL"
-          : "PRIMARY";
+          : source.includes("hugging face")
+            ? "GENERAL_WEB"
+        : "PRIMARY";
     const providerId = source.includes("github")
       ? "github-releases"
       : source.includes("official update")
@@ -1415,6 +1610,12 @@ export async function runResearchPipeline(
           ? "trusted-media"
           : source.includes("industry")
             ? "industry-media"
+            : source.includes("hacker news")
+              ? "hacker-news"
+              : source.includes("hugging face")
+                ? "huggingface"
+                : source.includes("arxiv")
+                  ? "arxiv"
             : source.includes("general web")
               ? "public-web"
             : source.includes("reddit")

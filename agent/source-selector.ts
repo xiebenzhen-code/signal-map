@@ -21,8 +21,8 @@ const strategySources: Record<Exclude<ResearchStrategy, "STOP">, SourceSelection
 const providerIds: Record<SourceSelectionType, string[]> = {
   MEMORY: [],
   OFFICIAL: ["official-update-pages", "github-releases"],
-  PRIMARY: ["primary-web-search", "reverse-primary"],
-  GENERAL_WEB: ["public-web"],
+  PRIMARY: ["primary-web-search", "reverse-primary", "arxiv"],
+  GENERAL_WEB: ["public-web", "hacker-news", "huggingface"],
   INDEPENDENT_MEDIA: ["trusted-media", "industry-media"],
   SOCIAL_SIGNAL: ["social-access", "reddit"],
 };
