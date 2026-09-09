@@ -41,6 +41,7 @@ browser-profile/
 next-env.d.ts
 /dist/
 /dist-api/
+/.sites-package-stage/
 /dist-edgeone-drop/
 /.wrangler/
 /outputs/

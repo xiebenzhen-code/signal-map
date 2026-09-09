@@ -159,11 +159,18 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       response.outputMode = sourceProfile.outputMode;
       response.intentOutput = mapIntentOutput(response, sourceProfile);
       if (!response.signals.length && plan.fallbackSourceTypes?.length) {
-          const fallbackSelection = selectSource({
-            strategy: plan.strategy ?? "INITIAL",
-            availableSourceCapabilities: options.availableSourceCapabilities,
-            sourceProfile,
-            previousSourceOutcomes: [
+        const fallbackSelection = selectSource({
+          strategy: plan.strategy ?? "INITIAL",
+          availableSourceCapabilities: plan.fallbackSourceTypes.map((type) => ({
+            type,
+            available: true,
+            supportsFreshness: type !== "MEMORY",
+            supportsPrimaryDocuments: type === "OFFICIAL" || type === "PRIMARY",
+            supportsDomainFilter: type !== "MEMORY",
+            supportsTimeFilter: type !== "MEMORY",
+          })),
+          sourceProfile,
+          previousSourceOutcomes: [
             ...previousSourceOutcomes,
             {
               sourceType: plan.selectedSourceType!,

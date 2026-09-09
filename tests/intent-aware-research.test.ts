@@ -185,6 +185,21 @@ test("AgentRunner records intent and keeps the same research boundary", async ()
   assert.equal(result.response?.outputMode, "JOB_SHORTLIST");
 });
 
+test("JOB_SEARCH fallback stays inside planned fallback sources instead of switching to social", async () => {
+  const selectedSources: Array<string | undefined> = [];
+  await runAgent({
+    input: { ...baseInput, currentQuestions: "最近有哪些适合 AIGC 视频方向的岗位？" },
+    maxRounds: 1,
+    research: async (_input, plan) => {
+      selectedSources.push(plan.selectedSourceType);
+      return response([]);
+    },
+  });
+
+  assert.equal(selectedSources[0], "GENERAL_WEB");
+  assert.notEqual(selectedSources[1], "SOCIAL_SIGNAL");
+});
+
 test("JOB_SEARCH can use the existing public-web provider for general web job results", async () => {
   const originalFetch = globalThis.fetch;
   const urls: string[] = [];
