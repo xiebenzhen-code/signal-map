@@ -653,11 +653,12 @@ export async function runResearchPipeline(
     counts,
   });
   const socialQuery = plan.searchCombinations.slice(0, 3).join(" OR ");
+  const shouldSearchReddit = canExecute("reddit");
   const [socialAccess, redditResult] = await Promise.all([
     canExecute("social-access")
       ? socialAccessLayer.search({ query: socialQuery, industry: input.industry, maxSearchesPerProvider: 1 })
       : Promise.resolve({ items: [] as LiveItem[], outcomes: [], statuses: [] }),
-    canExecute("reddit")
+    shouldSearchReddit
       ? Promise.allSettled([redditSearch(socialQuery)])
       : Promise.resolve([{ status: "fulfilled", value: [] as LiveItem[] }] as const),
   ]);
@@ -675,7 +676,14 @@ export async function runResearchPipeline(
       resultCount: outcome.resultCount,
       failureCode: outcome.failureCode,
     })),
-    redditResult[0].status === "fulfilled"
+    !shouldSearchReddit
+      ? {
+          source: "Reddit",
+          execution: "not_searched" as const,
+          searched: false,
+          resultCount: 0,
+        }
+      : redditResult[0].status === "fulfilled"
       ? {
           source: "Reddit",
           execution: reddit.length ? "searched_with_results" as const : "searched_no_results" as const,

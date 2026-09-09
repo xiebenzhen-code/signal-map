@@ -250,6 +250,9 @@ test("JOB_SEARCH can use the existing public-web provider for general web job re
     assert.equal(result.sourceOutcomes?.some((outcome) =>
       outcome.sourceType === "SOCIAL_SIGNAL" && outcome.providerId === "public-web" && outcome.executed,
     ), false);
+    assert.equal(result.sourceOutcomes?.some((outcome) =>
+      outcome.sourceType === "SOCIAL_SIGNAL" && outcome.providerId === "reddit" && outcome.executed,
+    ), false);
   } finally {
     globalThis.fetch = originalFetch;
   }
