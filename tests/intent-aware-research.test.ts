@@ -8,6 +8,7 @@ import { classifyIntent } from "../intent/classifier.ts";
 import { sourceProfileForIntent } from "../intent/source-profiles.ts";
 import { assessActionability } from "../intent/actionability.ts";
 import { mapIntentOutput } from "../intent/output-mapping.ts";
+import { runResearchPipeline } from "../research/research-pipeline.ts";
 import type { ResearchInput, ResearchResponse, ResearchSignal } from "../research/types.ts";
 
 const baseInput: ResearchInput = {
@@ -182,6 +183,43 @@ test("AgentRunner records intent and keeps the same research boundary", async ()
   assert.equal(result.steps.some((step) => step.state === "INTENT"), true);
   assert.equal(result.response?.intent?.primaryIntent, "JOB_SEARCH");
   assert.equal(result.response?.outputMode, "JOB_SHORTLIST");
+});
+
+test("JOB_SEARCH can use the existing public-web provider for general web job results", async () => {
+  const originalFetch = globalThis.fetch;
+  const urls: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    urls.push(url);
+    const xml = `
+      <rss><channel><item>
+        <title>AIGC video workflow producer job opening</title>
+        <link>https://jobs.example.com/aigc-video-producer</link>
+        <description>Open role with apply link, remote option, video generation workflow skills.</description>
+        <source url="https://jobs.example.com">Example Jobs</source>
+        <pubDate>Wed, 09 Sep 2026 00:00:00 GMT</pubDate>
+      </item></channel></rss>
+    `;
+    return new Response(xml, { status: 200, headers: { "content-type": "application/rss+xml" } });
+  }) as typeof fetch;
+  try {
+    const result = await runResearchPipeline({
+      ...baseInput,
+      currentQuestions: "最近有哪些适合 AIGC 视频方向的岗位？",
+      trackedEntities: "AIGC video",
+    }, undefined, undefined, {
+      primarySourceType: "GENERAL_WEB",
+      fallbackSourceTypes: [],
+      allowedProviderIds: ["public-web"],
+      reason: "job search test",
+    });
+
+    assert.equal(urls.some((url) => url.includes("news.google.com")), true);
+    assert.ok(result.signals.some((item) => /job opening/i.test(item.title)));
+    assert.ok(result.sourceOutcomes?.some((outcome) => outcome.providerId === "public-web" && outcome.executed));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("personal knowledge changes relevance path but does not replace external research", async () => {

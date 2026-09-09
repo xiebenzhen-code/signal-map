@@ -288,11 +288,12 @@ function verification(
 
 async function searchQueries(
   queries: string[],
-  expected: SourceType,
+  expected: SourceType | "other",
   plan: QueryPlan,
   failures: string[],
   requestedFreshnessDays: number,
 ) {
+  const candidateSourceType: SourceType = expected === "other" ? "industry_media" : expected;
   const windows = [requestedFreshnessDays];
   const discovered: LiveItem[] = [];
   let failed = 0;
@@ -312,7 +313,7 @@ async function searchQueries(
           const result = resolveFreshness(item);
           return result.ageHours !== undefined && result.ageHours <= days * 24;
         })
-        .map((item) => ({ ...item, sourceType: expected })),
+        .map((item) => ({ ...item, sourceType: candidateSourceType })),
     );
     if (verifiedRecent.length >= 6 && days >= requestedFreshnessDays) break;
   }
@@ -329,11 +330,13 @@ async function searchQueries(
         const recent = result.ageHours === undefined || result.ageHours <= requestedFreshnessDays * 24;
         return (
           recent &&
-          classifySource(item.source, item.publisherUrl || item.url) === expected &&
+          (expected === "other"
+            ? classifySource(item.source, item.publisherUrl || item.url) === "other"
+            : classifySource(item.source, item.publisherUrl || item.url) === expected) &&
           relevant(item, plan)
         );
       })
-      .map((item) => ({ ...item, sourceType: expected })),
+      .map((item) => ({ ...item, sourceType: candidateSourceType })),
     ),
   };
 }
@@ -607,6 +610,18 @@ export async function runResearchPipeline(
     industryMedia: industryMedia.length,
   };
 
+  const generalWebQueries = plan.searchCombinations.slice(0, 4);
+  const generalWebResult = canExecute("public-web")
+    ? await searchQueries(generalWebQueries, "other", plan, failures, windowDays)
+    : emptySearchResult();
+  sourceOutcomes.push(webSearchOutcome("General Web", generalWebResult));
+  scanned += generalWebResult.scanned;
+  counts = {
+    ...counts,
+    candidates: counts.candidates + generalWebResult.items.length,
+    industryMedia: counts.industryMedia + generalWebResult.items.length,
+  };
+
   const communityWebQueries = plan.searchCombinations.slice(0, 3).map(
     (query) =>
       `${query} (site:reddit.com OR site:github.com OR site:news.ycombinator.com OR site:stackoverflow.com OR site:dev.to)`,
@@ -725,6 +740,7 @@ export async function runResearchPipeline(
     ...allPrimary,
     ...trustedMedia,
     ...industryMedia,
+    ...generalWebResult.items,
     ...social.representatives,
   ]);
   await emit({
@@ -1377,6 +1393,8 @@ export async function runResearchPipeline(
       ? "SOCIAL_SIGNAL"
       : source.includes("trusted") || source.includes("industry")
         ? "INDEPENDENT_MEDIA"
+        : source.includes("general web")
+          ? "GENERAL_WEB"
         : source.includes("github") || source.includes("official")
           ? "OFFICIAL"
           : "PRIMARY";
@@ -1388,6 +1406,8 @@ export async function runResearchPipeline(
           ? "trusted-media"
           : source.includes("industry")
             ? "industry-media"
+            : source.includes("general web")
+              ? "public-web"
             : source.includes("reddit")
               ? "reddit"
               : source.includes("community")
