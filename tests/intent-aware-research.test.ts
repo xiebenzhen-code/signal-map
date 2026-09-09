@@ -247,6 +247,9 @@ test("JOB_SEARCH can use the existing public-web provider for general web job re
     assert.equal(urls.some((url) => url.includes("news.google.com")), true);
     assert.ok(result.signals.some((item) => /job opening/i.test(item.title)));
     assert.ok(result.sourceOutcomes?.some((outcome) => outcome.providerId === "public-web" && outcome.executed));
+    assert.equal(result.sourceOutcomes?.some((outcome) =>
+      outcome.sourceType === "SOCIAL_SIGNAL" && outcome.providerId === "public-web" && outcome.executed,
+    ), false);
   } finally {
     globalThis.fetch = originalFetch;
   }

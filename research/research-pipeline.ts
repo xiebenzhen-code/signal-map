@@ -497,6 +497,7 @@ export async function runResearchPipeline(
     ? new Set(sourceSelection.allowedProviderIds)
     : undefined;
   const canExecute = (providerId: string) => !allowedProviders || allowedProviders.has(providerId);
+  const sourceConstrained = Boolean(sourceSelection?.primarySourceType || sourceSelection?.allowedProviderIds?.length);
   const emptySearchResult = () => ({
     scanned: 0,
     attempted: 0,
@@ -626,7 +627,7 @@ export async function runResearchPipeline(
     (query) =>
       `${query} (site:reddit.com OR site:github.com OR site:news.ycombinator.com OR site:stackoverflow.com OR site:dev.to)`,
   );
-  const communityWebResult = canExecute("public-web")
+  const communityWebResult = canExecute("public-web") && (!sourceConstrained || plan.selectedSourceType === "SOCIAL_SIGNAL")
     ? await searchQueries(communityWebQueries, "social", plan, failures, windowDays)
     : emptySearchResult();
   sourceOutcomes.push(webSearchOutcome("Public Web Community", communityWebResult));
