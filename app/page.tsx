@@ -179,34 +179,49 @@ function FilteringSummaryCard({ summary }: { summary?: FilteringSummary }) {
     [summary.filteredReasons.noInformationGain, "无明显信息增量"],
     [summary.filteredReasons.insufficientContent, "正文提取不足"],
   ].filter(([count]) => Number(count) > 0).slice(0, 3);
+  const filteredCount = Math.max(0, summary.retrievedCount - summary.displayedCount);
+  const hasContentOrReliabilityGap =
+    (summary.filteredReasons.insufficientContent ?? 0) > 0 ||
+    (summary.filteredReasons.lowReliability ?? 0) > 0;
+  const overviewText = `今天检索到 ${summary.retrievedCount} 条，${summary.displayedCount} 条通过筛选。`;
+  const filteredText = filteredCount > 0
+    ? hasContentOrReliabilityGap
+      ? "其余因内容不足或来源可信度不够被过滤。"
+      : "其余因未达到筛选条件被过滤。"
+    : "当前没有其他候选需要过滤。";
   return (
     <section className="mt-8 rounded-[24px] border border-[#dfe3e7] bg-white/75 p-5 text-sm leading-6 text-[#596473]">
       <p className="text-xs font-black uppercase tracking-[.14em] text-[#2359ff]">过滤说明</p>
-      <p className="mt-2 font-semibold text-[#172033]">{summary.summaryText}</p>
-      <div className="mt-4 flex flex-wrap gap-2">
-        {[
-          [`检索 ${summary.retrievedCount}`, "条"],
-          [`聚合 ${summary.clusteredCount}`, "个信号"],
-          [`展示 ${summary.displayedCount}`, "个"],
-          ...(summary.detailEnrichment
-            ? [
-                [`详情抓取 ${summary.detailEnrichment.detailAttempted}`, "次"],
-                [`详情成功 ${summary.detailEnrichment.detailSucceeded}`, "次"],
-                [`仍不足 ${summary.detailEnrichment.stillInsufficient}`, "条"],
-              ] as const
-            : []),
-        ].map(([label, suffix]) => (
-          <span key={label} className="rounded-full bg-[#f3f4f1] px-3 py-1 text-xs font-bold text-[#596473]">{label}{suffix}</span>
-        ))}
-        {reasons.map(([count, label]) => (
-          <span key={String(label)} className="rounded-full bg-[#fff4e6] px-3 py-1 text-xs font-bold text-[#8a5a00]">{label} {count}</span>
-        ))}
-      </div>
-      {summary.strongestHiddenSignal && (
-        <p className="mt-3 text-xs text-[#737c88]">
-          最强隐藏信号：{signalTypeLabel(summary.strongestHiddenSignal.signalType)} · {summary.strongestHiddenSignal.independentSourceCount} 个独立来源 · 原因 {userFacingReason(summary.strongestHiddenSignal.reason)}
-        </p>
-      )}
+      <p className="mt-2 font-semibold text-[#172033]">{overviewText}</p>
+      <p className="mt-1 text-sm text-[#737c88]">{filteredText}</p>
+      <details className="mt-4 rounded-2xl border border-[#e5e8eb] bg-white/60 px-4 py-3">
+        <summary className="cursor-pointer list-none text-sm font-black text-[#2359ff]">查看筛选详情</summary>
+        <p className="mt-3 text-xs text-[#737c88]">{summary.summaryText}</p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {[
+            [`检索 ${summary.retrievedCount}`, "条"],
+            [`聚合 ${summary.clusteredCount}`, "个信号"],
+            [`展示 ${summary.displayedCount}`, "个"],
+            ...(summary.detailEnrichment
+              ? [
+                  [`详情抓取 ${summary.detailEnrichment.detailAttempted}`, "次"],
+                  [`详情成功 ${summary.detailEnrichment.detailSucceeded}`, "次"],
+                  [`仍不足 ${summary.detailEnrichment.stillInsufficient}`, "条"],
+                ] as const
+              : []),
+          ].map(([label, suffix]) => (
+            <span key={label} className="rounded-full bg-[#f3f4f1] px-3 py-1 text-xs font-bold text-[#596473]">{label}{suffix}</span>
+          ))}
+          {reasons.map(([count, label]) => (
+            <span key={String(label)} className="rounded-full bg-[#fff4e6] px-3 py-1 text-xs font-bold text-[#8a5a00]">{label} {count}</span>
+          ))}
+        </div>
+        {summary.strongestHiddenSignal && (
+          <p className="mt-3 text-xs text-[#737c88]">
+            最强隐藏信号：{signalTypeLabel(summary.strongestHiddenSignal.signalType)} · {summary.strongestHiddenSignal.independentSourceCount} 个独立来源 · 原因 {userFacingReason(summary.strongestHiddenSignal.reason)}
+          </p>
+        )}
+      </details>
     </section>
   );
 }
