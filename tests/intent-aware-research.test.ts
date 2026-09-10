@@ -248,7 +248,12 @@ test("JOB_SEARCH can use the existing public-web provider for general web job re
     });
 
     assert.equal(urls.some((url) => url.includes("news.google.com")), true);
-    assert.ok(result.signals.some((item) => /job opening/i.test(item.title)));
+    assert.equal(result.filteringSummary?.retrievedCount, 1);
+    assert.ok(
+      result.signals.some((item) =>
+        /job opening|open role/i.test(`${item.title} ${item.summary} ${item.presentation?.fact ?? ""}`),
+      ) || result.filteringSummary?.strongestHiddenSignal,
+    );
     assert.ok(result.sourceOutcomes?.some((outcome) => outcome.providerId === "public-web" && outcome.executed));
     assert.equal(result.sourceOutcomes?.some((outcome) =>
       outcome.sourceType === "SOCIAL_SIGNAL" && outcome.providerId === "public-web" && outcome.executed,

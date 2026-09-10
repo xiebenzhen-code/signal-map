@@ -104,7 +104,7 @@ test("pipeline output carries fusion context and direct provider candidates", as
       }] });
     }
     if (url.includes("news.google.com")) {
-      return new Response(`<rss><channel><item><title>Claude Code released a new planning feature</title><link>https://blog.example.com/claude-code-planning</link><description>Claude Code new planning feature update for AI developer tools</description><source url="https://blog.example.com">Independent Blog</source><pubDate>${published}</pubDate></item></channel></rss>`);
+      return new Response(`<rss><channel><item><title>Claude Code released a new planning feature</title><link>https://blog.example.com/claude-code-planning</link><description>Independent Blog reports that Claude Code released a new planning feature for AI developer tools today. The update adds plan review steps and cites the product changelog as supporting evidence.</description><source url="https://blog.example.com">Independent Blog</source><pubDate>${published}</pubDate></item></channel></rss>`);
     }
     if (url.includes("api.github.com")) return Response.json({ message: "not found" }, { status: 404 });
     return new Response("<feed></feed>");
@@ -212,6 +212,7 @@ test("Company Source Registry executes official company sources before general w
     reason: "test",
   });
   assert.equal(result.sourceOutcomes?.some((outcome) => outcome.providerId === "company-registry" && outcome.executed), true);
+  assert.equal(result.sourceOutcomes?.some((outcome) => outcome.providerId === "primary-web-search" && outcome.executed), false);
   assert.equal(fetched.some((url) => url.includes("news.google.com")), false);
 });
 
@@ -291,6 +292,32 @@ test("FilteringSummary explains zero-result filtering and strongest hidden early
   assert.equal(summary.filteredReasons.stale, 1);
   assert.equal(summary.strongestHiddenSignal?.signalType, "EARLY_SIGNAL");
   assert.match(summary.summaryText, /检索到 12 条信息/);
+});
+
+test("insufficient content cannot be displayed as a normal signal", async (t) => {
+  const published = new Date().toUTCString();
+  t.mock.method(globalThis, "fetch", async () => new Response(`
+    <rss><channel><item>
+      <title>OpenAI News | OpenAI</title>
+      <link>https://example.com/template</link>
+      <description>Newsroom Related Recommended Login Sign up Privacy Terms</description>
+      <source url="https://example.com">Example</source>
+      <pubDate>${published}</pubDate>
+    </item></channel></rss>
+  `));
+  const result = await runResearchPipeline(baseInput({
+    currentQuestions: "最近 OpenAI 有什么值得关注的更新？",
+    focusAreas: "OpenAI",
+    informationGaps: "official update",
+    trackedEntities: "OpenAI",
+  }), undefined, undefined, {
+    primarySourceType: "GENERAL_WEB",
+    fallbackSourceTypes: [],
+    allowedProviderIds: ["public-web"],
+    reason: "test",
+  });
+  assert.equal(result.signals.some((signal) => signal.contentQuality === "INSUFFICIENT_CONTENT"), false);
+  assert.equal((result.filteringSummary?.filteredReasons.insufficientContent ?? 0) > 0, true);
 });
 
 test("FilteringSummary reports duplicate, low verification, and non-zero displayed counts without chain-of-thought", () => {
