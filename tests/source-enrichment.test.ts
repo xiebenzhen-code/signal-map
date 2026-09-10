@@ -95,7 +95,7 @@ test("pipeline detail enrichment improves Product Hunt candidates without creati
   t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => {
     const url = String(target);
     if (url.includes("producthunt.com/search")) {
-      return new Response(`<html><body><a href="/products/neon-video-agent">Neon Video Agent</a></body></html>`);
+      return new Response(`<html><body><div class="flex flex-col gap-2"><ul><li><a class=" pr-2 text-sm text-secondary hover:underline" href="/products/neon-video-agent/reviews?ref=footer">Neon Video Agent</a></li></ul></div></body></html>`);
     }
     if (url.includes("producthunt.com/products/neon-video-agent")) {
       return new Response(`
@@ -123,6 +123,13 @@ test("pipeline detail enrichment improves Product Hunt candidates without creati
   assert.equal(result.filteringSummary?.detailEnrichment?.stillInsufficient, 0);
   assert.equal(result.filteringSummary?.filteredReasons.insufficientContent, 0);
   assert.equal(result.filteringSummary?.strongestHiddenSignal?.signalType, "EARLY_SIGNAL");
+  const productHuntDiagnostics = result.sourceDiagnostics?.find((item) => item.providerId === "product-hunt");
+  assert.equal(productHuntDiagnostics?.rawProviderResultCount, 1);
+  assert.equal(productHuntDiagnostics?.normalizedCandidateCount, 1);
+  assert.equal(productHuntDiagnostics?.admittedCandidateCount, 1);
+  assert.equal(productHuntDiagnostics?.enrichmentEligibleCount, 1);
+  assert.equal(productHuntDiagnostics?.detailAttempted, 1);
+  assert.equal(productHuntDiagnostics?.detailSucceeded, 1);
 });
 
 test("pipeline detail enrichment improves Hugging Face candidates through README", async (t) => {

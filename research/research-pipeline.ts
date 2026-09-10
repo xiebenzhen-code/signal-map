@@ -42,6 +42,7 @@ import type {
   ResearchInput,
   ResearchResponse,
   ResearchSignal,
+  SourceStageDiagnostics,
   QueryPlan,
   SourceType,
   VerificationStatus,
@@ -410,14 +411,16 @@ async function searchDirectProvider(
   providerId?: string,
 ) {
   try {
-    const items = unique((await search())
+    const rawItems = await search();
+    const normalizedItems = rawItems
       .filter((item) => relevant(item, plan))
       .map((item) => ({
         ...item,
         sourceType,
         providerId,
         sourceCapability: providerId ? sourceCapability(providerId) : undefined,
-      })));
+      }));
+    const items = unique(normalizedItems);
     return {
       items,
       outcome: {
@@ -425,6 +428,8 @@ async function searchDirectProvider(
         execution: items.length ? "searched_with_results" as const : "searched_no_results" as const,
         searched: true,
         resultCount: items.length,
+        rawResultCount: rawItems.length,
+        normalizedCandidateCount: normalizedItems.length,
         requestCount: 1,
       },
     };
@@ -751,7 +756,7 @@ async function enrichDiscoveryCandidates(
   };
   const cache = new Set<string>();
   const candidatesByUrl = new Map(candidates.map((candidate) => [candidate.url, candidate]));
-  const enrichmentTargets = [...candidates]
+  const eligibleCandidates = [...candidates]
     .filter((candidate) =>
       shouldEnrichDetail({
         providerId: candidate.providerId,
@@ -759,7 +764,13 @@ async function enrichDiscoveryCandidates(
         snippet: candidate.snippet,
         potentialScore: usefulness(candidate, plan),
       }),
-    )
+    );
+  const eligibleByProvider: Record<string, number> = {};
+  for (const candidate of eligibleCandidates) {
+    const providerId = candidate.providerId || candidate.source;
+    eligibleByProvider[providerId] = (eligibleByProvider[providerId] || 0) + 1;
+  }
+  const enrichmentTargets = eligibleCandidates
     .sort((left, right) => usefulness(right, plan) - usefulness(left, plan))
     .slice(0, maxDetailFetchesPerRound);
 
@@ -800,7 +811,47 @@ async function enrichDiscoveryCandidates(
     }
   }
 
-  return { candidates, summary };
+  return { candidates, summary, eligibleByProvider };
+}
+
+function buildSourceDiagnostics(
+  sourceOutcomes: SourceExecutionOutcome[],
+  candidates: ResearchCandidate[],
+  displayedSignals: ResearchSignal[],
+  eligibleByProvider: Record<string, number>,
+): SourceStageDiagnostics[] {
+  const providerIds = new Set([
+    ...sourceOutcomes
+      .map((outcome) => outcome.source.toLowerCase() === "product hunt" ? "product-hunt" : "")
+      .filter(Boolean),
+    ...candidates.map((candidate) => candidate.providerId).filter(Boolean) as string[],
+  ]);
+  return [...providerIds].map((providerId) => {
+    const outcome = sourceOutcomes.find((candidate) =>
+      providerId === "product-hunt" && candidate.source.toLowerCase() === "product hunt",
+    );
+    const providerCandidates = candidates.filter((candidate) => candidate.providerId === providerId);
+    const detailAttempted = providerCandidates.filter((candidate) => candidate.detailEnrichment?.attempted).length;
+    const detailSucceeded = providerCandidates.filter((candidate) => candidate.detailEnrichment?.status === "SUCCESS").length;
+    const detailFailed = providerCandidates.filter((candidate) => candidate.detailEnrichment?.status === "FETCH_FAILED").length;
+    return {
+      providerId,
+      rawProviderResultCount: outcome?.rawResultCount ?? outcome?.resultCount ?? 0,
+      normalizedCandidateCount: outcome?.normalizedCandidateCount ?? outcome?.resultCount ?? 0,
+      admittedCandidateCount: providerCandidates.length,
+      enrichmentEligibleCount: eligibleByProvider[providerId] || 0,
+      detailAttempted,
+      detailSucceeded,
+      detailFailed,
+      pipelineRetrievedCount: providerCandidates.length,
+      displayedCount: displayedSignals.filter((signal) =>
+        providerCandidates.some((candidate) => candidate.url === signal.sourceUrl),
+      ).length,
+      ...(providerId === "product-hunt" && providerCandidates.length === 0
+        ? { rejectionReasons: { no_candidate_after_normalization: 1 } }
+        : {}),
+    } satisfies SourceStageDiagnostics;
+  });
 }
 
 export async function runResearchPipeline(
@@ -1123,7 +1174,7 @@ export async function runResearchPipeline(
     ...hackerNewsResult.items,
     ...social.representatives,
   ]);
-  const { candidates, summary: detailEnrichment } = await enrichDiscoveryCandidates(
+  const { candidates, summary: detailEnrichment, eligibleByProvider } = await enrichDiscoveryCandidates(
     discoveredCandidates,
     plan,
     failures,
@@ -1824,6 +1875,7 @@ export async function runResearchPipeline(
     displayedSignals: signals,
     detailEnrichment,
   });
+  const sourceDiagnostics = buildSourceDiagnostics(sourceOutcomes, candidates, signals, eligibleByProvider);
 
   if (debug?.onEligibilityAudit) {
     const preliminaryIgnoreFailureCounts: Partial<Record<PreliminaryEligibilityFailure, number>> = {};
@@ -1922,5 +1974,6 @@ export async function runResearchPipeline(
     dataMode: "live",
     lastCheckedAt: new Date().toISOString(),
     sourceOutcomes: sourceOutcomesForAgent,
+    sourceDiagnostics,
   };
 }

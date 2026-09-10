@@ -264,10 +264,25 @@ export type ResearchResponse = {
   dataMode: "live" | "demo" | "mixed";
   lastCheckedAt?: string;
   sourceOutcomes?: ResearchSourceOutcome[];
+  sourceDiagnostics?: SourceStageDiagnostics[];
   intent?: IntentClassification;
   sourceProfile?: SourceProfile;
   outputMode?: SourceProfile["outputMode"];
   intentOutput?: IntentMappedOutput;
+};
+
+export type SourceStageDiagnostics = {
+  providerId: string;
+  rawProviderResultCount: number;
+  normalizedCandidateCount: number;
+  admittedCandidateCount: number;
+  enrichmentEligibleCount: number;
+  detailAttempted: number;
+  detailSucceeded: number;
+  detailFailed: number;
+  pipelineRetrievedCount: number;
+  displayedCount: number;
+  rejectionReasons?: Record<string, number>;
 };
 
 type ResearchSourceOutcome = {

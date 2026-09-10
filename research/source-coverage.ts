@@ -11,6 +11,8 @@ export type SourceExecutionOutcome = {
     | "failed";
   searched: boolean;
   resultCount: number;
+  rawResultCount?: number;
+  normalizedCandidateCount?: number;
   requestCount?: number;
   failureCode?: ProviderSearchFailureCode;
 };
