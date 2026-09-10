@@ -94,7 +94,7 @@ export function buildFilteringSummary(input: {
           : reason
             ? userFacingLabel(reason)
             : "暂未达到展示条件",
-        sources: signal.sources.map((source) => ({ publisher: source.publisher, sourceUrl: source.sourceUrl })),
+        sources: (signal.sources ?? []).map((source) => ({ publisher: source.publisher, sourceUrl: source.sourceUrl })),
       };
     }),
     summaryText,

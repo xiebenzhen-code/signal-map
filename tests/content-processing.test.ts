@@ -123,5 +123,5 @@ test("INSUFFICIENT_CONTENT enters FilteringSummary", () => {
     displayedSignals: [],
   });
   assert.equal(summary.filteredReasons.insufficientContent, 1);
-  assert.match(summary.summaryText, /INSUFFICIENT_CONTENT|正文提取不足|insufficient/i);
+  assert.match(summary.summaryText, /内容太少，无法验证/);
 });
