@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export default function ResetPasswordPage() {
   const [password, setPassword] = useState("");
@@ -8,8 +8,11 @@ export default function ResetPasswordPage() {
   const [status, setStatus] = useState("");
   const [done, setDone] = useState(false);
   const [ready, setReady] = useState(false);
+  const recoveryStarted = useRef(false);
 
   useEffect(() => {
+    if (recoveryStarted.current) return;
+    recoveryStarted.current = true;
     const code = new URLSearchParams(window.location.search).get("code");
     if (!code) { setStatus("重置链接无效或已过期，请重新请求"); return; }
     void fetch("/api/auth/password-recovery", {
@@ -52,7 +55,8 @@ export default function ResetPasswordPage() {
       <label className="grid gap-2 text-sm font-semibold">确认新密码<input required minLength={6} type="password" value={confirm} onChange={(event) => setConfirm(event.target.value)} autoComplete="new-password" className="min-h-12 rounded-xl border bg-white px-4 font-normal" /></label>
       <button className="min-h-12 rounded-xl bg-[#2457ff] font-semibold text-white">更新密码</button>
     </form> : <p className="mt-6 text-sm leading-7 text-[#657080]">正在验证重置链接…</p>}
-    {status ? <p role="status" className="mt-4 text-sm text-[#a13926]">{status}</p> : null}
+    {status ? <p role="status" className="mt-4 text-sm leading-7 text-[#a13926]">{status}</p> : null}
+    {!ready && !done ? <p className="mt-3 text-xs leading-6 text-[#657080]">密码重置链接与发起请求的浏览器绑定。请不要在另一台设备或无痕窗口打开。</p> : null}
     <a href="/control" className="mt-6 block text-center text-sm text-[#657080]">返回登录</a>
   </main>;
 }

@@ -387,7 +387,17 @@ export const handleAuthPasswordRecovery = withSession(async (request: Request) =
   const { client } = requestSession(request);
   if (!client) return Response.json({ error: "Supabase Auth 尚未配置" }, { status: 503 });
   const { error } = await client.auth.exchangeCodeForSession(code);
-  if (error) return Response.json({ error: "重置链接无效或已过期，请重新请求" }, { status: 401 });
+  if (error) {
+    const detail = `${error.message ?? ""}`.toLowerCase();
+    const verifierMissing = detail.includes("code verifier") || detail.includes("pkce") || detail.includes("verifier");
+    if (verifierMissing) {
+      return Response.json({
+        error: "请在发起重置请求的同一浏览器打开邮件链接。若换了设备，请在当前设备重新请求一次。",
+        code: "recovery_browser_mismatch",
+      }, { status: 401 });
+    }
+    return Response.json({ error: "重置链接无效或已过期，请重新请求" }, { status: 401 });
+  }
   return Response.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
 });
 

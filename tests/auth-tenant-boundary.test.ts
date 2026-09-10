@@ -253,16 +253,20 @@ test("password recovery exchanges the email code before password update", async 
     const url = new URL(String(target));
     assert.equal(url.pathname, "/auth/v1/token");
     assert.equal(url.searchParams.get("grant_type"), "pkce");
-    assert.deepEqual(JSON.parse(String(init?.body)), { code: "recovery-code", code_verifier: undefined });
-    return Response.json({ error: "missing_verifier", error_description: "missing" }, { status: 400 });
+    assert.deepEqual(JSON.parse(String(init?.body)), { auth_code: "recovery-code", code_verifier: "test-verifier" });
+    return Response.json({
+      access_token: "fixture-access-token", refresh_token: "fixture-refresh-token", token_type: "bearer", expires_in: 3600,
+      user: { id: "recovered-user", aud: "authenticated", app_metadata: {}, user_metadata: {}, created_at: now },
+    });
   });
   const response = await handleBackendRequest(new Request("https://signal.benzhenlab.com/api/auth/password-recovery", {
     method: "POST",
-    headers: { Origin: "https://signal.benzhenlab.com", "Content-Type": "application/json" },
+    headers: { Origin: "https://signal.benzhenlab.com", "Content-Type": "application/json", Cookie: `sb-auth-fixture-auth-token-code-verifier=base64-${Buffer.from(JSON.stringify("test-verifier/recovery")).toString("base64url")}` },
     body: JSON.stringify({ code: "recovery-code" }),
   }));
-  assert.equal(response.status, 401);
-  assert.deepEqual(await response.json(), { error: "重置链接无效或已过期，请重新请求" });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true });
+  assert.ok(response.headers.getSetCookie().some((cookie) => cookie.startsWith("sb-auth-fixture-auth-token=")));
 });
 
 test("Agent API never falls back to guest when no database or auth exists", async () => {
