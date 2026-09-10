@@ -412,8 +412,12 @@ async function searchDirectProvider(
 ) {
   try {
     const rawItems = await search();
+    const discoveryProvider = providerId ? sourceCapability(providerId) === "DISCOVERY" : false;
     const normalizedItems = rawItems
-      .filter((item) => relevant(item, plan))
+      // Discovery providers have already applied their own source query. Do not
+      // discard their candidates a second time with the generic keyword gate;
+      // detail enrichment and the existing downstream gates remain authoritative.
+      .filter((item) => discoveryProvider || relevant(item, plan))
       .map((item) => ({
         ...item,
         sourceType,

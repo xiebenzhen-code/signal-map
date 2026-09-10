@@ -95,14 +95,14 @@ test("pipeline detail enrichment improves Product Hunt candidates without creati
   t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => {
     const url = String(target);
     if (url.includes("producthunt.com/search")) {
-      return new Response(`<html><body><div class="flex flex-col gap-2"><ul><li><a class=" pr-2 text-sm text-secondary hover:underline" href="/products/neon-video-agent/reviews?ref=footer">Neon Video Agent</a></li></ul></div></body></html>`);
+      return new Response(`<html><body><div class="flex flex-col gap-2"><ul><li><a class=" pr-2 text-sm text-secondary hover:underline" href="/products/neon-canvas/reviews?ref=footer">Neon Canvas</a></li></ul></div></body></html>`);
     }
-    if (url.includes("producthunt.com/products/neon-video-agent")) {
+    if (url.includes("producthunt.com/products/neon-canvas")) {
       return new Response(`
         <html><head>
-          <title>Neon Video Agent</title>
-          <meta name="description" content="Neon Video Agent launched a browser-based AI video workflow for creators. The product page describes prompt-to-video generation, timeline review, and export support.">
-        </head><body>Neon Video Agent launched a browser-based AI video workflow for creators.</body></html>
+          <title>Neon Canvas</title>
+          <meta name="description" content="Neon Canvas launched a browser-based creative workflow for teams. The product page describes collaborative editing, review, and export support.">
+        </head><body>Neon Canvas launched a browser-based creative workflow for teams.</body></html>
       `);
     }
     return new Response("", { status: 404 });
