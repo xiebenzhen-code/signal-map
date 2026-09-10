@@ -243,6 +243,28 @@ test("password update rejects requests without a verified recovery session", asy
   assert.deepEqual(await response.json(), { error: "重置链接已失效，请重新请求密码重置" });
 });
 
+test("password recovery exchanges the email code before password update", async (t) => {
+  const keys = ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"] as const;
+  const previous = keys.map((key) => process.env[key]);
+  t.after(() => keys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; }));
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://auth-fixture.supabase.co";
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "test-publishable-key";
+  t.mock.method(globalThis, "fetch", async (target: string | URL, init?: RequestInit) => {
+    const url = new URL(String(target));
+    assert.equal(url.pathname, "/auth/v1/token");
+    assert.equal(url.searchParams.get("grant_type"), "pkce");
+    assert.deepEqual(JSON.parse(String(init?.body)), { code: "recovery-code", code_verifier: undefined });
+    return Response.json({ error: "missing_verifier", error_description: "missing" }, { status: 400 });
+  });
+  const response = await handleBackendRequest(new Request("https://signal.benzhenlab.com/api/auth/password-recovery", {
+    method: "POST",
+    headers: { Origin: "https://signal.benzhenlab.com", "Content-Type": "application/json" },
+    body: JSON.stringify({ code: "recovery-code" }),
+  }));
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error: "重置链接无效或已过期，请重新请求" });
+});
+
 test("Agent API never falls back to guest when no database or auth exists", async () => {
   const previous = process.env.DATABASE_URL;
   delete process.env.DATABASE_URL;

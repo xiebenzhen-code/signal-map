@@ -379,6 +379,18 @@ export const handleAuthPasswordUpdate = withSession(async (request: Request) => 
   return Response.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
 });
 
+export const handleAuthPasswordRecovery = withSession(async (request: Request) => {
+  if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
+  const body = await bodyRecord(request);
+  const code = typeof body.code === "string" ? body.code.trim() : "";
+  if (!code) return Response.json({ error: "重置链接无效或已过期，请重新请求" }, { status: 400 });
+  const { client } = requestSession(request);
+  if (!client) return Response.json({ error: "Supabase Auth 尚未配置" }, { status: 503 });
+  const { error } = await client.auth.exchangeCodeForSession(code);
+  if (error) return Response.json({ error: "重置链接无效或已过期，请重新请求" }, { status: 401 });
+  return Response.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
+});
+
 export const handleResearchStream = withSession(async (request: Request) => {
   if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
   if (!await resolveAuthContext(request)) return Response.json({ error: "Unauthorized" }, { status: 401 });

@@ -6,6 +6,7 @@ import {
   handleAuthLogout,
   handleAuthMe,
   handleAuthPasswordReset,
+  handleAuthPasswordRecovery,
   handleAuthPasswordUpdate,
   handleConnections,
   handleControlAgentRuns,
@@ -67,6 +68,8 @@ export async function handleBackendRequest(request: Request) {
     response = await handleAuthPasswordReset(request);
   } else if (url.pathname === "/api/auth/password-update") {
     response = await handleAuthPasswordUpdate(request);
+  } else if (url.pathname === "/api/auth/password-recovery") {
+    response = await handleAuthPasswordRecovery(request);
   } else if (url.pathname === "/api/connections") {
     response = await handleConnections();
   } else if (url.pathname === "/api/research/plan") {

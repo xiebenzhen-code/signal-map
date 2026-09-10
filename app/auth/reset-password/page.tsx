@@ -1,12 +1,29 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export default function ResetPasswordPage() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [status, setStatus] = useState("");
   const [done, setDone] = useState(false);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get("code");
+    if (!code) { setStatus("重置链接无效或已过期，请重新请求"); return; }
+    void fetch("/api/auth/password-recovery", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ code }),
+    }).then(async (response) => {
+      const body = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) { setStatus(body.error ?? "重置链接无效或已过期，请重新请求"); return; }
+      setReady(true);
+      setStatus("");
+    }).catch(() => setStatus("暂时无法验证重置链接，请稍后重试"));
+  }, []);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -30,11 +47,11 @@ export default function ResetPasswordPage() {
   return <main className="signal-shell mx-auto min-h-screen max-w-md px-5 py-16 sm:py-24">
     <p className="signal-eyebrow">个人信息雷达</p>
     <h1 className="signal-display mt-4 text-4xl leading-tight">设置新密码。</h1>
-    {done ? <p className="mt-6 text-sm leading-7 text-[#2457ff]">密码已更新，现在可以返回登录。</p> : <form className="signal-surface mt-8 grid gap-5 rounded-3xl p-6" onSubmit={submit}>
+    {done ? <p className="mt-6 text-sm leading-7 text-[#2457ff]">密码已更新，现在可以返回登录。</p> : ready ? <form className="signal-surface mt-8 grid gap-5 rounded-3xl p-6" onSubmit={submit}>
       <label className="grid gap-2 text-sm font-semibold">新密码<input required minLength={6} type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" className="min-h-12 rounded-xl border bg-white px-4 font-normal" /></label>
       <label className="grid gap-2 text-sm font-semibold">确认新密码<input required minLength={6} type="password" value={confirm} onChange={(event) => setConfirm(event.target.value)} autoComplete="new-password" className="min-h-12 rounded-xl border bg-white px-4 font-normal" /></label>
       <button className="min-h-12 rounded-xl bg-[#2457ff] font-semibold text-white">更新密码</button>
-    </form>}
+    </form> : <p className="mt-6 text-sm leading-7 text-[#657080]">正在验证重置链接…</p>}
     {status ? <p role="status" className="mt-4 text-sm text-[#a13926]">{status}</p> : null}
     <a href="/control" className="mt-6 block text-center text-sm text-[#657080]">返回登录</a>
   </main>;
