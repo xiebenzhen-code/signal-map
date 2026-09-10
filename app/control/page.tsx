@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { goalStatusLabel, resumeConditionLabel, userFacingLabel, userFacingReason, verificationStatusLabel } from "@/lib/user-facing-labels";
 
 type ControlGoal = {
   id: string;
@@ -247,7 +248,7 @@ export default function ControlDashboard() {
             <article className="control-card" key={goal.id}>
               <div className="control-row">
                 <h3>{goal.objective}</h3>
-                <span className={`control-badge ${goal.status}`}>{goal.status}</span>
+                <span className={`control-badge ${goal.status}`}>{goalStatusLabel(goal.status)}</span>
               </div>
               <p>已完成 {goal.completedCriteria.length} / 剩余 {goal.remainingCriteria.length}</p>
               {goal.waitingOrBlockedReason ? <p>原因：{goal.waitingOrBlockedReason}</p> : null}
@@ -265,7 +266,7 @@ export default function ControlDashboard() {
           {state.goals.filter((goal) => goal.watch).length === 0 ? <Empty text="暂无 Watch metadata。" /> : state.goals.filter((goal) => goal.watch).map((goal) => (
             <article className="control-card" key={`watch-${goal.id}`}>
               <h3>{goal.objective}</h3>
-              <p>{goal.watch?.resumeCondition?.type} · {goal.watch?.resumeCondition?.reason}</p>
+              <p>{resumeConditionLabel(goal.watch?.resumeCondition?.type)} · {goal.watch?.resumeCondition?.reason || "等待明确的恢复条件"}</p>
               <p>目标：{goal.watch?.resumeCondition?.target}</p>
               <p>状态：{goal.watch?.watchStatus} · 上次：{goal.watch?.lastCheckOutcome ?? "not_checked"}</p>
               <p>nextCheckAt：{goal.watch?.nextCheckAt ?? "无"}</p>
@@ -279,7 +280,7 @@ export default function ControlDashboard() {
             <article className="control-card" key={item.id}>
               <div className="control-row">
                 <h3>{item.attention}</h3>
-                <span className="control-badge">{item.status}</span>
+                <span className="control-badge">{userFacingLabel(item.status, "状态未知")}</span>
               </div>
               <p>{item.deliveryAction} · {item.unread === false ? `已读 ${item.readAt ?? ""}` : "未读"} · {item.createdAt}</p>
               <p>Goal：{item.relatedGoalId ?? "无"} · Revision：{item.relatedRevisionId ?? "无"}</p>
@@ -297,13 +298,13 @@ export default function ControlDashboard() {
           {recentKnowledge.length === 0 ? <Empty text="暂无 Personal Knowledge。" /> : recentKnowledge.map((item) => (
             <article className="control-card" key={item.id}>
               <h3>{item.currentValue}</h3>
-              <p>{item.type} · revision {item.revision.currentRevision ?? "unknown"}</p>
-              <p>{item.provenance.verificationStatus ?? "verification unknown"} · reliability {item.provenance.reliabilityScore ?? "unknown"}</p>
+              <p>{userFacingLabel(item.type, "知识记录")} · 修订 {item.revision.currentRevision ?? "未知"}</p>
+              <p>{verificationStatusLabel(item.provenance.verificationStatus)} · 可靠性 {item.provenance.reliabilityScore ?? "未知"}</p>
               <p>原因：{item.revision.revisionReason ?? "无"}</p>
               <details>
                 <summary>Supporting Evidence ({item.supportingEvidence.length})</summary>
                 {item.supportingEvidence.map((evidence) => (
-                  <a key={evidence.id} href={evidence.sourceUrl} target="_blank" rel="noreferrer">{evidence.publisher} · {evidence.verificationStatus}</a>
+                  <a key={evidence.id} href={evidence.sourceUrl} target="_blank" rel="noreferrer">{evidence.publisher} · {verificationStatusLabel(evidence.verificationStatus)}</a>
                 ))}
               </details>
             </article>
@@ -322,7 +323,7 @@ export default function ControlDashboard() {
               <details>
                 <summary>Trace ({run.trace.length})</summary>
                 {run.trace.map((entry, index) => (
-                  <p key={`${run.id}-${entry.timestamp}-${index}`}>{entry.state} · {entry.action} · {entry.reason ?? entry.result}</p>
+                  <p key={`${run.id}-${entry.timestamp}-${index}`}>{userFacingLabel(entry.state, "执行步骤")} · {userFacingReason(entry.action)} · {userFacingReason(entry.reason ?? entry.result)}</p>
                 ))}
               </details>
             </article>

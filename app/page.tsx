@@ -53,6 +53,7 @@ import {
   loadAlphaSnapshot,
   setAlphaValue,
 } from "@/lib/alpha-storage";
+import { signalTypeLabel, userFacingReason } from "@/lib/user-facing-labels";
 
 type Page = "today" | "information" | "library" | "settings";
 type LibraryView = "following" | "saved" | "questions" | "knowledge";
@@ -202,7 +203,7 @@ function FilteringSummaryCard({ summary }: { summary?: FilteringSummary }) {
       </div>
       {summary.strongestHiddenSignal && (
         <p className="mt-3 text-xs text-[#737c88]">
-          最强隐藏信号：{summary.strongestHiddenSignal.signalType} · {summary.strongestHiddenSignal.independentSourceCount} 个独立来源 · 原因 {summary.strongestHiddenSignal.reason}
+          最强隐藏信号：{signalTypeLabel(summary.strongestHiddenSignal.signalType)} · {summary.strongestHiddenSignal.independentSourceCount} 个独立来源 · 原因 {userFacingReason(summary.strongestHiddenSignal.reason)}
         </p>
       )}
     </section>
