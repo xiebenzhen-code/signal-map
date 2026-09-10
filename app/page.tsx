@@ -34,6 +34,7 @@ import {
 } from "@/information/run-information";
 import { createResearchRequest } from "@/information/research-request";
 import { selectTodayPresentation } from "@/information/today-selection";
+import { todayResultCopy } from "@/information/today-copy";
 import type {
   ActiveKnowledgeContext,
   FilterKnowledgeState,
@@ -1197,8 +1198,10 @@ export default function HomePage() {
         <div>
           <p className="signal-eyebrow">{todayDate}</p>
           <h1 className="signal-display mt-2 text-5xl sm:text-6xl">今日</h1>
-          {!loading && response && <p className="mt-3 text-[22px] font-semibold tracking-[-.045em] text-[#172033]">今天只需阅读 {todayPresentation.items.length} 条。</p>}
-          <p className="mt-3 max-w-xl text-sm leading-6 text-[#737c88]">只保留可能改变你判断、且有证据支持的新变化。</p>
+          {!loading && response && (() => {
+            const copy = todayResultCopy(todayPresentation.items.length, response.filteringSummary?.retrievedCount ?? 0);
+            return <><p className="mt-3 text-[22px] font-semibold tracking-[-.045em] text-[#172033]">{copy.headline}</p><p className="mt-3 max-w-xl text-sm leading-6 text-[#737c88]">{copy.supporting}</p></>;
+          })()}
         </div>
         <button
           onClick={() => activeFilter && activeContext && void refreshToday(activeContext, activeFilter)}
