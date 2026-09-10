@@ -348,6 +348,37 @@ export const handleAuthLogout = withSession(async (request: Request) => {
   return Response.json({ ok: true }, { headers: { "Set-Cookie": "signal_map_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0" } });
 });
 
+export const handleAuthPasswordReset = withSession(async (request: Request) => {
+  if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
+  const body = await bodyRecord(request);
+  const email = fieldValue(body.email ?? body.loginName);
+  if (!email || !email.includes("@")) return Response.json({ error: "请输入有效邮箱" }, { status: 400 });
+  const { client } = requestSession(request);
+  if (!client) return Response.json({ error: "Supabase Auth 尚未配置" }, { status: 503 });
+  const origin = new URL(request.url).origin;
+  const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo: `${origin}/auth/reset-password` });
+  if (error) {
+    const mapped = mapAuthError(error, "login");
+    return Response.json({ error: mapped.error, code: mapped.code }, { status: mapped.status });
+  }
+  // Keep account existence private: a valid request has the same success shape either way.
+  return Response.json({ ok: true, status: "reset_requested" }, { headers: { "Cache-Control": "no-store" } });
+});
+
+export const handleAuthPasswordUpdate = withSession(async (request: Request) => {
+  if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
+  const body = await bodyRecord(request);
+  const password = typeof body.password === "string" ? body.password : "";
+  if (password.length < 6) return Response.json({ error: "请输入至少 6 位新密码" }, { status: 400 });
+  const { client } = requestSession(request);
+  if (!client) return Response.json({ error: "Supabase Auth 尚未配置" }, { status: 503 });
+  const auth = await resolveAuthContext(request);
+  if (!auth) return Response.json({ error: "重置链接已失效，请重新请求密码重置" }, { status: 401 });
+  const { error } = await client.auth.updateUser({ password });
+  if (error) return Response.json({ error: "新密码未更新，请重新请求密码重置" }, { status: 400 });
+  return Response.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
+});
+
 export const handleResearchStream = withSession(async (request: Request) => {
   if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
   if (!await resolveAuthContext(request)) return Response.json({ error: "Unauthorized" }, { status: 401 });

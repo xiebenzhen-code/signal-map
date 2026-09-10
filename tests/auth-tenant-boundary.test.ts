@@ -202,6 +202,47 @@ test("Alpha signup creates an authenticated Supabase session", async (t) => {
   assert.equal((await response.json() as { user?: { id: string } }).user?.id, "new-user");
 });
 
+test("password reset is server-side and points to the recovery page", async (t) => {
+  const keys = ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"] as const;
+  const previous = keys.map((key) => process.env[key]);
+  t.after(() => keys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; }));
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://auth-fixture.supabase.co";
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "test-publishable-key";
+  t.mock.method(globalThis, "fetch", async (target: string | URL, init?: RequestInit) => {
+    const url = new URL(String(target));
+    assert.equal(url.pathname, "/auth/v1/recover");
+    assert.equal(url.searchParams.get("redirect_to"), "https://signal.benzhenlab.com/auth/reset-password");
+    assert.equal(JSON.parse(String(init?.body)).email, "fixture@example.com");
+    return Response.json({});
+  });
+  const response = await handleBackendRequest(new Request("https://signal.benzhenlab.com/api/auth/password-reset", {
+    method: "POST",
+    headers: { Origin: "https://signal.benzhenlab.com", "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "fixture@example.com" }),
+  }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, status: "reset_requested" });
+});
+
+test("password update rejects requests without a verified recovery session", async (t) => {
+  const priorUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const priorKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://auth-fixture.supabase.co";
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "test-publishable-key";
+  t.after(() => {
+    if (priorUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL; else process.env.NEXT_PUBLIC_SUPABASE_URL = priorUrl;
+    if (priorKey === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY; else process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = priorKey;
+  });
+  t.mock.method(globalThis, "fetch", async () => Response.json({ code: "bad_jwt", message: "Invalid token" }, { status: 401 }));
+  const response = await handleBackendRequest(new Request("https://signal.benzhenlab.com/api/auth/password-update", {
+    method: "POST",
+    headers: { Origin: "https://signal.benzhenlab.com", "Content-Type": "application/json" },
+    body: JSON.stringify({ password: "new-password" }),
+  }));
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error: "重置链接已失效，请重新请求密码重置" });
+});
+
 test("Agent API never falls back to guest when no database or auth exists", async () => {
   const previous = process.env.DATABASE_URL;
   delete process.env.DATABASE_URL;
