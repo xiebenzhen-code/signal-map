@@ -1,4 +1,5 @@
 import type { QueryPlan, ResearchInput } from "./types";
+import { deduplicateQueries, resolveResearchEntities } from "./entity-resolution.ts";
 
 const expansions: Array<{
   test: RegExp;
@@ -129,7 +130,9 @@ export function planQuery(input: ResearchInput): QueryPlan {
     ...(originalNeed.match(/[“「『\"]([^”」』\"]{2,})[”」』\"]/g) || []).map(
       (item) => item.replace(/[“”「」『』\"]/g, ""),
     ),
-  ]);
+  ]).filter((entity) => !/^(AI|API|Agent|Model|Research|Open|New|Latest)$/i.test(entity));
+  const resolvedEntities = resolveResearchEntities({ entities, query: originalNeed });
+  const aliasesConsidered = unique(resolvedEntities.flatMap((entity) => entity.aliasesConsidered));
   const knownSubjects = knownEntitySubjects(input.knownInformation, entities);
   const industryKeywords = unique([
     input.industry,
@@ -154,7 +157,7 @@ export function planQuery(input: ResearchInput): QueryPlan {
       `${subject} copyright update`,
     ]),
   ]);
-  const searchCombinations = unique([
+  const searchCombinations = deduplicateQueries([
     ...entities.map((entity) => `${entity} latest update`),
     ...knownSubjects.map((subject) => `${subject} API new feature new limitation pricing policy`),
     ...entities.flatMap((entity) => [
@@ -177,7 +180,7 @@ export function planQuery(input: ResearchInput): QueryPlan {
     ...coreKeywords.slice(0, 4).flatMap((keyword) =>
       englishKeywords.slice(0, 3).map((english) => `${keyword} ${english}`),
     ),
-  ], 24);
+  ], resolvedEntities, 24);
 
   return {
     originalNeed,
@@ -191,5 +194,9 @@ export function planQuery(input: ResearchInput): QueryPlan {
     searchCombinations,
     retrievalWindows: ["24h", "3d", "7d", "30d"],
     requestedFreshnessWindow: normalizeFreshnessWindow(input.freshnessWindow),
+    resolvedEntities,
+    aliasesConsidered,
+    queryBudget: 24,
+    deduplicatedQueryCount: searchCombinations.length,
   };
 }

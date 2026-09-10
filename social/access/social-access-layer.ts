@@ -50,6 +50,7 @@ export class SocialAccessLayer {
           execution: success.items.length ? "searched_with_results" : "searched_no_results",
           searched: true,
           resultCount: success.items.length,
+          requestCount: 1,
           startedAt: success.startedAt,
           completedAt: success.completedAt,
         } satisfies ProviderSearchOutcome;
@@ -71,6 +72,7 @@ export class SocialAccessLayer {
           execution: "failed",
           searched: true,
           resultCount: 0,
+          requestCount: 1,
           failureCode: isProviderSearchError(reason) ? reason.code : "upstream_error",
           retryAfterSeconds: isProviderSearchError(reason) ? reason.retryAfterSeconds : undefined,
         } satisfies ProviderSearchOutcome;
@@ -81,6 +83,7 @@ export class SocialAccessLayer {
         execution: connectionStatus === "connected" ? "not_searched" : "failed",
         searched: false,
         resultCount: 0,
+        requestCount: 0,
       } satisfies ProviderSearchOutcome;
     });
     return {

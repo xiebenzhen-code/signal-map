@@ -3,6 +3,7 @@ import type { ResearchInput } from "../research/types.ts";
 import type { ResearchPlan, ResearchStrategy } from "./types.ts";
 import type { SourceSelection } from "./source-selector.ts";
 import type { IntentClassification, SourceProfile } from "../intent/types.ts";
+import { deduplicateQueries } from "../research/entity-resolution.ts";
 
 function appendLines(existing: string, values: string[]) {
   return [existing, ...values].map((value) => value.trim()).filter(Boolean).join("\n");
@@ -23,7 +24,11 @@ export function createResearchPlan(
     knownInformation: appendLines(input.knownInformation, relatedKnowledge),
   });
   const base = planned.searchCombinations;
-  const subject = [input.focusAreas, input.trackedEntities, input.currentQuestions].filter(Boolean).join(" ").trim();
+  const canonicalSubject = planned.resolvedEntities?.map((entity) => entity.canonicalEntity).join(" ") || [input.focusAreas, input.trackedEntities].filter(Boolean).join(" ");
+  const question = input.currentQuestions?.trim() || "";
+  const subject = (question && planned.resolvedEntities?.some((entity) => question.toLocaleLowerCase().includes(entity.canonicalEntity.toLocaleLowerCase()))
+    ? question
+    : [canonicalSubject, question].filter(Boolean).join(" ")).trim();
   const strategyQueries: Record<Exclude<ResearchStrategy, "STOP">, string[]> = {
     INITIAL: [`${subject} recent changes`, `${subject} official documentation`, `${subject} release notes`],
     REFRESH: [`${subject} latest update`, `${subject} official announcement`, `${subject} recent release notes`],
@@ -59,9 +64,9 @@ export function createResearchPlan(
       `${subject} legal text implementation date`,
     ],
   };
-  const queries = (strategy && strategy !== "STOP"
+  const queries = deduplicateQueries((strategy && strategy !== "STOP"
     ? [...(intent ? intentQueries[intent.primaryIntent] ?? [] : []), ...strategyQueries[strategy], ...base]
-    : base).filter((query, index, all) => query.trim() && all.indexOf(query) === index).slice(0, maxQueries);
+    : base), planned.resolvedEntities ?? [], maxQueries);
   return {
     objective: round === 1 ? planned.originalNeed : `${planned.originalNeed} · 补充验证第 ${round} 轮`,
     queries,

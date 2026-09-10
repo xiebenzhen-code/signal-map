@@ -26,6 +26,10 @@ const officialUpdateTargets: OfficialUpdateTarget[] = [
     aliases: ["google gemini", "gemini"],
     githubRepos: ["google-gemini/gemini-cli"],
   },
+  {
+    aliases: ["deepseek", "deep seek"],
+    githubRepos: ["deepseek-ai/DeepSeek-V3"],
+  },
 ];
 
 type Fetcher = typeof fetch;
@@ -122,6 +126,7 @@ export async function discoverOfficialGithubReleases(
         execution: "not_searched",
         searched: false,
         resultCount: 0,
+        requestCount: 0,
       },
     };
   }
@@ -134,15 +139,17 @@ export async function discoverOfficialGithubReleases(
   const outcome: SourceExecutionOutcome = succeeded
     ? {
         source: "GitHub Releases",
-        execution: items.length ? "searched_with_results" : "searched_no_results",
-        searched: true,
-        resultCount: items.length,
+      execution: items.length ? "searched_with_results" : "searched_no_results",
+      searched: true,
+      resultCount: items.length,
+      requestCount: repos.length,
       }
     : {
         source: "GitHub Releases",
-        execution: "failed",
-        searched: true,
-        resultCount: 0,
+      execution: "failed",
+      searched: true,
+      resultCount: 0,
+      requestCount: repos.length,
         failureCode: "upstream_error",
       };
   return {
@@ -201,6 +208,7 @@ export async function discoverOfficialUpdatePages(
         execution: "not_searched",
         searched: false,
         resultCount: 0,
+        requestCount: 0,
       },
     };
   }
@@ -218,12 +226,14 @@ export async function discoverOfficialUpdatePages(
           execution: items.length ? "searched_with_results" : "searched_no_results",
           searched: true,
           resultCount: items.length,
+          requestCount: pages.length,
         }
       : {
           source: "Official Update Pages",
           execution: "failed",
           searched: true,
           resultCount: 0,
+          requestCount: pages.length,
           failureCode: "upstream_error",
         },
     failure: failed ? `Official Update Pages: ${failed} 个页面请求失败或超时。` : undefined,

@@ -64,4 +64,13 @@ export const companySourceRegistry: CompanySourceProfile[] = [
     docsUrls: ["https://huggingface.co/docs"],
     githubOrgs: ["huggingface"],
   },
+  {
+    company: "DeepSeek",
+    aliases: ["deepseek", "deep seek"],
+    domains: ["deepseek.com", "api-docs.deepseek.com"],
+    changelogUrls: ["https://api-docs.deepseek.com/quick_start/intro"],
+    newsroomUrls: ["https://www.deepseek.com/"],
+    docsUrls: ["https://api-docs.deepseek.com/"],
+    githubOrgs: ["deepseek-ai"],
+  },
 ];

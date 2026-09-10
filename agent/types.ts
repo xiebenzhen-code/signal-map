@@ -66,6 +66,7 @@ export type SourceOutcome = {
   sourceType: SourceSelectionType;
   providerId: string;
   resultCount: number;
+  requestCount?: number;
   newEvidenceCount: number;
   newClaimCount: number;
   reliabilityGain: number;

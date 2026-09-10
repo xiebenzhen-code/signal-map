@@ -175,6 +175,7 @@ function FilteringSummaryCard({ summary }: { summary?: FilteringSummary }) {
     [summary.filteredReasons.unresolvedConflict, "冲突未解决"],
     [summary.filteredReasons.lowActionability, "行动价值低"],
     [summary.filteredReasons.noInformationGain, "无明显信息增量"],
+    [summary.filteredReasons.insufficientContent, "正文提取不足"],
   ].filter(([count]) => Number(count) > 0).slice(0, 3);
   return (
     <section className="mt-8 rounded-[24px] border border-[#dfe3e7] bg-white/75 p-5 text-sm leading-6 text-[#596473]">
@@ -185,6 +186,13 @@ function FilteringSummaryCard({ summary }: { summary?: FilteringSummary }) {
           [`检索 ${summary.retrievedCount}`, "条"],
           [`聚合 ${summary.clusteredCount}`, "个信号"],
           [`展示 ${summary.displayedCount}`, "个"],
+          ...(summary.detailEnrichment
+            ? [
+                [`详情抓取 ${summary.detailEnrichment.detailAttempted}`, "次"],
+                [`详情成功 ${summary.detailEnrichment.detailSucceeded}`, "次"],
+                [`仍不足 ${summary.detailEnrichment.stillInsufficient}`, "条"],
+              ] as const
+            : []),
         ].map(([label, suffix]) => (
           <span key={label} className="rounded-full bg-[#f3f4f1] px-3 py-1 text-xs font-bold text-[#596473]">{label}{suffix}</span>
         ))}
@@ -221,8 +229,13 @@ function EventCard({
       </div>
 
       <h3 className="signal-event-title mt-4 text-[20px] leading-7 sm:text-[23px] sm:leading-8">
-        {event.title}
+        {event.presentation?.headline || event.title}
       </h3>
+      {event.presentation?.fact && (
+        <p className="mt-3 text-sm font-semibold leading-6 text-[#4f5968]">
+          {event.presentation.fact}
+        </p>
+      )}
       <div className="signal-why mt-4 rounded-xl p-4">
         <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[#68727f]">
           为什么值得关注
@@ -353,7 +366,7 @@ function EventDetail({
         </div>
 
         <h2 className="mt-5 text-2xl font-black leading-9 tracking-[-.04em]">
-          {event.title}
+          {event.presentation?.headline || event.title}
         </h2>
         {event.latestUpdateAt && event.originalOccurredAt && (
           <p className="mt-2 text-xs font-semibold text-[#7d8691]">
@@ -363,32 +376,38 @@ function EventDetail({
         <section className="mt-6">
           <p className="text-xs font-black uppercase tracking-[.12em] text-[#7e8792]">为什么值得关注</p>
           <p className="mt-2 text-sm font-semibold leading-6 text-[#4f5968]">
-            {event.whyItMatters}
+            {event.presentation?.whyItMatters || event.whyItMatters}
           </p>
         </section>
 
         <section className="mt-6">
           <p className="text-xs font-black uppercase tracking-[.12em] text-[#7e8792]">事实</p>
-          {factClaims.length === 0 && (
+          {event.presentation?.contentQuality === "INSUFFICIENT_CONTENT" ? (
+            <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-800">
+              正文提取不足，未生成可验证事实。
+            </div>
+          ) : factClaims.length === 0 && (
             <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-800">
               未找到可靠证据。
             </div>
           )}
           <div className="mt-3 grid gap-2">
-            {factClaims.map((claim) => <p key={`${claim.sourceUrl}-${claim.claimText}`} className="rounded-2xl bg-[#f5f7f4] p-4 text-sm font-bold leading-6">{claim.claimText}</p>)}
+            {event.presentation?.contentQuality === "VALID" && (
+              <p className="rounded-2xl bg-[#f5f7f4] p-4 text-sm font-bold leading-6">{event.presentation.fact}</p>
+            )}
           </div>
         </section>
 
         <section className="mt-7">
           <p className="text-xs font-black uppercase tracking-[.12em] text-[#7e8792]">证据</p>
           <div className="mt-3 grid gap-3">
-            {event.claims.map((claim) => <article key={`${claim.sourceUrl}-${claim.claimText}`} className="border-l-2 border-[#d9e0ff] pl-4"><p className={`text-xs font-black ${claim.contentType === "FACT" ? "text-emerald-700" : "text-amber-700"}`}>{claim.contentType === "FACT" ? "事实" : "线索"} · {claim.publisher}</p><p className="mt-2 text-sm leading-6 text-[#5d6775]">{claim.evidenceSnippet}</p></article>)}
+            {(event.presentation?.evidence.length ? event.presentation.evidence : event.claims.map((claim) => ({ sourceName: claim.publisher, sourceRole: claim.contentType === "FACT" ? "verification" as const : "discovery" as const, snippet: claim.evidenceSnippet, url: claim.sourceUrl, publishedAt: claim.publishedAt }))).map((evidence) => <article key={`${evidence.url}-${evidence.snippet}`} className="border-l-2 border-[#d9e0ff] pl-4"><p className={`text-xs font-black ${evidence.sourceRole === "verification" ? "text-emerald-700" : "text-amber-700"}`}>{evidence.sourceRole === "verification" ? "事实证据" : "线索证据"} · {evidence.sourceName}</p><p className="mt-2 text-sm leading-6 text-[#5d6775]">{evidence.snippet}</p></article>)}
           </div>
         </section>
 
         <section className="mt-7 rounded-2xl bg-[#f6f7f4] p-4">
           <p className="text-xs font-black uppercase tracking-[.12em] text-[#7e8792]">解读</p>
-          <p className="mt-2 text-sm font-semibold leading-6 text-[#4f5968]">{event.why}</p>
+          <p className="mt-2 text-sm font-semibold leading-6 text-[#4f5968]">{event.presentation?.interpretation || event.why}</p>
         </section>
 
         <section className="mt-7">
@@ -518,21 +537,24 @@ function FocusReading({
           </span>
           <span>{eventStatusLabels[event.eventStatus]}</span>
         </div>
-        <h1 className="mt-5 text-3xl font-black leading-[1.2] tracking-[-.05em]">{event.title}</h1>
+        <h1 className="mt-5 text-3xl font-black leading-[1.2] tracking-[-.05em]">{event.presentation?.headline || event.title}</h1>
+        {event.presentation?.fact && (
+          <p className="mt-4 text-base font-bold leading-7 text-[#4f5968]">{event.presentation.fact}</p>
+        )}
         <section className="mt-6 rounded-2xl bg-white p-5 shadow-[0_8px_30px_rgba(28,36,50,.035)]">
           <p className="text-[9px] font-black tracking-[.14em] text-[#8a929d]">为什么值得关注 · 解读</p>
-          <p className="mt-2 text-sm font-semibold leading-7 text-[#4f5968]">{event.whyItMatters}</p>
+          <p className="mt-2 text-sm font-semibold leading-7 text-[#4f5968]">{event.presentation?.whyItMatters || event.whyItMatters}</p>
         </section>
         <section className="mt-5">
           <p className="text-[10px] font-black uppercase tracking-[.15em] text-[#7b8490]">证据</p>
           <div className="mt-3 grid gap-3">
-            {event.claims.map((claim) => (
-              <article key={claim.sourceUrl} className="rounded-2xl border border-[#e4e6e2] bg-white p-4">
-                <p className={`text-[9px] font-black ${claim.contentType === "FACT" ? "text-emerald-700" : "text-amber-700"}`}>
-                  {claim.contentType === "FACT" ? "事实" : "线索"} · 来源等级 {claim.sourceTier}
+            {(event.presentation?.evidence.length ? event.presentation.evidence : event.claims.map((claim) => ({ sourceName: claim.publisher, sourceRole: claim.contentType === "FACT" ? "verification" as const : "discovery" as const, snippet: claim.evidenceSnippet, url: claim.sourceUrl }))).map((evidence) => (
+              <article key={evidence.url} className="rounded-2xl border border-[#e4e6e2] bg-white p-4">
+                <p className={`text-[9px] font-black ${evidence.sourceRole === "verification" ? "text-emerald-700" : "text-amber-700"}`}>
+                  {evidence.sourceRole === "verification" ? "事实证据" : "线索证据"} · {evidence.sourceName}
                 </p>
-                <p className="mt-2 text-sm font-bold leading-6">{claim.claimText}</p>
-                <a href={claim.sourceUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block text-[10px] font-black text-[#2359ff]">
+                <p className="mt-2 text-sm font-bold leading-6">{evidence.snippet}</p>
+                <a href={evidence.url} target="_blank" rel="noreferrer" className="mt-3 inline-block text-[10px] font-black text-[#2359ff]">
                   查看原文 ↗
                 </a>
               </article>

@@ -2,6 +2,8 @@ import type { LiveItem } from "../social/providers/index.ts";
 import type { SourceCoverage } from "./source-coverage.ts";
 import type { IntentClassification, IntentMappedOutput, SourceProfile } from "../intent/types.ts";
 import type { SignalClassification, SignalCluster, SourceRole as FusionSourceRole } from "../signal-fusion/types.ts";
+import type { ContentQuality, SignalPresentation } from "../content-processing/types.ts";
+import type { DetailEnrichmentMetadata, DetailEnrichmentSummary, SourceCapabilityRole } from "../source-enrichment/types.ts";
 
 export type SourceType =
   | "primary"
@@ -26,6 +28,8 @@ export type EvidenceSource = {
   evidenceSnippet: string;
   sourceRole: SourceRole;
   verificationStatus: VerificationStatus;
+  discoveredBy?: string;
+  evidenceFrom?: string;
 };
 
 export type Claim = {
@@ -41,6 +45,9 @@ export type Claim = {
   verificationStatus: VerificationStatus;
   contentType: "FACT" | "SIGNAL";
   evidenceSources: EvidenceSource[];
+  discoveredBy?: string;
+  evidenceFrom?: string;
+  contentQuality?: ContentQuality;
   evidenceChainId?: string;
   canonicalClaimFingerprint?: string;
   propagationCount?: number;
@@ -61,7 +68,12 @@ export type QueryPlan = {
   requestedFreshnessWindow: "24h" | "3d" | "7d" | "30d";
   selectedSourceType?: string;
   fallbackSourceTypes?: string[];
+  allowedProviderIds?: string[];
   sourceSelectionReason?: string;
+  resolvedEntities?: Array<{ canonicalEntity: string; aliasesConsidered: string[] }>;
+  aliasesConsidered?: string[];
+  queryBudget?: number;
+  deduplicatedQueryCount?: number;
 };
 
 export type PipelineCounts = {
@@ -98,6 +110,10 @@ export type PipelineProgress = {
 
 export type ResearchCandidate = LiveItem & {
   sourceType: SourceType;
+  providerId?: string;
+  sourceCapability?: SourceCapabilityRole;
+  enrichedRawContent?: string;
+  detailEnrichment?: DetailEnrichmentMetadata;
 };
 
 export type ResearchSignal = {
@@ -177,6 +193,9 @@ export type ResearchSignal = {
     | "WORTH_WATCHING"
     | "LIBRARY_ONLY"
     | "IGNORE";
+  presentation?: SignalPresentation;
+  contentQuality?: ContentQuality;
+  contentFailureReason?: string;
 };
 
 export type ResearchOverview = {
@@ -202,7 +221,8 @@ export type FilteringReason =
   | "LOW_NOVELTY"
   | "UNRESOLVED_CONFLICT"
   | "LOW_ACTIONABILITY"
-  | "NO_INFORMATION_GAIN";
+  | "NO_INFORMATION_GAIN"
+  | "INSUFFICIENT_CONTENT";
 
 export type FilteringSummary = {
   retrievedCount: number;
@@ -218,7 +238,9 @@ export type FilteringSummary = {
     unresolvedConflict: number;
     lowActionability?: number;
     noInformationGain?: number;
+    insufficientContent?: number;
   };
+  detailEnrichment?: DetailEnrichmentSummary;
   strongestHiddenSignal?: {
     signalType: SignalClassification;
     reason: FilteringReason;
@@ -253,6 +275,7 @@ type ResearchSourceOutcome = {
   providerId: string;
   executed: boolean;
   resultCount: number;
+  requestCount?: number;
   newEvidenceCount: number;
   newClaimCount: number;
   reliabilityGain: number;

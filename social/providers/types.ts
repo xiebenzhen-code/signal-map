@@ -76,6 +76,7 @@ export type ProviderSearchOutcome = {
     | "failed";
   searched: boolean;
   resultCount: number;
+  requestCount?: number;
   startedAt?: string;
   completedAt?: string;
   failureCode?: ProviderSearchFailureCode;
