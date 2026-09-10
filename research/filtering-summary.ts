@@ -1,4 +1,5 @@
 import type { FilteringReason, FilteringSummary, ResearchSignal } from "./types.ts";
+import { userFacingLabel } from "../lib/user-facing-labels.ts";
 
 const emptyReasons = (): FilteringSummary["filteredReasons"] => ({
   stale: 0,
@@ -69,7 +70,7 @@ export function buildFilteringSummary(input: {
     .filter(([, count]) => count > 0)
     .sort((left, right) => right[1] - left[1])
     .slice(0, 2)
-    .map(([reason, count]) => `${count} 条 ${reason}`);
+    .map(([reason, count]) => `${count} 条 ${userFacingLabel(reason)}`);
   const summaryText = input.displayedSignals.length
     ? `共检索 ${input.retrievedCount} 条，聚合为 ${input.clusteredCount} 个信号，最终展示 ${input.displayedSignals.length} 个；其余主要因${topReasons.join("、") || "证据价值不足"}被过滤。`
     : `检索到 ${input.retrievedCount} 条信息，聚合为 ${input.clusteredCount} 个信号；当前主要因${topReasons.join("、") || "缺少可靠新增证据"}，没有达到展示门槛的可靠新信号。`;
@@ -80,6 +81,22 @@ export function buildFilteringSummary(input: {
     filteredReasons,
     detailEnrichment: input.detailEnrichment,
     strongestHiddenSignal: strongestHidden(hidden),
+    filteringDetails: input.allSignals.map((signal) => {
+      const displayed = displayedIds.has(signal.id);
+      const reason = displayed ? undefined : primaryFilteringReason(signal) ?? undefined;
+      return {
+        id: signal.id,
+        title: signal.title,
+        decision: displayed ? "displayed" as const : "filtered" as const,
+        reason,
+        explanation: displayed
+          ? signal.why || signal.whyItMatters
+          : reason
+            ? userFacingLabel(reason)
+            : "暂未达到展示条件",
+        sources: signal.sources.map((source) => ({ publisher: source.publisher, sourceUrl: source.sourceUrl })),
+      };
+    }),
     summaryText,
   };
 }

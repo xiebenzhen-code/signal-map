@@ -27,6 +27,7 @@ const LABELS: Record<string, string> = {
   stale: "时间较旧",
   duplicate: "与已有信息重复",
   background: "仅作背景参考",
+  BACKGROUND_ONLY: "仅作背景参考",
   lowNovelty: "新增信息有限",
   lowActionability: "暂时不影响行动",
 };

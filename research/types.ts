@@ -247,6 +247,14 @@ export type FilteringSummary = {
     evidenceCount: number;
     independentSourceCount: number;
   };
+  filteringDetails?: Array<{
+    id: string;
+    title: string;
+    decision: "displayed" | "filtered";
+    reason?: FilteringReason;
+    explanation: string;
+    sources: Array<{ publisher: string; sourceUrl: string }>;
+  }>;
   summaryText: string;
 };
 

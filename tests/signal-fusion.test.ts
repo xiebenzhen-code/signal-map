@@ -281,6 +281,7 @@ test("FilteringSummary explains zero-result filtering and strongest hidden early
         verificationStatus: "unverified",
         independentEvidenceCount: 1,
         overallScore: 68,
+        sources: [{ publisher: "Example", sourceUrl: "https://example.com/social", sourceType: "social", sourceTier: "C" }],
       }),
       baseSignal({ id: "stale", timestampStatus: "missing", freshnessScore: 0, overallScore: 20 }),
     ],
@@ -292,6 +293,10 @@ test("FilteringSummary explains zero-result filtering and strongest hidden early
   assert.equal(summary.filteredReasons.stale, 1);
   assert.equal(summary.strongestHiddenSignal?.signalType, "EARLY_SIGNAL");
   assert.match(summary.summaryText, /检索到 12 条信息/);
+  assert.equal(summary.filteringDetails?.length, 2);
+  assert.equal(summary.filteringDetails?.[0]?.decision, "filtered");
+  assert.equal(summary.filteringDetails?.[0]?.reason, "LOW_RELIABILITY");
+  assert.equal(summary.filteringDetails?.[0]?.sources.length, 1);
 });
 
 test("insufficient content cannot be displayed as a normal signal", async (t) => {
