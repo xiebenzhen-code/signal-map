@@ -93,6 +93,8 @@ type Connection = {
   publicMessage?: string;
 };
 
+type CurrentUser = { id: string; mode: "authenticated" } | null;
+
 const defaultProfile: PersonalProfile = {
   defaultIdentity: "AI 产品经理与独立创作者",
 };
@@ -785,6 +787,7 @@ function CoverageBadge({ coverage }: { coverage: ProviderCoverage }) {
 
 export default function HomePage() {
   const [page, setPage] = useState<Page>("today");
+  const [currentUser, setCurrentUser] = useState<CurrentUser>(null);
   const [profile, setProfile] = useState<PersonalProfile>(defaultProfile);
   const [knowledgeByFilterId, setKnowledgeByFilterId] = useState<KnowledgeByFilterId>({});
   const [lastRunByFilterId, setLastRunByFilterId] = useState<Record<string, InformationRun>>({});
@@ -821,6 +824,7 @@ export default function HomePage() {
   const [newEntity, setNewEntity] = useState("");
   const [newJudgement, setNewJudgement] = useState("");
   const [knowledgeDrafts, setKnowledgeDrafts] = useState<Record<string, string>>({});
+  const loggedIn = Boolean(currentUser);
   const activeFilter = useMemo(
     () => filters.find((filter) => filter.id === activeFilterId) || null,
     [activeFilterId, filters],
@@ -936,7 +940,11 @@ export default function HomePage() {
         runLive: async () => {
           const { url, ...requestInit } = createResearchRequest(state);
           const request = await fetch(url, requestInit);
-          if (!request.ok) throw Object.assign(new Error(request.status === 401 || request.status === 403 ? "请先使用 Alpha 测试账号登录" : "Live Web 暂时不可用"), { status: request.status });
+          if (!request.ok) {
+            const body = await request.json().catch(() => null) as { error?: string; reason?: string } | null;
+            const message = body?.error || body?.reason || (request.status === 401 || request.status === 403 ? "登录状态无效，请重新登录。" : "Live Web 暂时不可用");
+            throw Object.assign(new Error(message), { status: request.status });
+          }
           return (await request.json()) as InformationRunPayload;
         },
         runDemo: () => demoProvider.run({ filter, knowledge: state }),
@@ -987,7 +995,14 @@ export default function HomePage() {
       });
     const timer = window.setTimeout(() => {
       setTestMode(new URLSearchParams(window.location.search).get("test") === "true");
-      fetch("/api/connections", { cache: "no-store" })
+      fetch("/api/auth/me", { cache: "no-store", credentials: "same-origin" })
+        .then(async (request) => {
+          if (!request.ok) throw new Error("auth unavailable");
+          return (await request.json()) as { user: CurrentUser };
+        })
+        .then((value) => setCurrentUser(value.user))
+        .catch(() => setCurrentUser(null));
+      fetch("/api/connections", { cache: "no-store", credentials: "same-origin" })
         .then(async (request) => (await request.json()) as { connections?: Connection[] })
         .then((value) => setConnections(value.connections || []))
         .catch(() => setConnections([]));
@@ -1262,7 +1277,9 @@ export default function HomePage() {
         <section className="mt-10 rounded-2xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-800">
           <p className="font-black">本次过滤未完成</p>
           <p className="mt-1 text-xs leading-5">{error}</p>
-          <a href="/control" className="mt-4 inline-flex min-h-11 items-center rounded-xl bg-[#2457ff] px-5 font-semibold text-white">登录 / 注册</a>
+          {loggedIn
+            ? <button onClick={() => activeFilter && activeContext && void refreshToday(activeContext, activeFilter)} className="mt-4 inline-flex min-h-11 items-center rounded-xl bg-[#2457ff] px-5 font-semibold text-white">重新尝试</button>
+            : <a href="/control" className="mt-4 inline-flex min-h-11 items-center rounded-xl bg-[#2457ff] px-5 font-semibold text-white">登录 / 注册</a>}
         </section>
       )}
       {!loading && !error && response && <FilteringSummaryCard summary={response.filteringSummary} />}
@@ -1478,10 +1495,10 @@ export default function HomePage() {
     const summaryClass = "signal-accordion-summary";
     return (
       <main className="signal-page mx-auto max-w-[760px] px-4 pb-32 pt-8 sm:px-6 sm:pt-12">
-        <p className="signal-eyebrow">默认仅本地保存</p>
+        <p className="signal-eyebrow">{loggedIn ? "已开启长期记忆" : "默认仅本地保存"}</p>
         <h1 className="signal-display mt-2 text-5xl">设置</h1>
-        <p className="mt-3 text-sm leading-6 text-[#737c88]">管理你的过滤器、认知状态和本地测试数据。</p>
-        <a href="/control" className="mt-5 flex min-h-12 items-center justify-center rounded-xl border border-[#cfd8ff] bg-[#f4f6ff] text-sm font-black text-[#2359ff]">登录 / 注册，开启长期记忆</a>
+        <p className="mt-3 text-sm leading-6 text-[#737c88]">管理你的过滤器、认知状态和测试数据。</p>
+        <a href="/control" className="mt-5 flex min-h-12 items-center justify-center rounded-xl border border-[#cfd8ff] bg-[#f4f6ff] text-sm font-black text-[#2359ff]">{loggedIn ? "查看账户与长期记忆" : "登录 / 注册，开启长期记忆"}</a>
 
         <div className="mt-8 grid gap-3">
           <details className={accordionClass}>
@@ -1507,7 +1524,7 @@ export default function HomePage() {
 
           <details className={accordionClass}>
             <summary className={summaryClass}><span>我的数据</span><ChevronRight size={18}/></summary>
-            <p className="mt-4 text-sm leading-6 text-[#68727f]">过滤器、认知状态、资料库、笔记与反馈只保存在当前浏览器。</p>{experienceFeedback.length ? <a href={feedbackExportHref} download={`signal-map-feedback-${sessionId.slice(0, 8) || "alpha"}.json`} className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black">导出反馈 JSON</a> : <span className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black opacity-40">导出反馈 JSON</span>}<button onClick={() => { if (!window.confirm("清除当前设备上的全部 Signal Map Alpha 数据？")) return; void clearAlphaData().then(() => { setFilters([]); setActiveFilterId(null); setProfile(defaultProfile); setKnowledgeByFilterId({}); setLastRunByFilterId({}); setLibrary([]); setNotes({}); setFeedbackRecords([]); setExperienceFeedback([]); setPage("today"); }); }} className="mt-2 min-h-12 w-full rounded-xl text-sm font-black text-rose-700">清除本地测试数据</button>
+            <p className="mt-4 text-sm leading-6 text-[#68727f]">{loggedIn ? "登录后长期 Knowledge 与 RAG Memory 由服务器账户隔离保存；本机仍保留界面草稿和反馈。" : "过滤器、认知状态、资料库、笔记与反馈只保存在当前浏览器。"}</p>{experienceFeedback.length ? <a href={feedbackExportHref} download={`signal-map-feedback-${sessionId.slice(0, 8) || "alpha"}.json`} className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black">导出反馈 JSON</a> : <span className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black opacity-40">导出反馈 JSON</span>}<button onClick={() => { if (!window.confirm("清除当前设备上的全部 Signal Map Alpha 数据？")) return; void clearAlphaData().then(() => { setFilters([]); setActiveFilterId(null); setProfile(defaultProfile); setKnowledgeByFilterId({}); setLastRunByFilterId({}); setLibrary([]); setNotes({}); setFeedbackRecords([]); setExperienceFeedback([]); setPage("today"); }); }} className="mt-2 min-h-12 w-full rounded-xl text-sm font-black text-rose-700">清除本地测试数据</button>
           </details>
         </div>
 
@@ -1564,7 +1581,7 @@ export default function HomePage() {
               </button>
             ))}
           </nav>
-          <a href="/control" className="rounded-full border border-[#dfe3e7] px-3 py-2 text-[10px] font-black text-[#596473]">登录 / 注册</a>
+          <a href="/control" className="rounded-full border border-[#dfe3e7] px-3 py-2 text-[10px] font-black text-[#596473]">{loggedIn ? "账户" : "登录 / 注册"}</a>
         </div>
       </header>
 

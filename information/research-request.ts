@@ -6,6 +6,7 @@ export function createResearchRequest(knowledge: ActiveKnowledgeContext): Reques
     method: "POST",
     headers: { "Content-Type": "application/json" },
     cache: "no-store",
+    credentials: "same-origin",
     body: JSON.stringify({
       identity: knowledge.identity,
       industry: knowledge.industry,

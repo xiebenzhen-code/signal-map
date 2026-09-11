@@ -26,6 +26,7 @@ test("research request sends knowledge context in POST body, not URL query", () 
   assert.equal(request.url, "/api/signals");
   assert.equal(request.method, "POST");
   assert.equal(request.cache, "no-store");
+  assert.equal(request.credentials, "same-origin");
   assert.equal(new URL(request.url, "http://localhost").search, "");
 
   const body = JSON.parse(String(request.body)) as Record<string, unknown>;
