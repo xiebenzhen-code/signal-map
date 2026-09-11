@@ -1,4 +1,5 @@
 import type { Claim, ResearchSignal } from "./types";
+import { throwAfterDiscardingBody } from "../lib/http-response.ts";
 
 const DEFAULT_TRANSLATION_URL =
   "https://translate.googleapis.com/translate_a/single";
@@ -63,7 +64,7 @@ async function requestGoogle(text: string) {
     signal: AbortSignal.timeout(10000),
   });
   if (!response.ok) {
-    throw new Error(`primary translation service returned ${response.status}`);
+    await throwAfterDiscardingBody(response, new Error(`primary translation service returned ${response.status}`));
   }
   const translated = parseGooglePayload(await response.json());
   if (!translated) throw new Error("primary translation response was empty");
@@ -81,7 +82,7 @@ async function requestFallback(text: string) {
     signal: AbortSignal.timeout(10000),
   });
   if (!response.ok) {
-    throw new Error(`fallback translation service returned ${response.status}`);
+    await throwAfterDiscardingBody(response, new Error(`fallback translation service returned ${response.status}`));
   }
   const payload = (await response.json()) as {
     responseData?: { translatedText?: string };

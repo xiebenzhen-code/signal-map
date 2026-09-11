@@ -5,6 +5,7 @@ import type {
   XiaohongshuConnectionAdapter,
 } from "../../providers/types.ts";
 import { xhsItems, xhsProfile } from "./normalize.ts";
+import { throwAfterDiscardingBody } from "../../../lib/http-response.ts";
 
 function token() {
   return process.env.XHS_ACCESS_TOKEN?.trim() || "";
@@ -36,7 +37,7 @@ async function request(path: string, init?: RequestInit) {
     },
     signal: AbortSignal.timeout(15000),
   });
-  if (!response.ok) throw new Error(`Xiaohongshu OAuth API ${response.status}`);
+  if (!response.ok) await throwAfterDiscardingBody(response, new Error(`Xiaohongshu OAuth API ${response.status}`));
   return response;
 }
 

@@ -35,6 +35,7 @@ import { fuseSignal } from "../signal-fusion/fusion.ts";
 import type { FusionEvidence } from "../signal-fusion/types.ts";
 import { enrichDetail, maxDetailFetchesPerRound, shouldEnrichDetail, sourceCapability } from "../source-enrichment/index.ts";
 import type { DetailEnrichmentSummary } from "../source-enrichment/types.ts";
+import { discardResponseBody, throwAfterDiscardingBody } from "../lib/http-response.ts";
 import type {
   PipelineCounts,
   PipelineProgress,
@@ -125,7 +126,7 @@ async function googleNews(query: string): Promise<LiveItem[]> {
       signal: AbortSignal.timeout(10000),
     },
   );
-  if (!response.ok) throw new Error(`Google News returned ${response.status}`);
+  if (!response.ok) await throwAfterDiscardingBody(response, new Error(`Google News returned ${response.status}`));
   const xml = await response.text();
   return [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)]
     .slice(0, 12)
@@ -164,7 +165,7 @@ async function redditSearch(query: string): Promise<LiveItem[]> {
     headers: { "User-Agent": "SignalMapResearch/0.4" },
     signal: AbortSignal.timeout(10000),
   });
-  if (!response.ok) throw new Error(`Reddit returned ${response.status}`);
+  if (!response.ok) await throwAfterDiscardingBody(response, new Error(`Reddit returned ${response.status}`));
   const payload = (await response.json()) as {
     data?: {
       children?: Array<{
@@ -207,7 +208,7 @@ async function hackerNewsSearch(query: string): Promise<LiveItem[]> {
     headers: { "User-Agent": "SignalMapResearch/0.4" },
     signal: AbortSignal.timeout(10000),
   });
-  if (!response.ok) throw new Error(`Hacker News returned ${response.status}`);
+  if (!response.ok) await throwAfterDiscardingBody(response, new Error(`Hacker News returned ${response.status}`));
   const payload = (await response.json()) as {
     hits?: Array<{
       objectID: string;
@@ -258,7 +259,7 @@ async function huggingFaceSearch(query: string): Promise<LiveItem[]> {
     headers: { "User-Agent": "SignalMapResearch/0.4" },
     signal: AbortSignal.timeout(10000),
   });
-    if (!response.ok) throw new Error(`Hugging Face ${type} returned ${response.status}`);
+    if (!response.ok) await throwAfterDiscardingBody(response, new Error(`Hugging Face ${type} returned ${response.status}`));
     return (await response.json()) as Array<{
     id: string;
     author?: string;
@@ -307,7 +308,7 @@ async function productHuntSearch(query: string): Promise<LiveItem[]> {
     headers: { "User-Agent": "SignalMapResearch/0.4" },
     signal: AbortSignal.timeout(10000),
   });
-  if (!response.ok) throw new Error(`Product Hunt returned ${response.status}`);
+  if (!response.ok) await throwAfterDiscardingBody(response, new Error(`Product Hunt returned ${response.status}`));
   const html = await response.text();
   const links = [...html.matchAll(/href=["'](\/products\/[^"']+)["'][^>]*>([\s\S]{0,240}?)<\/a>/gi)];
   const seen = new Set<string>();
@@ -347,8 +348,11 @@ async function companyRegistrySearch(plan: QueryPlan): Promise<LiveItem[]> {
       headers: { "User-Agent": "SignalMapResearch/0.4" },
       signal: AbortSignal.timeout(10000),
     });
-    if (response.status === 404) return null;
-    if (!response.ok) throw new Error(`Company registry returned ${response.status}`);
+    if (response.status === 404) {
+      await discardResponseBody(response);
+      return null;
+    }
+    if (!response.ok) await throwAfterDiscardingBody(response, new Error(`Company registry returned ${response.status}`));
     const html = await response.text();
     const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1];
     const publishedAt = htmlPublishedAt(html);
@@ -384,7 +388,7 @@ async function arxivSearch(query: string): Promise<LiveItem[]> {
     headers: { "User-Agent": "SignalMapResearch/0.4" },
     signal: AbortSignal.timeout(10000),
   });
-  if (!response.ok) throw new Error(`arXiv returned ${response.status}`);
+  if (!response.ok) await throwAfterDiscardingBody(response, new Error(`arXiv returned ${response.status}`));
   const xml = await response.text();
   return [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/gi)].map((match) => {
     const block = match[1];

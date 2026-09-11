@@ -7,6 +7,7 @@ import type {
   SocialSearchContext,
 } from "./types.ts";
 import { ProviderSearchError } from "./types.ts";
+import { discardResponseBody } from "../../lib/http-response.ts";
 
 const SUCCESS_CACHE_MS = 60_000;
 const ZERO_RESULT_CACHE_MS = 45_000;
@@ -66,12 +67,14 @@ async function xRequest(path: string, dependencies: Required<XProviderDependenci
     );
   }
   if (response.status === 429) {
+    await discardResponseBody(response);
     throw new ProviderSearchError("rate_limited", "X request is temporarily rate limited", {
       retryAfterSeconds: retryAfterSeconds(response),
       diagnostic: "X API returned 429",
     });
   }
   if (!response.ok) {
+    await discardResponseBody(response);
     throw new ProviderSearchError("upstream_error", "X API request failed", {
       diagnostic: `X API ${response.status}`,
     });

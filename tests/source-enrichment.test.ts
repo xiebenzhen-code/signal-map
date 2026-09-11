@@ -174,3 +174,28 @@ Open Video Generator released a text-to-video workflow for short video prototypi
   assert.equal(result.filteringSummary?.filteredReasons.insufficientContent, 0);
   assert.ok(result.filteringSummary?.strongestHiddenSignal);
 });
+
+test("failed external provider responses cancel unread bodies", async (t) => {
+  let canceled = 0;
+  t.mock.method(globalThis, "fetch", async () =>
+    new Response(new ReadableStream({
+      cancel() {
+        canceled += 1;
+      },
+    }), { status: 500 }),
+  );
+
+  const result = await runResearchPipeline(baseInput({
+    currentQuestions: "最近有什么新的 AI 视频工具？",
+    focusAreas: "AI video tools",
+    trackedEntities: "AI video tools",
+  }), undefined, undefined, {
+    primarySourceType: "GENERAL_WEB",
+    fallbackSourceTypes: [],
+    allowedProviderIds: ["product-hunt"],
+    reason: "test",
+  });
+
+  assert.equal(result.status.some((outcome) => outcome.name === "Product Hunt" && outcome.state === "failed"), true);
+  assert.equal(canceled, 1);
+});

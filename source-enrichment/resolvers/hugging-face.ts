@@ -1,5 +1,6 @@
 import type { DetailEnrichmentInput, DetailEnrichmentResult } from "../types.ts";
 import { htmlTitle, isThinDetail, metaContent } from "./shared.ts";
+import { discardResponseBody } from "../../lib/http-response.ts";
 
 function huggingFaceRawReadmeUrl(input: DetailEnrichmentInput) {
   const canonicalId =
@@ -48,6 +49,8 @@ export async function enrichHuggingFaceDetail(input: DetailEnrichmentInput): Pro
             evidenceFrom: "Hugging Face README",
           };
         }
+      } else {
+        await discardResponseBody(response);
       }
     }
 
@@ -59,6 +62,7 @@ export async function enrichHuggingFaceDetail(input: DetailEnrichmentInput): Pro
       signal: AbortSignal.timeout(10000),
     });
     if (!page.ok) {
+      await discardResponseBody(page);
       return { status: "FETCH_FAILED", canonicalUrl, discoveredBy: "Hugging Face" };
     }
     const html = await page.text();

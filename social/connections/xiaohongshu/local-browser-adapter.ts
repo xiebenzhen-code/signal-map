@@ -5,6 +5,7 @@ import type {
   XiaohongshuConnectionAdapter,
 } from "../../providers/types.ts";
 import { isLoggedIn, xhsItems, xhsProfile } from "./normalize.ts";
+import { discardResponseBody, throwAfterDiscardingBody } from "../../../lib/http-response.ts";
 
 function serviceBase() {
   const parsed = new URL(
@@ -29,6 +30,7 @@ async function firstResponse(paths: string[], init?: RequestInit) {
         signal: AbortSignal.timeout(3500),
       });
       if (response.ok) return response;
+      await discardResponseBody(response);
     } catch {}
   }
   return null;
@@ -101,7 +103,7 @@ export const localBrowserAdapter: XiaohongshuConnectionAdapter = {
       }),
       signal: AbortSignal.timeout(20000),
     });
-    if (!response.ok) throw new Error(`Xiaohongshu local service ${response.status}`);
+    if (!response.ok) await throwAfterDiscardingBody(response, new Error(`Xiaohongshu local service ${response.status}`));
     return xhsItems(await response.json());
   },
 

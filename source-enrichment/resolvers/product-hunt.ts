@@ -1,5 +1,6 @@
 import type { DetailEnrichmentInput, DetailEnrichmentResult } from "../types.ts";
 import { htmlTitle, isThinDetail, metaContent, stripHtmlForDetail } from "./shared.ts";
+import { discardResponseBody } from "../../lib/http-response.ts";
 
 function isProductHuntTemplate(value: string) {
   return /Launch archive|Most-loved launches|Launch Guide|The best of Product Hunt|Product Hunt, every day|Sign in|Sign up/i.test(value);
@@ -37,7 +38,10 @@ async function fetchText(url: string) {
     headers: { "User-Agent": "SignalMapResearch/0.4" },
     signal: AbortSignal.timeout(10000),
   });
-  if (!response.ok) return undefined;
+  if (!response.ok) {
+    await discardResponseBody(response);
+    return undefined;
+  }
   return response.text();
 }
 

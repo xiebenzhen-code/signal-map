@@ -1,5 +1,6 @@
 import type { LiveItem } from "../social/providers/types.ts";
 import type { SourceExecutionOutcome } from "./source-coverage.ts";
+import { discardResponseBody, throwAfterDiscardingBody } from "../lib/http-response.ts";
 
 type OfficialUpdateTarget = {
   aliases: string[];
@@ -82,8 +83,11 @@ async function githubLatestRelease(repo: string, fetcher: Fetcher): Promise<Live
     },
     signal: AbortSignal.timeout(10000),
   });
-  if (response.status === 404) return null;
-  if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
+  if (response.status === 404) {
+    await discardResponseBody(response);
+    return null;
+  }
+  if (!response.ok) await throwAfterDiscardingBody(response, new Error(`GitHub returned ${response.status}`));
   const release = (await response.json()) as {
     id: number;
     name?: string;
@@ -168,8 +172,11 @@ async function officialUpdatePage(
     headers: { "User-Agent": "SignalMapResearch/0.6" },
     signal: AbortSignal.timeout(10000),
   });
-  if (response.status === 404) return null;
-  if (!response.ok) throw new Error(`Official update page returned ${response.status}`);
+  if (response.status === 404) {
+    await discardResponseBody(response);
+    return null;
+  }
+  if (!response.ok) await throwAfterDiscardingBody(response, new Error(`Official update page returned ${response.status}`));
   const html = await response.text();
   const publishedAt = updatePagePublishedAt(html);
   return {

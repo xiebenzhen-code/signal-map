@@ -1,5 +1,6 @@
 import type { EvidenceBoundSynthesis } from "../evidence-synthesis.ts";
 import type { ParsedConclusion } from "./types.ts";
+import { discardResponseBody } from "../../lib/http-response.ts";
 
 export function parseJsonObject(value: string): Record<string, unknown> {
   const parsed = JSON.parse(value);
@@ -36,6 +37,7 @@ export async function callJsonEndpoint(fetchImpl: (input: string, init: RequestI
     clearTimeout(timeout);
   }
   if (!response.ok) {
+    await discardResponseBody(response);
     if (response.status === 401 || response.status === 403) throw new Error("authentication_error");
     if (response.status === 402) throw new Error("quota_error");
     if (response.status === 429) throw new Error("rate_limit");
