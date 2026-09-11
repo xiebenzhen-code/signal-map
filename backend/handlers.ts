@@ -81,8 +81,9 @@ async function authorizedContext(request: Request, repository: ControlRepository
   const auth = await resolveAuthContext(request);
   if (!auth) return { response: Response.json({ error: "Unauthorized" }, { status: 401 }) };
   const context = { authenticatedUserId: auth.userId, filterId: filterIdFromRequest(request, auth.userId) };
+  if (context.filterId === `account-${auth.userId}`) return { context, auth };
   const allowed = await withOperationTimeout(
-    ensureFilter(repository, context, { createIfMissing: options.createFilterIfMissing === true || context.filterId === `account-${auth.userId}` }),
+    ensureFilter(repository, context, { createIfMissing: options.createFilterIfMissing === true }),
     CONTROL_PERSISTENCE_TIMEOUT_MS,
     "DB_TIMEOUT",
   ).catch((error) => {
@@ -337,7 +338,16 @@ export const handleControlFollows = withSession(async (request: Request) => {
   const auth = await authorizedContext(request, repository, { createFilterIfMissing: request.method === "POST" });
   if (auth.response) return auth.response;
   if (request.method === "GET") {
-    return Response.json(await getControlFollows({ context: auth.context, repository }), { headers: { "Cache-Control": "no-store" } });
+    const follows = await withOperationTimeout(
+      getControlFollows({ context: auth.context, repository }),
+      CONTROL_PERSISTENCE_TIMEOUT_MS,
+      "DB_TIMEOUT",
+    ).catch((error) => {
+      if (error && typeof error === "object" && "code" in error && error.code === "DB_TIMEOUT") return null;
+      throw error;
+    });
+    if (follows === null) return Response.json({ error: "Service temporarily unavailable", code: "DB_TIMEOUT" }, { status: 503 });
+    return Response.json(follows, { headers: { "Cache-Control": "no-store" } });
   }
   if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
   const body = await bodyRecord(request);
@@ -345,11 +355,20 @@ export const handleControlFollows = withSession(async (request: Request) => {
   const intensity = body.intensity === "major_only" || body.intensity === "worth_knowing" || body.intensity === "more" ? body.intensity : undefined;
   const delivery = body.delivery === "important" || body.delivery === "daily" || body.delivery === "weekly" ? body.delivery : undefined;
   try {
-    return Response.json(await createControlFollow({
-      context: auth.context,
-      repository,
-      follow: { topic, intensity, delivery },
-    }), { headers: { "Cache-Control": "no-store" } });
+    const created = await withOperationTimeout(
+      createControlFollow({
+        context: auth.context,
+        repository,
+        follow: { topic, intensity, delivery },
+      }),
+      CONTROL_PERSISTENCE_TIMEOUT_MS,
+      "DB_TIMEOUT",
+    ).catch((error) => {
+      if (error && typeof error === "object" && "code" in error && error.code === "DB_TIMEOUT") return null;
+      throw error;
+    });
+    if (created === null) return Response.json({ error: "Service temporarily unavailable", code: "DB_TIMEOUT" }, { status: 503 });
+    return Response.json(created, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const code = error && typeof error === "object" && "code" in error ? String(error.code) : "INVALID_FOLLOW";
     return Response.json({ error: "关注主题无效", code }, { status: 400 });
