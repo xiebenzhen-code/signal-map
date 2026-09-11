@@ -53,6 +53,8 @@ type ProgressHandler = (progress: PipelineProgress) => void | Promise<void>;
 export type ResearchPipelineDebug = {
   onCandidateSelectionAudit?: (audit: CandidateSelectionAudit[]) => void;
   onEligibilityAudit?: (audit: EligibilityAuditFunnel) => void;
+  onPhase?: (event: { phase: string; success?: boolean; itemCount?: number; errorCode?: string }) => void;
+  deadlineAt?: number;
 };
 
 export type EligibilityAuditFunnel = {
@@ -751,6 +753,7 @@ async function enrichDiscoveryCandidates(
   candidates: ResearchCandidate[],
   plan: QueryPlan,
   failures: string[],
+  remainingBudgetMs = 12000,
 ) {
   const summary: DetailEnrichmentSummary = {
     detailAttempted: 0,
@@ -758,6 +761,7 @@ async function enrichDiscoveryCandidates(
     detailFailed: 0,
     stillInsufficient: 0,
   };
+  const startedAt = Date.now();
   const cache = new Set<string>();
   const candidatesByUrl = new Map(candidates.map((candidate) => [candidate.url, candidate]));
   const eligibleCandidates = [...candidates]
@@ -779,6 +783,10 @@ async function enrichDiscoveryCandidates(
     .slice(0, maxDetailFetchesPerRound);
 
   for (const candidate of enrichmentTargets) {
+    if (Date.now() - startedAt > remainingBudgetMs) {
+      failures.push("Detail Enrichment: 已接近请求时间上限，保留已有候选并跳过剩余详情抓取。");
+      break;
+    }
     const cacheKey = `${candidate.providerId || candidate.source}:${candidate.id || candidate.url}`;
     if (cache.has(cacheKey)) continue;
     cache.add(cacheKey);
@@ -875,6 +883,9 @@ export async function runResearchPipeline(
   let scanned = 0;
   let counts = emptyCounts();
   const sourceOutcomes: SourceExecutionOutcome[] = [];
+  const markPhase = (phase: string, success = true, itemCount?: number, errorCode?: string) =>
+    debug?.onPhase?.({ phase, success, itemCount, errorCode });
+  const remainingMs = () => Math.max(0, (debug?.deadlineAt ?? Date.now() + 30000) - Date.now());
   const emit = async (event: PipelineProgress) => {
     progress.push(event);
     await onProgress?.(event);
@@ -926,6 +937,7 @@ export async function runResearchPipeline(
     .slice(0, 5)
     .map((query) => `${query}${sourceHint} ${domains}`);
   const primaryWebEnabled = canExecute("primary-web-search");
+  markPhase("search_started");
   const [primaryResult, companyRegistryResult, githubReleaseResult, officialUpdatePageResult] = await Promise.all([
     primaryWebEnabled
       ? searchQueries(primaryQueries, "primary", plan, failures, windowDays)
@@ -1152,6 +1164,7 @@ export async function runResearchPipeline(
     reversePrimary = unique([...reversePrimary, ...reverseResult.items]);
     scanned += reverseResult.scanned;
   }
+  markPhase("search_finished", true, scanned);
   const allPrimary = unique([...primary, ...reversePrimary]);
   const primaryOutcome = sourceOutcomes.find((outcome) => outcome.source === "Primary Sources");
   if (primaryOutcome && primaryWebEnabled && primaryResult.items.length > 0) {
@@ -1167,6 +1180,7 @@ export async function runResearchPipeline(
     counts,
   });
 
+  markPhase("detail_fetch_started");
   const discoveredCandidates = unique([
     ...allPrimary,
     ...arxivResult.items,
@@ -1182,18 +1196,23 @@ export async function runResearchPipeline(
     discoveredCandidates,
     plan,
     failures,
+    Math.min(12000, Math.max(0, remainingMs() - 7000)),
   );
+  markPhase("detail_fetch_finished", true, detailEnrichment.detailSucceeded);
+  markPhase("aggregation_started");
   await emit({
     stage: "deduplication",
     label: `去重完成 · ${scanned} 条扫描结果收敛为 ${candidates.length} 条来源`,
     counts,
   });
   const eventClusters = clusterEvents(candidates);
+  markPhase("aggregation_finished", true, eventClusters.length);
   await emit({
     stage: "clustering",
     label: `事件聚合完成 · ${eventClusters.length} 个独立事件`,
     counts,
   });
+  markPhase("evidence_started");
   const gapTerms = filterTerms(input.informationGaps);
   const questionTerms = filterTerms(input.currentQuestions);
   const focusAreaTerms = filterTerms(input.focusAreas);
@@ -1776,6 +1795,7 @@ export async function runResearchPipeline(
   }
   const signals = allSignals
     .filter((signal) => signal.attentionDecision !== "IGNORE" && signal.contentQuality !== "INSUFFICIENT_CONTENT");
+  markPhase("evidence_finished", true, allSignals.length);
   detailEnrichment.stillInsufficient = allSignals.reduce(
     (total, signal) =>
       total +

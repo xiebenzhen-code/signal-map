@@ -1,5 +1,5 @@
 import type { ModelAdapter, AdapterOptions } from "./types.ts";
-import { asStringArray, callJsonEndpoint, normalizeModelError, parseJsonObject, parseSynthesis } from "./protocol.ts";
+import { asStringArray, callJsonEndpoint, modelTimeoutMs, normalizeModelError, parseJsonObject, parseSynthesis } from "./protocol.ts";
 
 const DEFAULT_PLANNING_MODEL = "deepseek-chat";
 const DEFAULT_SYNTHESIS_MODEL = "deepseek-reasoner";
@@ -8,9 +8,10 @@ export function createDeepSeekAdapter(options: AdapterOptions = {}): ModelAdapte
   const env = options.env ?? process.env;
   const apiKey = env.DEEPSEEK_API_KEY?.trim();
   const fetchImpl = options.fetch ?? fetch;
+  const timeoutMs = modelTimeoutMs(env);
   const models = { planning: env.DEEPSEEK_MODEL?.trim() || DEFAULT_PLANNING_MODEL, synthesis: env.DEEPSEEK_SYNTHESIS_MODEL?.trim() || DEFAULT_SYNTHESIS_MODEL };
   const status = apiKey ? "configured" : "not_configured" as const;
-  const request = (model: string, prompt: string) => callJsonEndpoint(fetchImpl, "https://api.deepseek.com/chat/completions", apiKey as string, { model, messages: [{ role: "system", content: "Return JSON only. Never invent evidence or sources. If eligible reliable evidence is provided and unresolvedConflict is false, produce a FACT citing only eligibleEvidenceIds. If unresolvedConflict is true, preserve unresolved/conflicting state and never produce a confirmed FACT." }, { role: "user", content: prompt }], response_format: { type: "json_object" } });
+  const request = (model: string, prompt: string) => callJsonEndpoint(fetchImpl, "https://api.deepseek.com/chat/completions", apiKey as string, { model, messages: [{ role: "system", content: "Return JSON only. Never invent evidence or sources. If eligible reliable evidence is provided and unresolvedConflict is false, produce a FACT citing only eligibleEvidenceIds. If unresolvedConflict is true, preserve unresolved/conflicting state and never produce a confirmed FACT." }, { role: "user", content: prompt }], response_format: { type: "json_object" } }, timeoutMs);
   return {
     provider: "deepseek", status, models,
     async planResearch(input) {

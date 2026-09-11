@@ -3,6 +3,7 @@ import type { CandidateSelectionAudit } from "../research/candidate-selection.ts
 import type { EligibilityAuditFunnel } from "../research/research-pipeline.ts";
 import { runTaskPlannedAgent } from "../agent/task-runner.ts";
 import { createEnvironmentModelAdapter } from "../agent/model-adapter.ts";
+import { createSignalTracer, createSignalsRequestId, type SignalTracePhase } from "./signals-trace.ts";
 import { requestSession, resolveAuthContext, withSession } from "../auth/session.ts";
 import { resolveResearchIdentity } from "../auth/request-identity.ts";
 import { mapAuthError } from "../auth/auth-error.ts";
@@ -115,14 +116,44 @@ function providerId(value: string): ProviderId | null {
 
 export const handleSignals = withSession(async (request: Request) => {
   if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
+  const requestId = createSignalsRequestId(request.headers.get("X-Signal-Map-Request-Id"));
+  const tracer = createSignalTracer(requestId);
+  const deadlineAt = Date.now() + 25000;
+  const markPhase = (event: { phase: string; success?: boolean; itemCount?: number; errorCode?: string }) => {
+    const allowed = [
+      "source_selection_started",
+      "source_selection_finished",
+      "search_started",
+      "search_finished",
+      "detail_fetch_started",
+      "detail_fetch_finished",
+      "aggregation_started",
+      "aggregation_finished",
+      "evidence_started",
+      "evidence_finished",
+      "agent_started",
+      "agent_finished",
+      "knowledge_started",
+      "knowledge_finished",
+      "persistence_started",
+      "persistence_finished",
+    ];
+    if (allowed.includes(event.phase)) {
+      tracer.mark({ phase: event.phase as SignalTracePhase, success: event.success, itemCount: event.itemCount, errorCode: event.errorCode });
+    }
+  };
+  tracer.mark({ phase: "request_received" });
   const identity = await resolveResearchIdentity(request);
+  tracer.mark({ phase: "auth_resolved", itemCount: identity.mode === "authenticated" ? 1 : 0 });
   const body = await bodyRecord(request);
   const input = inputFromRecord(body);
+  tracer.mark({ phase: "request_parsed", success: Boolean(input.industry) });
   if (!input.industry) {
-    return Response.json(
-      { error: "Query Planner 缺少行业或自然语言需求。" },
-      { status: 400 },
+    const response = Response.json(
+      { error: "Query Planner 缺少行业或自然语言需求。", requestId },
+      { status: 400, headers: { "X-Signal-Map-Request-Id": requestId } },
     );
+    return response;
   }
 
   try {
@@ -149,17 +180,25 @@ export const handleSignals = withSession(async (request: Request) => {
       repository = persistentRepository;
     }
 
+    tracer.mark({ phase: "research_started" });
     const result = await executeResearch({ identity, input, context, repository,
+      onPhase: markPhase,
+      deadlineAt,
       modelAdapter: createEnvironmentModelAdapter(), debug: includeEligibilityAudit
       ? {
+          onPhase: markPhase,
+          deadlineAt,
           onCandidateSelectionAudit: (audit) => { candidateSelectionAudit = audit; },
           onEligibilityAudit: (audit) => { eligibilityFunnel = audit; },
         }
-      : undefined });
+      : { onPhase: markPhase, deadlineAt } });
+    tracer.mark({ phase: "research_finished" as SignalTracePhase, itemCount: result.signals.length });
 
+    tracer.mark({ phase: "response_started" });
     const response = Response.json(auditOnly
       ? {
           overview: result.overview,
+          requestId,
           debug: {
             candidateSelectionAudit: auditEventId
               ? candidateSelectionAudit.filter((audit) => audit.id === auditEventId)
@@ -168,23 +207,32 @@ export const handleSignals = withSession(async (request: Request) => {
           },
         }
       : includeEligibilityAudit
-        ? { ...result, debug: { candidateSelectionAudit, eligibilityFunnel } }
-        : result, {
-      headers: { "Cache-Control": "no-store" },
+        ? { ...result, requestId, debug: { candidateSelectionAudit, eligibilityFunnel } }
+        : { ...result, requestId }, {
+      headers: { "Cache-Control": "no-store", "X-Signal-Map-Request-Id": requestId },
     });
     if (identity.mode === "anonymous" && identity.setCookie) response.headers.append("Set-Cookie", identity.setCookie);
+    tracer.mark({ phase: "response_finished", itemCount: result.signals.length });
     return response;
   } catch (error) {
+    const errorCode = error && typeof error === "object" && "code" in error ? String(error.code) : "UNKNOWN_RESEARCH_FAILURE";
+    tracer.mark({ phase: "response_started", success: false, errorCode });
     if (error && typeof error === "object" && "status" in error && Number(error.status) === 429) {
-      return Response.json({ error: "查询过于频繁，请稍后再试。" }, { status: 429 });
+      const response = Response.json({ error: "查询过于频繁，请稍后再试。", requestId, errorCode: "RATE_LIMIT" }, { status: 429, headers: { "X-Signal-Map-Request-Id": requestId } });
+      tracer.mark({ phase: "response_finished", success: false, errorCode: "RATE_LIMIT" });
+      return response;
     }
-    return Response.json(
+    const response = Response.json(
       {
         error: "Research Pipeline 未能完成。",
         reason: "本轮来源检索暂时不可用，请稍后再试。",
+        requestId,
+        errorCode,
       },
-      { status: 502 },
+      { status: 502, headers: { "X-Signal-Map-Request-Id": requestId } },
     );
+    tracer.mark({ phase: "response_finished", success: false, errorCode });
+    return response;
   }
 });
 

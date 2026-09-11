@@ -18,8 +18,23 @@ export function parseSynthesis(value: string): EvidenceBoundSynthesis {
   }) : [];
   return { summary: typeof parsed.summary === "string" ? parsed.summary : "No reliable evidence found.", conclusions, unresolvedItems: asStringArray(parsed.unresolvedItems) };
 }
-export async function callJsonEndpoint(fetchImpl: (input: string, init: RequestInit) => Promise<Response>, endpoint: string, apiKey: string, body: unknown) {
-  const response = await fetchImpl(endpoint, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify(body) });
+export function modelTimeoutMs(env: Record<string, string | undefined> = process.env) {
+  const configured = Number(env.MODEL_REQUEST_TIMEOUT_MS || "");
+  return Number.isFinite(configured) && configured > 0 ? configured : 8000;
+}
+
+export async function callJsonEndpoint(fetchImpl: (input: string, init: RequestInit) => Promise<Response>, endpoint: string, apiKey: string, body: unknown, timeoutMs = modelTimeoutMs()) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let response: Response;
+  try {
+    response = await fetchImpl(endpoint, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify(body), signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted || error instanceof Error && error.name === "AbortError") throw new Error("timeout");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) throw new Error("authentication_error");
     if (response.status === 402) throw new Error("quota_error");

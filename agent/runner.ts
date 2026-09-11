@@ -109,6 +109,10 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
   const runId = options.runId ?? `agent-run-${randomUUID()}`;
   const steps: AgentStep[] = [];
   const trace: AgentTraceEntry[] = [];
+  const markPhase = (phase: string, success = true, itemCount?: number, errorCode?: string) =>
+    options.onPhase?.({ phase, success, itemCount, errorCode });
+  const deadlineAt = options.deadlineAt ?? startedAt + (options.maxExecutionTimeMs ?? 30000);
+  const hasDeadlineBudget = (minimumMs: number) => Date.now() + minimumMs < deadlineAt;
   const add = (state: AgentState, status: AgentStep["status"], input: unknown, output: unknown, reason?: string) => {
     steps.push({ state, status, input, output });
     trace.push({ state, status, action: state.toLowerCase(), inputSummary: JSON.stringify(input).slice(0, 500), outputSummary: JSON.stringify(output).slice(0, 500), decisionReason: reason, timestamp: now() });
@@ -140,21 +144,25 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     ? await Promise.resolve(options.repository.getResearchContextRevision(options.context))
     : options.initialRevision ?? 1;
   const bootstrapStrategy: ResearchStrategy = relatedKnowledge.length > 0 ? "REFRESH" : "INITIAL";
+  markPhase("source_selection_started");
   const bootstrapSelection = selectSource({
     strategy: bootstrapStrategy,
     availableSourceCapabilities: options.availableSourceCapabilities,
     sourceProfile,
   });
+  markPhase("source_selection_finished", true, bootstrapSelection.allowedProviderIds.length);
   add("SOURCE_SELECTOR", "completed", { round: 1, strategy: bootstrapStrategy }, bootstrapSelection, bootstrapSelection.reason);
   let plan = createResearchPlan(researchInput, 1, maxQueries, relatedKnowledge, bootstrapStrategy, bootstrapSelection, intent, sourceProfile);
-  plan = await applyModelPlanning({
-    plan,
-    adapter: options.modelAdapter,
-    userQuery: (options.userQuery ?? options.input.currentQuestions) || options.input.industry,
-    relatedKnowledge,
-    previousQueries: [],
-    round: 1,
-  });
+  if (hasDeadlineBudget(9000)) {
+    plan = await applyModelPlanning({
+      plan,
+      adapter: options.modelAdapter,
+      userQuery: (options.userQuery ?? options.input.currentQuestions) || options.input.industry,
+      relatedKnowledge,
+      previousQueries: [],
+      round: 1,
+    });
+  }
   options.onPlan?.(plan, researchInput, 1);
   add("PLAN", "completed", { round: 1 }, plan);
   let response: ResearchResponse | undefined;
@@ -177,6 +185,9 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
         allowedProviderIds: selectedPlan.allowedProviderIds,
         reason: selectedPlan.sourceSelectionReason,
       })))(researchInput, currentPlan, round);
+      if (!hasDeadlineBudget(4000)) {
+        throw Object.assign(new Error("Worker deadline budget exhausted before research"), { code: "WORKER_DEADLINE" });
+      }
       response = await executeResearch(plan);
       response.intent = intent;
       response.sourceProfile = sourceProfile;
@@ -219,6 +230,9 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
             round,
           });
           add("SOURCE_SELECTOR", "completed", { round, fallback: true }, fallbackSelection, "首选来源无有效结果，执行 fallback 来源");
+          if (!hasDeadlineBudget(4000)) {
+            throw Object.assign(new Error("Worker deadline budget exhausted before fallback research"), { code: "WORKER_DEADLINE" });
+          }
           response = await executeResearch(plan);
           response = mergeResponseSourceOutcomes(firstAttemptResponse, response);
           response.intent = intent;
@@ -228,6 +242,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
         }
       }
     } catch (error) {
+      markPhase("agent_finished", false, undefined, error && typeof error === "object" && "code" in error ? String(error.code) : "UNKNOWN_RESEARCH_FAILURE");
       add("RESEARCH", "failed", { round }, { error: "research failed" }, error instanceof Error ? error.message : "unknown error");
       return { status: "failed", rounds, plan, evaluation, knowledgeChanges: [], attention: [], steps, trace };
     }
@@ -261,12 +276,14 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       reliabilityState,
       freshnessState,
     }, policy, policy.reason);
+    markPhase("source_selection_started");
     const sourceSelection = selectSource({
       strategy: policy.strategy,
       availableSourceCapabilities: options.availableSourceCapabilities,
       previousSourceOutcomes,
       sourceProfile,
     });
+    markPhase("source_selection_finished", true, sourceSelection.allowedProviderIds.length);
     add("SOURCE_SELECTOR", policy.strategy === "STOP" ? "skipped" : "completed", { round, strategy: policy.strategy }, sourceSelection, sourceSelection.reason);
     trace[trace.length - 1].selectedSourceType = sourceSelection.primarySourceType;
     trace[trace.length - 1].fallbackSourceTypes = sourceSelection.fallbackSourceTypes;
@@ -287,6 +304,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
         : response.signals.map((signal) => signal.attentionDecision);
       if (options.repository && options.context) {
         try {
+          markPhase("knowledge_started");
           const updateResult = await updateKnowledgeFromChanges({
             context: options.context,
             repository: options.repository,
@@ -295,6 +313,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
             runId,
             now: now(),
           });
+          markPhase("knowledge_finished", true, updateResult.evidenceIds.length);
           allKnowledgeChanges = [...allKnowledgeChanges, ...updateResult.persistedChanges];
           allEvidenceIds = Array.from(new Set([...allEvidenceIds, ...updateResult.evidenceIds]));
         } catch (error) {
@@ -309,6 +328,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       add("COMPLETE", "completed", { round }, { reason: evaluation.reason });
       const status = evaluation.sufficientEvidence ? "completed" : "needs_more_evidence";
       if (options.repository && options.context) {
+        markPhase("persistence_started");
         await Promise.resolve(options.repository.saveRunMetadata(options.context, {
           id: runId,
           userQuery: options.userQuery,
@@ -325,12 +345,15 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
           dataMode: response.dataMode,
           createdAt: startedAtIso,
         }));
+        markPhase("persistence_finished", true);
       }
       return { status, rounds, response, plan, evaluation, knowledgeChanges: allKnowledgeChanges, attention: finalAttention, steps, trace };
     }
     if (options.repository && options.context) {
       try {
+        markPhase("knowledge_started");
         const evidenceOnly = await persistResearchRecords({ repository: options.repository, response });
+        markPhase("knowledge_finished", true, evidenceOnly.evidenceIds.length);
         allEvidenceIds = Array.from(new Set([...allEvidenceIds, ...evidenceOnly.evidenceIds]));
         add("UPDATE_KNOWLEDGE", "skipped", { round }, { evidenceOnly: true, evidenceIds: evidenceOnly.evidenceIds }, "研究未结束，仅保存 Evidence provenance");
       } catch (error) {
@@ -339,14 +362,16 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       }
     }
     plan = createResearchPlan(researchInput, round + 1, maxQueries, relatedKnowledge, policy.strategy, sourceSelection, intent, sourceProfile);
-    plan = await applyModelPlanning({
-      plan,
-      adapter: options.modelAdapter,
-      userQuery: (options.userQuery ?? options.input.currentQuestions) || options.input.industry,
-      relatedKnowledge,
-      previousQueries: plan.queries,
-      round: round + 1,
-    });
+    if (hasDeadlineBudget(9000)) {
+      plan = await applyModelPlanning({
+        plan,
+        adapter: options.modelAdapter,
+        userQuery: (options.userQuery ?? options.input.currentQuestions) || options.input.industry,
+        relatedKnowledge,
+        previousQueries: plan.queries,
+        round: round + 1,
+      });
+    }
     options.onPlan?.(plan, researchInput, round + 1);
     add("PLAN", "completed", { round: round + 1 }, plan);
   }

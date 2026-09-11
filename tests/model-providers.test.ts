@@ -46,6 +46,22 @@ test("DeepSeek malformed response returns normalized error for deterministic fal
   assert.equal(result.errorCode, "malformed_response");
 });
 
+test("DeepSeek request timeout returns normalized error for deterministic fallback", async () => {
+  const adapter = createModelAdapter({
+    env: {
+      MODEL_PROVIDER: "deepseek",
+      DEEPSEEK_API_KEY: "test",
+      MODEL_REQUEST_TIMEOUT_MS: "5",
+    },
+    fetch: async (_url, init) => new Promise<Response>((_resolve, reject) => {
+      init.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+    }),
+  });
+  const result = await adapter.planResearch(input);
+  assert.equal(result.status, "error");
+  assert.equal(result.errorCode, "timeout");
+});
+
 test("a third adapter can satisfy the same contract without AgentRunner changes", async () => {
   const third = {
     provider: "none" as const,

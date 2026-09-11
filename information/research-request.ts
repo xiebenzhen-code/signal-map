@@ -1,10 +1,18 @@
 import type { ActiveKnowledgeContext } from "./types.ts";
 
+function requestId() {
+  const id = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `signals-${id}`;
+}
+
 export function createResearchRequest(knowledge: ActiveKnowledgeContext): RequestInit & { url: string } {
   return {
     url: "/api/signals",
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "X-Signal-Map-Request-Id": requestId(),
+    },
     cache: "no-store",
     credentials: "same-origin",
     body: JSON.stringify({
