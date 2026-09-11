@@ -10,6 +10,8 @@ import { mapAuthError } from "../auth/auth-error.ts";
 import { executeResearch } from "../research/research-service.ts";
 import {
   getControlAgentRuns,
+  createControlFollow,
+  getControlFollows,
   getControlGoals,
   getControlKnowledge,
   getControlNotifications,
@@ -328,6 +330,30 @@ export const handleControlGoals = withSession(async (request: Request, goalId?: 
   const result = await getControlGoals({ context: auth.context, repository, goalId });
   if (goalId && !result.goal) return Response.json({ error: "Goal not found" }, { status: 404 });
   return Response.json(result, { headers: { "Cache-Control": "no-store" } });
+});
+
+export const handleControlFollows = withSession(async (request: Request) => {
+  const repository = agentRepository();
+  const auth = await authorizedContext(request, repository, { createFilterIfMissing: request.method === "POST" });
+  if (auth.response) return auth.response;
+  if (request.method === "GET") {
+    return Response.json(await getControlFollows({ context: auth.context, repository }), { headers: { "Cache-Control": "no-store" } });
+  }
+  if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
+  const body = await bodyRecord(request);
+  const topic = typeof body.topic === "string" ? body.topic : "";
+  const intensity = body.intensity === "major_only" || body.intensity === "worth_knowing" || body.intensity === "more" ? body.intensity : undefined;
+  const delivery = body.delivery === "important" || body.delivery === "daily" || body.delivery === "weekly" ? body.delivery : undefined;
+  try {
+    return Response.json(await createControlFollow({
+      context: auth.context,
+      repository,
+      follow: { topic, intensity, delivery },
+    }), { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? String(error.code) : "INVALID_FOLLOW";
+    return Response.json({ error: "关注主题无效", code }, { status: 400 });
+  }
 });
 
 export const handleControlGoalAction = withSession(async (request: Request, goalId: string, action: "resume" | "pause" | "abandon") => {

@@ -1,5 +1,6 @@
 import { abandonGoal, pauseGoal, resumeGoalByUser, type GoalControlResult } from "../agent/goal-control.ts";
 import type { Goal } from "../agent/goal-types.ts";
+import { createFollowGoal, isFollowGoal, toFollowView, type FollowInput } from "../agent/following.ts";
 import type {
   AuthenticatedFilterContext,
   ClaimRepository,
@@ -159,6 +160,20 @@ export async function getControlGoals(input: ControlInput & { goalId?: string })
   }
   const goals = await Promise.resolve(input.repository.listGoals(input.context));
   return { goals: goals.map(summarizeGoal), goal: null };
+}
+
+export async function getControlFollows(input: ControlInput) {
+  const goals = await Promise.resolve(input.repository.listGoals(input.context));
+  return { follows: goals.filter(isFollowGoal).map(toFollowView) };
+}
+
+export async function createControlFollow(input: ControlInput & {
+  follow: FollowInput;
+  now?: string;
+}) {
+  const goal = createFollowGoal(input.context, input.follow, input.now);
+  const saved = await Promise.resolve(input.repository.saveGoal(input.context, goal));
+  return { follow: toFollowView(saved), goalId: saved.id };
 }
 
 export async function getControlNotifications(input: ControlInput) {

@@ -33,6 +33,10 @@ import {
   selectCurrentInformationRun,
 } from "@/information/run-information";
 import { createResearchRequest } from "@/information/research-request";
+import {
+  inferNaturalResearchDraft,
+  type NaturalResearchOptions,
+} from "@/information/natural-research-intent";
 import { selectTodayPresentation } from "@/information/today-selection";
 import { todayResultCopy } from "@/information/today-copy";
 import type {
@@ -103,6 +107,20 @@ type AccountKnowledgeItem = {
   revision: { currentRevision?: number; revisionReason?: string };
   provenance: { verificationStatus?: string; reliabilityScore?: number };
   supportingEvidence: Array<{ id: string; publisher: string; sourceUrl: string; verificationStatus: string }>;
+};
+
+type FollowIntensity = "major_only" | "worth_knowing" | "more";
+type FollowDelivery = "important" | "daily" | "weekly";
+type AccountFollow = {
+  id: string;
+  topic: string;
+  intensity: FollowIntensity;
+  intensityLabel: string;
+  delivery: FollowDelivery;
+  deliveryLabel: string;
+  status: string;
+  nextCheckAt?: string;
+  reason: string;
 };
 
 const defaultProfile: PersonalProfile = {
@@ -177,10 +195,6 @@ function unique(values: string[]) {
 
 function textToList(value: string) {
   return unique(value.split(/\r?\n/));
-}
-
-function textToDraftLines(value: string) {
-  return value.split(/\r?\n/);
 }
 
 function reliabilityLabel(score: number) {
@@ -682,24 +696,20 @@ function FilterBuilder({
   onSave: (draft: OnboardingDraft) => void;
   onCancel?: () => void;
 }) {
-  const [draft, setDraft] = useState<OnboardingDraft>(emptyFilterDraft);
-  const [step, setStep] = useState(0);
-  const listInput = (
-    field: "focusAreas" | "knownInformation" | "informationGaps" | "currentQuestions" | "trackedEntities",
-    label: string,
-    placeholder: string,
-  ) => (
-    <label className="block">
-      <span className="text-xs font-black text-[#172033]">{label}</span>
-      <textarea
-        value={draft[field].join("\n")}
-        onChange={(event) => setDraft((current) => ({ ...current, [field]: textToDraftLines(event.target.value) }))}
-        onBlur={(event) => setDraft((current) => ({ ...current, [field]: textToList(event.target.value) }))}
-        placeholder={placeholder}
-        className="mt-2 min-h-24 w-full resize-none rounded-2xl border border-[#dde2e7] bg-white p-4 text-base leading-6 outline-none focus:border-[#7e9cff]"
-      />
-    </label>
-  );
+  const [query, setQuery] = useState("");
+  const [options, setOptions] = useState<NaturalResearchOptions>({
+    sourcePreference: "auto",
+    reliabilityPreference: "balanced",
+  });
+  const examples = [
+    "最近有哪些值得投递的 AIGC 岗位？",
+    "最近有什么值得测试的 AI 视频工具？",
+    "这个方向最近有什么重要变化？",
+  ];
+  const submit = () => {
+    const draft = inferNaturalResearchDraft(query, options);
+    onSave({ ...emptyFilterDraft, ...draft });
+  };
 
   return (
     <main className="signal-onboarding min-h-screen px-4 pb-10 pt-7 text-[#172033] sm:px-6">
@@ -708,83 +718,129 @@ function FilterBuilder({
           <div className="flex items-center gap-3">
             <span className="signal-mark grid h-10 w-10 place-items-center rounded-xl text-[11px] font-bold text-white">SM</span>
             <div>
-              <p className="signal-eyebrow">先建立过滤器</p>
+              <p className="signal-eyebrow">个人信息雷达</p>
               <p className="text-sm font-semibold">Signal Map</p>
             </div>
           </div>
           {onCancel && <button onClick={onCancel} className="text-xs font-bold text-[#727b87]">取消</button>}
         </div>
 
-        <div className="mt-9 flex items-center justify-between">
-          <p className="signal-eyebrow">第 {step + 1} 步，共 4 步</p>
-          <p className="text-xs font-bold text-[#858e99]">{["身份", "关注重点", "已有认知", "信息缺口"][step]}</p>
-        </div>
-        <div className="mt-3 grid grid-cols-4 gap-2" aria-label={`引导进度：第 ${step + 1} 步，共 4 步`}>
-          {[0, 1, 2, 3].map((index) => <span key={index} className={`h-1.5 rounded-full ${index <= step ? "bg-[#2359ff]" : "bg-[#e3e6e8]"}`} />)}
-        </div>
-
-        <h1 className="signal-display mt-8 text-[38px] leading-[1.04] sm:text-5xl">
-          {["先从你是谁开始。", "你正在关注什么？", "你已经知道什么？", "最后，告诉我缺什么。"][step]}
-        </h1>
+        <h1 className="signal-display mt-10 text-[42px] leading-[1.02] sm:text-6xl">你现在想了解什么？</h1>
         <p className="mt-4 text-sm leading-6 text-[#707986]">
-          {step === 0 ? "Signal Map 只把可能改变你判断的新证据带到面前。所有字段都可以跳过。" : "可以留空，之后随时在设置中补充。"}
+          直接说问题就行。Signal Map 会自动判断要看多新的信息、优先查哪些来源，并只保留有证据支持的变化。
         </p>
 
-        {step === 0 && (
-          <button
-            onClick={() => setDraft({
-              filterName: "AI 产品与创作",
-              identity: "AI 产品经理与独立创作者",
-              industry: "人工智能与创作者工具",
-              focusAreas: ["Codex", "AI Agent", "大模型更新", "创作者"],
-              trackedEntities: ["OpenAI", "Anthropic", "Google"],
-              knownInformation: ["Codex 可以协助完成多步骤编程任务"],
-              currentJudgement: "AI Agent 的真实价值取决于任务完成与证据可审查性",
-              informationGaps: ["Agent 真实任务评测", "AI 生成内容标识", "近期官方能力变化"],
-              currentQuestions: ["哪些能力变化会真实影响普通创作者的工作方式？"],
-              freshnessWindow: "7d",
-              sourceScope: "hybrid",
-            })}
-            className="mt-6 min-h-11 rounded-full border border-[#cfd8ff] bg-[#f3f6ff] px-4 py-2.5 text-xs font-black text-[#2359ff]"
-          >
-            使用示例快速体验
-          </button>
-        )}
-
         <div className="signal-onboarding-form mt-7 grid gap-5 rounded-[22px] border p-5 sm:p-7">
-          {step === 0 && <>
-            <label><span className="text-sm font-black">过滤器名称</span><input value={draft.filterName} onChange={(event) => setDraft((current) => ({ ...current, filterName: event.target.value }))} placeholder="例如：我的 AI 产品雷达" className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none focus:border-[#7e9cff]" /></label>
-            <label><span className="text-sm font-black">你的身份</span><input value={draft.identity} onChange={(event) => setDraft((current) => ({ ...current, identity: event.target.value }))} placeholder="你是谁 / 正在做什么" className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none focus:border-[#7e9cff]" /></label>
-            <label><span className="text-sm font-black">行业</span><input value={draft.industry} onChange={(event) => setDraft((current) => ({ ...current, industry: event.target.value }))} placeholder="所在行业或赛道" className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none focus:border-[#7e9cff]" /></label>
-          </>}
-          {step === 1 && <>
-            {listInput("focusAreas", "关注领域", "每行一项，例如：AI Agent")}
-            {listInput("trackedEntities", "关注实体", "公司、产品、人物；每行一项")}
-            {listInput("currentQuestions", "当前问题", "当前尚未解决的问题；每行一项")}
-          </>}
-          {step === 2 && <>
-            {listInput("knownInformation", "已知信息", "你已经确认的信息；每行一项")}
-            <label><span className="text-sm font-black">当前判断</span><textarea value={draft.currentJudgement} onChange={(event) => setDraft((current) => ({ ...current, currentJudgement: event.target.value }))} placeholder="你现在如何判断这个领域？" className="mt-2 min-h-28 w-full resize-none rounded-2xl border border-[#dde2e7] bg-white p-4 text-base leading-6 outline-none focus:border-[#7e9cff]" /></label>
-          </>}
-          {step === 3 && <>
-            {listInput("informationGaps", "信息缺口", "还缺少哪些证据；每行一项")}
-            <label><span className="text-sm font-black">信息时效范围</span><select value={draft.freshnessWindow} onChange={(event) => setDraft((current) => ({ ...current, freshnessWindow: event.target.value as InformationFilter["freshnessWindow"] }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="24h">24 小时</option><option value="3d">3 天</option><option value="7d">7 天</option><option value="30d">30 天</option></select></label>
-            <label><span className="text-sm font-black">来源范围</span><select value={draft.sourceScope} onChange={(event) => setDraft((current) => ({ ...current, sourceScope: event.target.value as SourceScope }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="hybrid">国内与全球</option><option value="domestic">国内来源</option><option value="global">全球来源</option><option value="custom">自定义来源</option></select></label>
-          </>}
-
+          <label>
+            <span className="text-sm font-black">你现在想了解什么？</span>
+            <textarea
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="例如：最近有什么值得测试的 AI 视频工具？"
+              className="mt-2 min-h-32 w-full resize-none rounded-2xl border border-[#dde2e7] bg-white p-4 text-lg leading-7 outline-none focus:border-[#7e9cff]"
+            />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {examples.map((example) => (
+              <button
+                key={example}
+                onClick={() => setQuery(example)}
+                className="min-h-10 rounded-full border border-[#dfe3e7] bg-white px-3 text-xs font-bold text-[#596473]"
+              >
+                {example}
+              </button>
+            ))}
+          </div>
+          <details className="rounded-2xl border border-[#e4e7eb] bg-white/60 p-4">
+            <summary className="min-h-10 cursor-pointer list-none text-sm font-black text-[#2359ff]">更多筛选</summary>
+            <div className="mt-4 grid gap-4">
+              <label><span className="text-sm font-black">时间范围</span><select value={options.freshnessWindow ?? ""} onChange={(event) => setOptions((current) => ({ ...current, freshnessWindow: event.target.value ? event.target.value as InformationFilter["freshnessWindow"] : undefined }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="">自动判断</option><option value="24h">最新</option><option value="3d">最近 3 天</option><option value="7d">最近 7 天</option><option value="30d">最近一个月</option></select></label>
+              <label><span className="text-sm font-black">来源偏好</span><select value={options.sourcePreference ?? "auto"} onChange={(event) => setOptions((current) => ({ ...current, sourcePreference: event.target.value as NaturalResearchOptions["sourcePreference"] }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="auto">自动选择</option><option value="official">优先官方和一手来源</option><option value="domestic">优先中文/国内来源</option><option value="global">优先全球来源</option></select></label>
+              <label><span className="text-sm font-black">地区</span><input value={options.region ?? ""} onChange={(event) => setOptions((current) => ({ ...current, region: event.target.value }))} placeholder="例如：中国、美国、全球；不填则自动判断" className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none" /></label>
+              <label><span className="text-sm font-black">排除关键词</span><input value={options.excludeKeywords ?? ""} onChange={(event) => setOptions((current) => ({ ...current, excludeKeywords: event.target.value }))} placeholder="不想看的词，用逗号隔开" className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none" /></label>
+              <label><span className="text-sm font-black">最低可信度</span><select value={options.reliabilityPreference ?? "balanced"} onChange={(event) => setOptions((current) => ({ ...current, reliabilityPreference: event.target.value as NaturalResearchOptions["reliabilityPreference"] }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="balanced">正常过滤</option><option value="reliable">优先较可靠来源</option><option value="strict">只看证据更充分的信息</option></select></label>
+            </div>
+          </details>
           <div className="flex gap-3 pt-1">
-            {step > 0 && <button onClick={() => setStep((value) => value - 1)} className="min-h-12 flex-1 rounded-xl border border-[#d8dde3] bg-white text-sm font-black text-[#657080]">返回</button>}
             <button
-              onClick={() => step < 3 ? setStep((value) => value + 1) : onSave({ ...draft, filterName: draft.filterName.trim() || "我的过滤器" })}
-              className="min-h-12 flex-[2] rounded-xl bg-[#2359ff] px-4 text-sm font-black text-white"
+              onClick={submit}
+              className="min-h-12 flex-1 rounded-xl bg-[#2359ff] px-4 text-sm font-black text-white disabled:opacity-45"
+              disabled={!query.trim()}
             >
-              {step < 3 ? "继续" : "创建过滤器并查看今日信息"}
+              开始研究
             </button>
           </div>
-          <p className="text-center text-[11px] leading-5 text-[#8a929d]">数据只保存在这台设备的浏览器中，不需要账号或 API。</p>
+          <p className="text-center text-[11px] leading-5 text-[#8a929d]">不用先配置系统。登录后可保存长期记忆；未登录只保存在当前浏览器。</p>
         </div>
       </section>
     </main>
+  );
+}
+
+function ResearchPromptPanel({
+  initialQuery = "",
+  loading,
+  onSubmit,
+}: {
+  initialQuery?: string;
+  loading: boolean;
+  onSubmit: (draft: OnboardingDraft) => void;
+}) {
+  const [query, setQuery] = useState(initialQuery);
+  const [options, setOptions] = useState<NaturalResearchOptions>({
+    sourcePreference: "auto",
+    reliabilityPreference: "balanced",
+  });
+  const examples = [
+    "最近有哪些值得投递的 AIGC 岗位？",
+    "最近有什么值得测试的 AI 视频工具？",
+    "这个方向最近有什么重要变化？",
+  ];
+  const submit = () => {
+    const draft = inferNaturalResearchDraft(query, options);
+    onSubmit({ ...emptyFilterDraft, ...draft });
+  };
+
+  return (
+    <section className="signal-onboarding-form rounded-[24px] border p-5 sm:p-6">
+      <label>
+        <span className="text-sm font-black text-[#172033]">你现在想了解什么？</span>
+        <textarea
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="例如：最近有哪些值得投递的 AIGC 岗位？"
+          className="mt-2 min-h-28 w-full resize-none rounded-2xl border border-[#dde2e7] bg-white p-4 text-lg leading-7 outline-none focus:border-[#7e9cff]"
+        />
+      </label>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {examples.map((example) => (
+          <button
+            key={example}
+            onClick={() => setQuery(example)}
+            className="min-h-10 rounded-full border border-[#dfe3e7] bg-white px-3 text-xs font-bold text-[#596473]"
+          >
+            {example}
+          </button>
+        ))}
+      </div>
+      <details className="mt-4 rounded-2xl border border-[#e4e7eb] bg-white/60 p-4">
+        <summary className="min-h-10 cursor-pointer list-none text-sm font-black text-[#2359ff]">更多筛选</summary>
+        <div className="mt-4 grid gap-4">
+          <label><span className="text-sm font-black">时间范围</span><select value={options.freshnessWindow ?? ""} onChange={(event) => setOptions((current) => ({ ...current, freshnessWindow: event.target.value ? event.target.value as InformationFilter["freshnessWindow"] : undefined }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="">自动判断</option><option value="24h">最新</option><option value="3d">最近 3 天</option><option value="7d">最近 7 天</option><option value="30d">最近一个月</option></select></label>
+          <label><span className="text-sm font-black">来源偏好</span><select value={options.sourcePreference ?? "auto"} onChange={(event) => setOptions((current) => ({ ...current, sourcePreference: event.target.value as NaturalResearchOptions["sourcePreference"] }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="auto">自动选择</option><option value="official">优先官方和一手来源</option><option value="domestic">优先中文/国内来源</option><option value="global">优先全球来源</option></select></label>
+          <label><span className="text-sm font-black">地区</span><input value={options.region ?? ""} onChange={(event) => setOptions((current) => ({ ...current, region: event.target.value }))} placeholder="例如：中国、美国、全球；不填则自动判断" className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none" /></label>
+          <label><span className="text-sm font-black">排除关键词</span><input value={options.excludeKeywords ?? ""} onChange={(event) => setOptions((current) => ({ ...current, excludeKeywords: event.target.value }))} placeholder="不想看的词，用逗号隔开" className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none" /></label>
+          <label><span className="text-sm font-black">最低可信度</span><select value={options.reliabilityPreference ?? "balanced"} onChange={(event) => setOptions((current) => ({ ...current, reliabilityPreference: event.target.value as NaturalResearchOptions["reliabilityPreference"] }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="balanced">正常过滤</option><option value="reliable">优先较可靠来源</option><option value="strict">只看证据更充分的信息</option></select></label>
+        </div>
+      </details>
+      <button
+        onClick={submit}
+        disabled={loading || !query.trim()}
+        className="mt-4 min-h-12 w-full rounded-xl bg-[#2359ff] px-4 text-sm font-black text-white disabled:opacity-45"
+      >
+        {loading ? "正在研究…" : "开始研究"}
+      </button>
+    </section>
   );
 }
 
@@ -836,6 +892,12 @@ export default function HomePage() {
   const [accountKnowledge, setAccountKnowledge] = useState<AccountKnowledgeItem[]>([]);
   const [accountKnowledgeUserId, setAccountKnowledgeUserId] = useState<string | null>(null);
   const [accountKnowledgeError, setAccountKnowledgeError] = useState("");
+  const [accountFollows, setAccountFollows] = useState<AccountFollow[]>([]);
+  const [accountFollowsUserId, setAccountFollowsUserId] = useState<string | null>(null);
+  const [followTopic, setFollowTopic] = useState("");
+  const [followIntensity, setFollowIntensity] = useState<FollowIntensity>("worth_knowing");
+  const [followDelivery, setFollowDelivery] = useState<FollowDelivery>("daily");
+  const [followStatus, setFollowStatus] = useState("");
   const [selected, setSelected] = useState<ResearchSignal | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -852,6 +914,9 @@ export default function HomePage() {
   const loggedIn = Boolean(currentUser);
   const accountKnowledgeForCurrentUser = currentUser && accountKnowledgeUserId === currentUser.id
     ? accountKnowledge
+    : [];
+  const accountFollowsForCurrentUser = currentUser && accountFollowsUserId === currentUser.id
+    ? accountFollows
     : [];
   const activeFilter = useMemo(
     () => filters.find((filter) => filter.id === activeFilterId) || null,
@@ -1076,6 +1141,32 @@ export default function HomePage() {
     };
   }, [currentUser]);
 
+  const loadFollows = useCallback((userId: string) => {
+    fetch("/api/control/follows", { cache: "no-store", credentials: "same-origin" })
+      .then(async (request) => {
+        if (!request.ok) {
+          const body = await request.json().catch(() => null) as { error?: string } | null;
+          throw new Error(body?.error ?? "关注暂时无法读取");
+        }
+        return (await request.json()) as { follows?: AccountFollow[] };
+      })
+      .then((value) => {
+        setAccountFollows(value.follows || []);
+        setAccountFollowsUserId(userId);
+        setFollowStatus("");
+      })
+      .catch((requestError) => {
+        setAccountFollows([]);
+        setAccountFollowsUserId(userId);
+        setFollowStatus(requestError instanceof Error ? requestError.message : "关注暂时无法读取");
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    loadFollows(currentUser.id);
+  }, [currentUser, loadFollows]);
+
   useEffect(() => {
     if (!hydrated) return;
     void setAlphaValue("profile", profile);
@@ -1256,6 +1347,43 @@ export default function HomePage() {
     [filters.length, profile, refreshToday],
   );
 
+  const startResearch = useCallback(
+    (draft: OnboardingDraft) => {
+      if (!activeFilter || !activeKnowledge || !activeFilterId) {
+        createFilter(draft);
+        return;
+      }
+      const now = new Date().toISOString();
+      const filterUpdate = updateFilterResearchConfig(activeFilter, activeKnowledge, {
+        industry: draft.industry,
+        focusAreas: draft.focusAreas,
+        freshnessWindow: draft.freshnessWindow,
+        sourceScope: draft.sourceScope,
+        customSources: draft.customSources ?? [],
+      }, now);
+      const nextFilter: InformationFilter = {
+        ...filterUpdate.filter,
+        filterName: draft.filterName.trim() || filterUpdate.filter.filterName,
+        updatedAt: now,
+      };
+      const nextKnowledge = updateResearchContext(filterUpdate.knowledge, {
+        currentQuestions: draft.currentQuestions,
+        informationGaps: unique([...activeKnowledge.informationGaps, ...draft.informationGaps]),
+        trackedEntities: unique([...activeKnowledge.trackedEntities, ...draft.trackedEntities]),
+      }, now);
+      const nextContext = composeActiveKnowledgeContext(profile, nextFilter, nextKnowledge);
+      setFilters((current) => current.map((filter) => filter.id === activeFilterId ? nextFilter : filter));
+      setKnowledgeByFilterId((current) => ({ ...current, [activeFilterId]: nextKnowledge }));
+      setPage("today");
+      currentResearchContextRef.current = {
+        filterId: activeFilterId,
+        researchContextRevision: nextContext.researchContextRevision,
+      };
+      void refreshToday(nextContext, nextFilter);
+    },
+    [activeFilter, activeFilterId, activeKnowledge, createFilter, profile, refreshToday],
+  );
+
   const switchFilter = useCallback(
     (filter: InformationFilter) => {
       const nextKnowledge = knowledgeByFilterId[filter.id] ?? createEmptyFilterKnowledge(new Date().toISOString());
@@ -1289,6 +1417,35 @@ export default function HomePage() {
     setFeedbackSaved(true);
   }, [feedbackDraft, sessionId]);
 
+  const saveFollow = useCallback(() => {
+    if (!currentUser || !followTopic.trim()) return;
+    setFollowStatus("正在保存关注…");
+    fetch("/api/control/follows", {
+      method: "POST",
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic: followTopic,
+        intensity: followIntensity,
+        delivery: followDelivery,
+        filterId: activeFilterId ?? undefined,
+      }),
+    })
+      .then(async (request) => {
+        const body = await request.json().catch(() => null) as { follow?: AccountFollow; error?: string } | null;
+        if (!request.ok || !body?.follow) throw new Error(body?.error ?? "关注保存失败");
+        return body.follow;
+      })
+      .then((follow) => {
+        setAccountFollows((current) => [follow, ...current.filter((item) => item.id !== follow.id)]);
+        setAccountFollowsUserId(currentUser.id);
+        setFollowTopic("");
+        setFollowStatus("已开始关注。只有可能改变判断或行动的新证据才会提醒你。");
+      })
+      .catch((requestError) => setFollowStatus(requestError instanceof Error ? requestError.message : "关注保存失败"));
+  }, [activeFilterId, currentUser, followDelivery, followIntensity, followTopic]);
+
   const feedbackExportHref = useMemo(
     () => `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify({ sessionId, feedback: experienceFeedback }, null, 2))}`,
     [experienceFeedback, sessionId],
@@ -1302,13 +1459,12 @@ export default function HomePage() {
 
   const renderToday = () => (
     <main className="signal-page mx-auto max-w-[760px] px-4 pb-32 pt-8 sm:px-6 sm:pt-12">
-      <button onClick={() => navigate("settings")} className="signal-filter-switch flex min-h-14 w-full items-center justify-between rounded-xl border px-4 text-left">
-        <span>
-          <span className="block text-[10px] font-black uppercase tracking-[.12em] text-[#7b8490]">当前过滤器</span>
-          <span className="mt-1 block text-sm font-black text-[#172033]">{activeFilter?.filterName}</span>
-        </span>
-        <ChevronRight size={18} className="text-[#8a929d]" />
-      </button>
+      <ResearchPromptPanel
+        key={activeFilter?.id ?? "new"}
+        initialQuery={activeContext?.currentQuestions[0] ?? ""}
+        loading={loading}
+        onSubmit={startResearch}
+      />
 
       <div className="mt-8 flex items-start justify-between gap-4">
         <div>
@@ -1608,6 +1764,54 @@ export default function HomePage() {
         )}
 
         <div className="mt-8 grid gap-3">
+          <section className="rounded-[24px] border border-[#dfe3e7] bg-white/75 p-5">
+            <p className="text-xs font-black uppercase tracking-[.14em] text-[#2359ff]">主动发现</p>
+            <h2 className="mt-2 text-xl font-black tracking-[-.04em]">关注外部变化</h2>
+            <p className="mt-2 text-sm leading-6 text-[#68727f]">不是有新内容就提醒；只有足以改变你的认知或行动时，才进入注意力层。</p>
+            {loggedIn ? (
+              <div className="mt-5 grid gap-4">
+                <label>
+                  <span className="text-sm font-black">关注主题</span>
+                  <input value={followTopic} onChange={(event) => setFollowTopic(event.target.value)} placeholder="例如：AI 视频工具、AIGC 岗位、DeepSeek 产品变化" className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] bg-white px-4 text-base outline-none focus:border-[#8facff]"/>
+                </label>
+                <label>
+                  <span className="text-sm font-black">关注强度</span>
+                  <select value={followIntensity} onChange={(event) => setFollowIntensity(event.target.value as FollowIntensity)} className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] bg-white px-4 text-base">
+                    <option value="major_only">只看重大变化</option>
+                    <option value="worth_knowing">值得知道时告诉我</option>
+                    <option value="more">尽量多关注</option>
+                  </select>
+                </label>
+                <label>
+                  <span className="text-sm font-black">推送方式</span>
+                  <select value={followDelivery} onChange={(event) => setFollowDelivery(event.target.value as FollowDelivery)} className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] bg-white px-4 text-base">
+                    <option value="important">重要提醒</option>
+                    <option value="daily">每日摘要</option>
+                    <option value="weekly">每周摘要</option>
+                  </select>
+                </label>
+                <button onClick={saveFollow} disabled={!followTopic.trim()} className="min-h-12 rounded-xl bg-[#2359ff] text-sm font-black text-white disabled:opacity-45">开始关注</button>
+                {followStatus && <p className="text-sm leading-6 text-[#68727f]">{followStatus}</p>}
+                {accountFollowsForCurrentUser.length > 0 && (
+                  <div className="grid gap-3">
+                    {accountFollowsForCurrentUser.map((follow) => (
+                      <article key={follow.id} className="rounded-2xl border border-[#e5e7e4] bg-white p-4">
+                        <h3 className="text-base font-black">{follow.topic}</h3>
+                        <p className="mt-2 text-xs font-bold text-[#2359ff]">{follow.intensityLabel} · {follow.deliveryLabel}</p>
+                        <p className="mt-2 text-sm leading-6 text-[#68727f]">{follow.reason}</p>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="mt-5 rounded-2xl border border-[#e5e8eb] bg-white p-4 text-sm leading-6 text-[#68727f]">
+                <p>主动发现需要长期记忆和历史判断。登录后可以保存关注主题；未登录仍可临时检索，但不会写入长期记忆。</p>
+                <a href="/control" className="mt-4 inline-flex min-h-11 items-center rounded-xl bg-[#172033] px-5 text-sm font-black text-white">登录 / 注册</a>
+              </div>
+            )}
+          </section>
+
           <details className={accordionClass}>
             <summary className={summaryClass}><span>我的资料</span><ChevronRight size={18}/></summary>
             <div className="mt-5 grid gap-5"><label><span className="text-sm font-black">身份</span><input value={knowledge.identity} onChange={(event) => setKnowledge((current) => ({ ...current, identity: event.target.value }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] px-4 text-base"/></label><label><span className="text-sm font-black">行业</span><input value={knowledge.industry} onChange={(event) => setKnowledge((current) => ({ ...current, industry: event.target.value }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] px-4 text-base"/></label></div>

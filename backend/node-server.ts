@@ -10,6 +10,7 @@ import {
   handleAuthPasswordUpdate,
   handleConnections,
   handleControlAgentRuns,
+  handleControlFollows,
   handleControlGoalAction,
   handleControlGoals,
   handleControlKnowledge,
@@ -80,6 +81,8 @@ export async function handleBackendRequest(request: Request) {
     response = await handleResearchStream(request);
   } else if (url.pathname === "/api/control/goals") {
     response = await handleControlGoals(request);
+  } else if (url.pathname === "/api/control/follows") {
+    response = await handleControlFollows(request);
   } else if (url.pathname === "/api/control/notifications") {
     response = await handleControlNotifications(request);
   } else if (url.pathname === "/api/control/knowledge") {

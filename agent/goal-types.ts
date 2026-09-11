@@ -34,6 +34,9 @@ export type GoalWatchMetadata = {
   lastTriggerAt?: string;
   watchStatus: "waiting" | "ready" | "expired" | "error";
   lastCheckOutcome?: "not_checked" | "no_change" | "condition_met" | "temporary_failure" | "permanent_failure" | "expired" | "event_ignored";
+  followTopic?: string;
+  followIntensity?: "major_only" | "worth_knowing" | "more";
+  deliveryPreference?: "important" | "daily" | "weekly";
   leaseOwner?: string;
   leaseExpiresAt?: string;
   schedulerLastRunAt?: string;
