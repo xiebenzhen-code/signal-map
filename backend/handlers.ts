@@ -375,28 +375,44 @@ export const handleAuthPasswordUpdate = withSession(async (request: Request) => 
   const auth = await resolveAuthContext(request);
   if (!auth) return Response.json({ error: "重置链接已失效，请重新请求密码重置" }, { status: 401 });
   const { error } = await client.auth.updateUser({ password });
-  if (error) return Response.json({ error: "新密码未更新，请重新请求密码重置" }, { status: 400 });
+  if (error) return Response.json({ error: "新密码未更新，请重新请求密码重置", code: "password_update_failed" }, { status: 400 });
   return Response.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
 });
+
+function mapRecoveryError(error: { code?: string; message?: string; status?: number }) {
+  const detail = `${String(error.code || "").toLowerCase()} ${String(error.message || "").toLowerCase()}`;
+  if (/expired/.test(detail)) {
+    return { status: 401, code: "recovery_token_expired", error: "重置链接已过期，请重新请求密码重置。" };
+  }
+  if (/invalid|not found|otp|token/.test(detail)) {
+    return { status: 401, code: "invalid_recovery_token", error: "重置链接无效，请重新请求密码重置。" };
+  }
+  if ((error.status || 0) >= 500) {
+    return { status: 503, code: "recovery_session_failed", error: "认证服务暂时不可用，请稍后重试。" };
+  }
+  return { status: 401, code: "recovery_session_failed", error: "无法建立密码重置会话，请重新请求。" };
+}
 
 export const handleAuthPasswordRecovery = withSession(async (request: Request) => {
   if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
   const body = await bodyRecord(request);
-  const code = typeof body.code === "string" ? body.code.trim() : "";
-  if (!code) return Response.json({ error: "重置链接无效或已过期，请重新请求" }, { status: 400 });
+  const tokenHash = typeof body.token_hash === "string" ? body.token_hash.trim() : "";
+  const type = typeof body.type === "string" ? body.type.trim() : "";
+  if (type !== "recovery") {
+    return Response.json({ error: "重置链接类型无效，请重新请求密码重置。", code: "invalid_recovery_token" }, { status: 400 });
+  }
+  if (!tokenHash) {
+    return Response.json({ error: "重置链接缺少验证信息，请重新请求密码重置。", code: "invalid_recovery_token" }, { status: 400 });
+  }
   const { client } = requestSession(request);
   if (!client) return Response.json({ error: "Supabase Auth 尚未配置" }, { status: 503 });
-  const { error } = await client.auth.exchangeCodeForSession(code);
+  const { data, error } = await client.auth.verifyOtp({ token_hash: tokenHash, type: "recovery" });
   if (error) {
-    const detail = `${error.message ?? ""}`.toLowerCase();
-    const verifierMissing = detail.includes("code verifier") || detail.includes("pkce") || detail.includes("verifier");
-    if (verifierMissing) {
-      return Response.json({
-        error: "请在发起重置请求的同一浏览器打开邮件链接。若换了设备，请在当前设备重新请求一次。",
-        code: "recovery_browser_mismatch",
-      }, { status: 401 });
-    }
-    return Response.json({ error: "重置链接无效或已过期，请重新请求" }, { status: 401 });
+    const mapped = mapRecoveryError(error);
+    return Response.json({ error: mapped.error, code: mapped.code }, { status: mapped.status });
+  }
+  if (!data.session || !data.user || data.user.is_anonymous) {
+    return Response.json({ error: "无法建立密码重置会话，请重新请求。", code: "recovery_session_failed" }, { status: 401 });
   }
   return Response.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
 });

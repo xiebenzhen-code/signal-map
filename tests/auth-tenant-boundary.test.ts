@@ -243,7 +243,7 @@ test("password update rejects requests without a verified recovery session", asy
   assert.deepEqual(await response.json(), { error: "重置链接已失效，请重新请求密码重置" });
 });
 
-test("password recovery exchanges the email code before password update", async (t) => {
+test("password recovery verifies a token_hash before password update", async (t) => {
   const keys = ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"] as const;
   const previous = keys.map((key) => process.env[key]);
   t.after(() => keys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; }));
@@ -251,9 +251,11 @@ test("password recovery exchanges the email code before password update", async 
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "test-publishable-key";
   t.mock.method(globalThis, "fetch", async (target: string | URL, init?: RequestInit) => {
     const url = new URL(String(target));
-    assert.equal(url.pathname, "/auth/v1/token");
-    assert.equal(url.searchParams.get("grant_type"), "pkce");
-    assert.deepEqual(JSON.parse(String(init?.body)), { auth_code: "recovery-code", code_verifier: "test-verifier" });
+    assert.equal(url.pathname, "/auth/v1/verify");
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.token_hash, "valid-token-hash");
+    assert.equal(body.type, "recovery");
+    assert.equal(body.gotrue_meta_security.captcha_token, undefined);
     return Response.json({
       access_token: "fixture-access-token", refresh_token: "fixture-refresh-token", token_type: "bearer", expires_in: 3600,
       user: { id: "recovered-user", aud: "authenticated", app_metadata: {}, user_metadata: {}, created_at: now },
@@ -261,12 +263,87 @@ test("password recovery exchanges the email code before password update", async 
   });
   const response = await handleBackendRequest(new Request("https://signal.benzhenlab.com/api/auth/password-recovery", {
     method: "POST",
-    headers: { Origin: "https://signal.benzhenlab.com", "Content-Type": "application/json", Cookie: `sb-auth-fixture-auth-token-code-verifier=base64-${Buffer.from(JSON.stringify("test-verifier/recovery")).toString("base64url")}` },
-    body: JSON.stringify({ code: "recovery-code" }),
+    headers: { Origin: "https://signal.benzhenlab.com", "Content-Type": "application/json" },
+    body: JSON.stringify({ token_hash: "valid-token-hash", type: "recovery" }),
   }));
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { ok: true });
   assert.ok(response.headers.getSetCookie().some((cookie) => cookie.startsWith("sb-auth-fixture-auth-token=")));
+  assert.doesNotMatch(response.headers.get("set-cookie") ?? "", /valid-token-hash/);
+});
+
+test("password recovery rejects invalid token_hash with an explicit error", async (t) => {
+  const keys = ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"] as const;
+  const previous = keys.map((key) => process.env[key]);
+  t.after(() => keys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; }));
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://auth-fixture.supabase.co";
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "test-publishable-key";
+  t.mock.method(globalThis, "fetch", async () => Response.json({ code: "otp_disabled", message: "One-time token not found" }, { status: 403 }));
+  const response = await handleBackendRequest(new Request("https://signal.benzhenlab.com/api/auth/password-recovery", {
+    method: "POST",
+    headers: { Origin: "https://signal.benzhenlab.com", "Content-Type": "application/json" },
+    body: JSON.stringify({ token_hash: "invalid-token-hash", type: "recovery" }),
+  }));
+  assert.equal(response.status, 401);
+  const body = await response.json() as { code: string; error: string };
+  assert.equal(body.code, "invalid_recovery_token");
+  assert.doesNotMatch(JSON.stringify(body), /invalid-token-hash/);
+});
+
+test("password recovery rejects non-recovery link types without calling Supabase", async (t) => {
+  const keys = ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"] as const;
+  const previous = keys.map((key) => process.env[key]);
+  t.after(() => keys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; }));
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://auth-fixture.supabase.co";
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "test-publishable-key";
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async () => { calls += 1; return Response.json({}); });
+  const response = await handleBackendRequest(new Request("https://signal.benzhenlab.com/api/auth/password-recovery", {
+    method: "POST",
+    headers: { Origin: "https://signal.benzhenlab.com", "Content-Type": "application/json" },
+    body: JSON.stringify({ token_hash: "valid-token-hash", type: "signup" }),
+  }));
+  assert.equal(response.status, 400);
+  assert.equal((await response.json() as { code: string }).code, "invalid_recovery_token");
+  assert.equal(calls, 0);
+});
+
+test("authenticated recovery session can update the password", async (t) => {
+  const keys = ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"] as const;
+  const previous = keys.map((key) => process.env[key]);
+  t.after(() => keys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; }));
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://auth-fixture.supabase.co";
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "test-publishable-key";
+  const user = { id: "recovered-user", aud: "authenticated", app_metadata: {}, user_metadata: {}, created_at: now };
+  const session = {
+    access_token: "fixture-access-token",
+    refresh_token: "fixture-refresh-token",
+    token_type: "bearer",
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+    expires_in: 3600,
+    user,
+  };
+  const cookie = `sb-auth-fixture-auth-token=base64-${Buffer.from(JSON.stringify(session)).toString("base64url")}`;
+  let updated = false;
+  t.mock.method(globalThis, "fetch", async (target: string | URL, init?: RequestInit) => {
+    const url = new URL(String(target));
+    if (url.pathname === "/auth/v1/user" && (init?.method ?? "GET") === "GET") return Response.json(user);
+    if (url.pathname === "/auth/v1/user" && init?.method === "PUT") {
+      updated = true;
+      assert.equal(new Headers(init.headers).get("authorization"), "Bearer fixture-access-token");
+      assert.deepEqual(JSON.parse(String(init.body)), { password: "new-password", code_challenge: null, code_challenge_method: null });
+      return Response.json({ user });
+    }
+    throw new Error("Unexpected Auth transport call");
+  });
+  const response = await handleBackendRequest(new Request("https://signal.benzhenlab.com/api/auth/password-update", {
+    method: "POST",
+    headers: { Origin: "https://signal.benzhenlab.com", "Content-Type": "application/json", Cookie: cookie },
+    body: JSON.stringify({ password: "new-password" }),
+  }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true });
+  assert.equal(updated, true);
 });
 
 test("Agent API never falls back to guest when no database or auth exists", async () => {

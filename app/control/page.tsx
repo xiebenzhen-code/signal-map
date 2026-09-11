@@ -217,7 +217,7 @@ export default function ControlDashboard() {
 
   if (!user) return (
     <div className="signal-shell">
-      <header className="signal-topbar border-b px-6 py-5"><a href="/" className="flex items-center gap-3 font-semibold"><span className="signal-mark grid h-10 w-10 place-items-center rounded-xl text-xs text-white">SM</span>Signal Map</a></header>
+      <header className="signal-topbar border-b px-6 py-5"><Link href="/" className="flex items-center gap-3 font-semibold"><span className="signal-mark grid h-10 w-10 place-items-center rounded-xl text-xs text-white">SM</span>Signal Map</Link></header>
       <main className="mx-auto max-w-md px-5 py-16 sm:py-24">
         <p className="signal-eyebrow">个人信息雷达</p>
         <h1 className="signal-display mt-4 text-4xl leading-tight">{authMode === "login" ? "继续你的探索。" : "建立你的知识地图。"}</h1>
@@ -233,7 +233,7 @@ export default function ControlDashboard() {
           {!["loading", "signed_out"].includes(status) && <p role="status" className="text-sm leading-6 text-[#a13926]">{status === "error" ? "暂时无法连接账户服务，请稍后重试。" : status}</p>}
           <p className="text-xs leading-6 text-[#657080]">首次使用请先注册；若提示邮箱验证，请完成验证后再登录。此处密码是 Signal Map 账户密码。</p>
         </form>
-        <a href="/" className="mt-6 block text-center text-sm text-[#657080]">返回首页</a>
+        <Link href="/" className="mt-6 block text-center text-sm text-[#657080]">返回首页</Link>
       </main>
     </div>
   );
@@ -243,7 +243,7 @@ export default function ControlDashboard() {
       <section className="control-hero">
         <p className="control-eyebrow">Signal Map Control Plane</p>
         <h1>Agent 状态控制台</h1>
-        <a className="control-secondary inline-block" href="/">返回首页</a>
+        <Link className="control-secondary inline-block" href="/">返回首页</Link>
         <p>查看 Goal、Watch、通知、知识修订和 AgentRun trace。人工操作只走现有业务层，不绕过证据系统。</p>
         <p>当前身份：{user ? `${user.mode} · ${user.id}` : "未登录"}</p>
         {!user ? (
