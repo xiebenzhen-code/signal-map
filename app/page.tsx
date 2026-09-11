@@ -1065,7 +1065,7 @@ export default function HomePage() {
           : null;
         setProfile(snapshot.profile);
         setKnowledgeByFilterId(snapshot.knowledgeByFilterId);
-        setLastRunByFilterId({});
+        setLastRunByFilterId(snapshot.lastRunByFilterId);
         setLibrary(snapshot.library);
         setNotes(snapshot.notes);
         setFeedbackRecords(snapshot.feedback);
@@ -1079,7 +1079,6 @@ export default function HomePage() {
             filterId: restoredFilter.id,
             researchContextRevision: restoredContext.researchContextRevision,
           };
-          void refreshToday(restoredContext, restoredFilter);
         }
       })
       .catch(() => setError("本地数据暂时无法读取，请检查浏览器是否允许 IndexedDB。"))
@@ -1098,7 +1097,10 @@ export default function HomePage() {
           if (!request.ok) throw new Error("auth unavailable");
           return (await request.json()) as { user: CurrentUser };
         })
-        .then((value) => setCurrentUser(value.user))
+        .then((value) => {
+          setCurrentUser(value.user);
+          setError("");
+        })
         .catch(() => setCurrentUser(null));
       fetch("/api/connections", { cache: "no-store", credentials: "same-origin" })
         .then(async (request) => (await request.json()) as { connections?: Connection[] })
@@ -1397,11 +1399,8 @@ export default function HomePage() {
         filterId: filter.id,
         researchContextRevision: nextContext.researchContextRevision,
       };
-      if (!selectCurrentInformationRun(lastRunByFilterId, filter.id, nextContext.researchContextRevision)) {
-        void refreshToday(nextContext, filter);
-      }
     },
-    [knowledgeByFilterId, lastRunByFilterId, profile, refreshToday],
+    [knowledgeByFilterId, profile],
   );
 
   const submitExperienceFeedback = useCallback(() => {
