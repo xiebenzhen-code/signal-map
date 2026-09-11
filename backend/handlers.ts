@@ -27,6 +27,7 @@ type ProviderId = SocialProvider["id"];
 
 const guestAgentRepository = new InMemorySignalRepository();
 const SIGNALS_PERSISTENCE_TIMEOUT_MS = 4000;
+const CONTROL_PERSISTENCE_TIMEOUT_MS = 4000;
 
 export function operationTimeoutError(code: string) {
   return Object.assign(new Error(code), { code });
@@ -78,7 +79,15 @@ async function authorizedContext(request: Request, repository: ControlRepository
   const auth = await resolveAuthContext(request);
   if (!auth) return { response: Response.json({ error: "Unauthorized" }, { status: 401 }) };
   const context = { authenticatedUserId: auth.userId, filterId: filterIdFromRequest(request, auth.userId) };
-  const allowed = await ensureFilter(repository, context, { createIfMissing: options.createFilterIfMissing === true || context.filterId === `account-${auth.userId}` });
+  const allowed = await withOperationTimeout(
+    ensureFilter(repository, context, { createIfMissing: options.createFilterIfMissing === true || context.filterId === `account-${auth.userId}` }),
+    CONTROL_PERSISTENCE_TIMEOUT_MS,
+    "DB_TIMEOUT",
+  ).catch((error) => {
+    if (error && typeof error === "object" && "code" in error && error.code === "DB_TIMEOUT") return null;
+    throw error;
+  });
+  if (allowed === null) return { response: Response.json({ error: "Service temporarily unavailable", code: "DB_TIMEOUT" }, { status: 503 }) };
   if (!allowed) return { response: Response.json({ error: "Forbidden" }, { status: 403 }) };
   return { context, auth };
 }
