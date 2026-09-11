@@ -182,10 +182,11 @@ export async function getControlNotifications(input: ControlInput) {
   };
 }
 
-export async function getControlKnowledge(input: ControlInput) {
+export async function getControlKnowledge(input: ControlInput, options: { includeSupportingEvidence?: boolean } = {}) {
+  const includeSupportingEvidence = options.includeSupportingEvidence !== false;
   const [knowledge, evidence] = await Promise.all([
     Promise.resolve(input.repository.listPersonalKnowledge(input.context)),
-    Promise.resolve(input.repository.listEvidence?.() ?? []),
+    includeSupportingEvidence ? Promise.resolve(input.repository.listEvidence?.() ?? []) : Promise.resolve([]),
   ]);
   const evidenceById = new Map(evidence.map((item) => [item.id, item]));
   return {

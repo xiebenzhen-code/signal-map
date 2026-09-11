@@ -202,6 +202,16 @@ test("Notification, knowledge, evidence, and agent run inspectors expose scoped 
   assert.equal(knowledge.knowledge[0]?.supportingEvidence[0]?.id, "evidence-1");
   assert.equal(knowledge.knowledge[0]?.supportingEvidence[0]?.sourceUrl, "https://example.com/codex");
 
+  let listEvidenceCalled = false;
+  repository.listEvidence = () => {
+    listEvidenceCalled = true;
+    throw new Error("Evidence detail should not be loaded in summary mode");
+  };
+  const knowledgeSummary = await getControlKnowledge({ context, repository }, { includeSupportingEvidence: false });
+  assert.equal(knowledgeSummary.knowledge[0]?.currentValue, "Codex released a workflow update");
+  assert.deepEqual(knowledgeSummary.knowledge[0]?.supportingEvidence, []);
+  assert.equal(listEvidenceCalled, false);
+
   const runs = await getControlAgentRuns({ context, repository });
   assert.equal(runs.agentRuns[0]?.id, "run-1");
   assert.deepEqual(runs.agentRuns[0]?.trace.map((entry) => entry.state), ["COMPLETE"]);

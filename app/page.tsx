@@ -1049,7 +1049,7 @@ export default function HomePage() {
   useEffect(() => {
     if (!currentUser) return;
     let cancelled = false;
-    fetch("/api/control/knowledge", { cache: "no-store", credentials: "same-origin" })
+    fetch("/api/control/knowledge?summary=1", { cache: "no-store", credentials: "same-origin" })
       .then(async (request) => {
         if (!request.ok) {
           const body = await request.json().catch(() => null) as { error?: string } | null;

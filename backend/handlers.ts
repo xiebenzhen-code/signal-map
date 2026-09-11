@@ -364,10 +364,11 @@ export const handleControlKnowledge = withSession(async (request: Request) => {
   const repository = agentRepository();
   const auth = await authorizedContext(request, repository);
   if (auth.response) return auth.response;
+  const includeSupportingEvidence = new URL(request.url).searchParams.get("summary") !== "1";
   return Response.json(await getControlKnowledge({
     context: auth.context,
     repository,
-  }), { headers: { "Cache-Control": "no-store" } });
+  }, { includeSupportingEvidence }), { headers: { "Cache-Control": "no-store" } });
 });
 
 export const handleControlAgentRuns = withSession(async (request: Request) => {
