@@ -241,8 +241,8 @@ export default function ControlDashboard() {
   return (
     <main className="control-shell">
       <section className="control-hero">
-        <p className="control-eyebrow">Signal Map Control Plane</p>
-        <h1>Agent 状态控制台</h1>
+        <p className="control-eyebrow">Signal Map Account</p>
+        <h1>账户与长期记忆</h1>
         <Link
           className="control-secondary inline-block"
           href="/"
@@ -253,7 +253,8 @@ export default function ControlDashboard() {
         >
           返回首页
         </Link>
-        <p>查看 Goal、Watch、通知、知识修订和 AgentRun trace。人工操作只走现有业务层，不绕过证据系统。</p>
+        <Link className="control-secondary inline-block" href="/?page=library&libraryView=knowledge">查看长期记忆</Link>
+        <p>查看你的长期记忆、等待中的研究、提醒记录和最近的研究过程。这里不会绕过证据系统。</p>
         <p>当前身份：{user ? `${user.mode} · ${user.id}` : "未登录"}</p>
         {!user ? (
           <div className="control-login">
@@ -271,7 +272,7 @@ export default function ControlDashboard() {
       </section>
 
       <section className="control-grid">
-        <Panel title="Goals" description="当前 active / waiting / blocked 的目标">
+        <Panel title="进行中的研究" description="当前正在推进或等待条件满足的研究">
           {activeGoals.length === 0 ? <Empty text="没有正在推进或等待的 Goal。" /> : activeGoals.map((goal) => (
             <article className="control-card" key={goal.id}>
               <div className="control-row">
@@ -282,16 +283,16 @@ export default function ControlDashboard() {
               {goal.waitingOrBlockedReason ? <p>原因：{goal.waitingOrBlockedReason}</p> : null}
               {goal.nextCheckAt ? <p>下次检查：{goal.nextCheckAt}</p> : null}
               <div className="control-actions">
-                <button onClick={() => void control(goal.id, "resume")}>Resume</button>
-                <button onClick={() => void control(goal.id, "pause")}>Pause</button>
-                <button onClick={() => void control(goal.id, "abandon")}>Abandon</button>
+                <button onClick={() => void control(goal.id, "resume")}>继续</button>
+                <button onClick={() => void control(goal.id, "pause")}>暂停</button>
+                <button onClick={() => void control(goal.id, "abandon")}>放弃</button>
               </div>
             </article>
           ))}
         </Panel>
 
-        <Panel title="Watches" description="为什么等待、何时再检查">
-          {state.goals.filter((goal) => goal.watch).length === 0 ? <Empty text="暂无 Watch metadata。" /> : state.goals.filter((goal) => goal.watch).map((goal) => (
+        <Panel title="等待中的跟踪" description="为什么等待、何时再检查">
+          {state.goals.filter((goal) => goal.watch).length === 0 ? <Empty text="暂无等待记录。" /> : state.goals.filter((goal) => goal.watch).map((goal) => (
             <article className="control-card" key={`watch-${goal.id}`}>
               <h3>{goal.objective}</h3>
               <p>{resumeConditionLabel(goal.watch?.resumeCondition?.type)} · {goal.watch?.resumeCondition?.reason || "等待明确的恢复条件"}</p>
@@ -303,7 +304,7 @@ export default function ControlDashboard() {
           ))}
         </Panel>
 
-        <Panel title="Notifications" description="已有通知记录，不含外部发送设置">
+        <Panel title="提醒记录" description="已经产生的注意力提醒，不含外部发送设置">
           {recentNotifications.length === 0 ? <Empty text="暂无通知历史。" /> : recentNotifications.map((item) => (
             <article className="control-card" key={item.id}>
               <div className="control-row">
@@ -315,22 +316,22 @@ export default function ControlDashboard() {
               <p>Evidence：{item.relatedEvidenceIds.length}</p>
               {item.unread === false ? null : (
                 <div className="control-actions">
-                  <button onClick={() => void markRead(item.id)}>Mark read</button>
+                  <button onClick={() => void markRead(item.id)}>标记已读</button>
                 </div>
               )}
             </article>
           ))}
         </Panel>
 
-        <Panel title="Knowledge" description="当前知识、修订与证据来源">
-          {recentKnowledge.length === 0 ? <Empty text="暂无 Personal Knowledge。" /> : recentKnowledge.map((item) => (
+        <Panel title="长期记忆" description="已确认的知识、修订与证据来源">
+          {recentKnowledge.length === 0 ? <Empty text="暂无长期记忆。" /> : recentKnowledge.map((item) => (
             <article className="control-card" key={item.id}>
               <h3>{item.currentValue}</h3>
               <p>{userFacingLabel(item.type, "知识记录")} · 修订 {item.revision.currentRevision ?? "未知"}</p>
               <p>{verificationStatusLabel(item.provenance.verificationStatus)} · 可靠性 {item.provenance.reliabilityScore ?? "未知"}</p>
               <p>原因：{item.revision.revisionReason ?? "无"}</p>
               <details>
-                <summary>Supporting Evidence ({item.supportingEvidence.length})</summary>
+                <summary>支撑证据（{item.supportingEvidence.length}）</summary>
                 {item.supportingEvidence.map((evidence) => (
                   <a key={evidence.id} href={evidence.sourceUrl} target="_blank" rel="noreferrer">{evidence.publisher} · {verificationStatusLabel(evidence.verificationStatus)}</a>
                 ))}
@@ -339,8 +340,8 @@ export default function ControlDashboard() {
           ))}
         </Panel>
 
-        <Panel title="Agent Runs" description="结构化 trace，不展示思维链">
-          {state.agentRuns.length === 0 ? <Empty text="暂无 AgentRun metadata。" /> : state.agentRuns.slice(0, 6).map((run) => (
+        <Panel title="最近研究记录" description="结构化执行记录，不展示模型思维链">
+          {state.agentRuns.length === 0 ? <Empty text="暂无研究记录。" /> : state.agentRuns.slice(0, 6).map((run) => (
             <article className="control-card" key={run.id}>
               <div className="control-row">
                 <h3>{run.userQuery ?? run.id}</h3>
@@ -349,7 +350,7 @@ export default function ControlDashboard() {
               <p>Rounds：{run.rounds ?? 0} · Evidence：{run.evidenceCount} · Attention：{run.finalAttention.join(", ") || "none"}</p>
               <p>Strategy：{run.selectedStrategies.join(" → ") || "none"}</p>
               <details>
-                <summary>Trace ({run.trace.length})</summary>
+                <summary>执行链路（{run.trace.length}）</summary>
                 {run.trace.map((entry, index) => (
                   <p key={`${run.id}-${entry.timestamp}-${index}`}>{userFacingLabel(entry.state, "执行步骤")} · {userFacingReason(entry.action)} · {userFacingReason(entry.reason ?? entry.result)}</p>
                 ))}

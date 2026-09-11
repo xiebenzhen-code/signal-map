@@ -149,6 +149,18 @@ const eventStatusLabels: Record<ResearchSignal["eventStatus"], string> = {
   BACKGROUND: "背景资料",
 };
 
+function pageFromParam(value: string | null): Page | null {
+  return value === "today" || value === "information" || value === "library" || value === "settings"
+    ? value
+    : null;
+}
+
+function libraryViewFromParam(value: string | null): LibraryView | null {
+  return value === "following" || value === "saved" || value === "questions" || value === "knowledge"
+    ? value
+    : null;
+}
+
 function unique(values: string[]) {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
@@ -994,7 +1006,12 @@ export default function HomePage() {
         if (!cancelled) setHydrated(true);
       });
     const timer = window.setTimeout(() => {
-      setTestMode(new URLSearchParams(window.location.search).get("test") === "true");
+      const params = new URLSearchParams(window.location.search);
+      setTestMode(params.get("test") === "true");
+      const initialPage = pageFromParam(params.get("page"));
+      const initialLibraryView = libraryViewFromParam(params.get("libraryView"));
+      if (initialPage) setPage(initialPage);
+      if (initialLibraryView) setLibraryView(initialLibraryView);
       fetch("/api/auth/me", { cache: "no-store", credentials: "same-origin" })
         .then(async (request) => {
           if (!request.ok) throw new Error("auth unavailable");
@@ -1581,7 +1598,19 @@ export default function HomePage() {
               </button>
             ))}
           </nav>
-          <a href="/control" className="rounded-full border border-[#dfe3e7] px-3 py-2 text-[10px] font-black text-[#596473]">{loggedIn ? "账户" : "登录 / 注册"}</a>
+          {loggedIn ? (
+            <button
+              onClick={() => {
+                setLibraryView("knowledge");
+                navigate("library");
+              }}
+              className="rounded-full border border-[#dfe3e7] px-3 py-2 text-[10px] font-black text-[#596473]"
+            >
+              长期记忆
+            </button>
+          ) : (
+            <a href="/control" className="rounded-full border border-[#dfe3e7] px-3 py-2 text-[10px] font-black text-[#596473]">登录 / 注册</a>
+          )}
         </div>
       </header>
 
