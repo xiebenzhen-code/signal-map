@@ -243,7 +243,16 @@ export default function ControlDashboard() {
       <section className="control-hero">
         <p className="control-eyebrow">Signal Map Control Plane</p>
         <h1>Agent 状态控制台</h1>
-        <Link className="control-secondary inline-block" href="/">返回首页</Link>
+        <Link
+          className="control-secondary inline-block"
+          href="/"
+          onClick={(event) => {
+            event.preventDefault();
+            window.location.assign("/");
+          }}
+        >
+          返回首页
+        </Link>
         <p>查看 Goal、Watch、通知、知识修订和 AgentRun trace。人工操作只走现有业务层，不绕过证据系统。</p>
         <p>当前身份：{user ? `${user.mode} · ${user.id}` : "未登录"}</p>
         {!user ? (
