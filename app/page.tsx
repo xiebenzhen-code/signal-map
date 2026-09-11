@@ -95,6 +95,16 @@ type Connection = {
 
 type CurrentUser = { id: string; mode: "authenticated" } | null;
 
+type AccountKnowledgeItem = {
+  id: string;
+  type: string;
+  currentValue: string;
+  updatedAt: string;
+  revision: { currentRevision?: number; revisionReason?: string };
+  provenance: { verificationStatus?: string; reliabilityScore?: number };
+  supportingEvidence: Array<{ id: string; publisher: string; sourceUrl: string; verificationStatus: string }>;
+};
+
 const defaultProfile: PersonalProfile = {
   defaultIdentity: "AI 产品经理与独立创作者",
 };
@@ -823,6 +833,9 @@ export default function HomePage() {
   const [sessionId, setSessionId] = useState("");
   const [testMode, setTestMode] = useState(false);
   const [connections, setConnections] = useState<Connection[]>([]);
+  const [accountKnowledge, setAccountKnowledge] = useState<AccountKnowledgeItem[]>([]);
+  const [accountKnowledgeUserId, setAccountKnowledgeUserId] = useState<string | null>(null);
+  const [accountKnowledgeError, setAccountKnowledgeError] = useState("");
   const [selected, setSelected] = useState<ResearchSignal | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -837,6 +850,9 @@ export default function HomePage() {
   const [newJudgement, setNewJudgement] = useState("");
   const [knowledgeDrafts, setKnowledgeDrafts] = useState<Record<string, string>>({});
   const loggedIn = Boolean(currentUser);
+  const accountKnowledgeForCurrentUser = currentUser && accountKnowledgeUserId === currentUser.id
+    ? accountKnowledge
+    : [];
   const activeFilter = useMemo(
     () => filters.find((filter) => filter.id === activeFilterId) || null,
     [activeFilterId, filters],
@@ -1029,6 +1045,36 @@ export default function HomePage() {
       window.clearTimeout(timer);
     };
   }, [refreshToday]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    let cancelled = false;
+    fetch("/api/control/knowledge", { cache: "no-store", credentials: "same-origin" })
+      .then(async (request) => {
+        if (!request.ok) {
+          const body = await request.json().catch(() => null) as { error?: string } | null;
+          throw new Error(body?.error ?? "长期记忆暂时无法读取");
+        }
+        return (await request.json()) as { knowledge?: AccountKnowledgeItem[] };
+      })
+      .then((value) => {
+        if (!cancelled) {
+          setAccountKnowledge(value.knowledge || []);
+          setAccountKnowledgeUserId(currentUser.id);
+          setAccountKnowledgeError("");
+        }
+      })
+      .catch((requestError) => {
+        if (!cancelled) {
+          setAccountKnowledge([]);
+          setAccountKnowledgeUserId(currentUser.id);
+          setAccountKnowledgeError(requestError instanceof Error ? requestError.message : "长期记忆暂时无法读取");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -1464,6 +1510,38 @@ export default function HomePage() {
         </section>}
 
         {libraryView === "knowledge" && <section className="mt-8 grid gap-7">
+          {loggedIn && <div>
+            <p className="text-xs font-black uppercase tracking-[.12em] text-[#7b8490]">长期记忆</p>
+            <div className="mt-3 grid gap-3">
+              {accountKnowledgeForCurrentUser.map((item) => (
+                <article key={item.id} className="rounded-[22px] border border-[#e5e7e4] bg-white p-5">
+                  <p className="text-xs font-black text-[#2359ff]">
+                    知识记录 · 修订 {item.revision.currentRevision ?? 1}
+                  </p>
+                  <h3 className="mt-3 text-base font-black leading-7">{item.currentValue}</h3>
+                  <p className="mt-2 text-sm leading-6 text-[#68727f]">
+                    {verificationLabels[(item.provenance.verificationStatus as VerificationStatus) || "verified"] || "已验证"}
+                    {typeof item.provenance.reliabilityScore === "number" ? ` · 可靠性 ${item.provenance.reliabilityScore}` : ""}
+                  </p>
+                  {item.revision.revisionReason && <p className="mt-2 text-sm leading-6 text-[#68727f]">原因：{userFacingReason(item.revision.revisionReason)}</p>}
+                  {item.supportingEvidence.length > 0 && (
+                    <details className="mt-3 rounded-xl bg-[#f4f6f3] p-3 text-xs text-[#68727f]">
+                      <summary className="min-h-8 cursor-pointer font-black">支撑证据（{item.supportingEvidence.length}）</summary>
+                      <div className="mt-2 grid gap-2">
+                        {item.supportingEvidence.map((evidence) => (
+                          <a key={evidence.id} href={evidence.sourceUrl} target="_blank" rel="noreferrer" className="leading-5 text-[#2359ff]">
+                            {evidence.publisher || "来源"} · {verificationLabels[(evidence.verificationStatus as VerificationStatus) || "verified"] || "已验证"}
+                          </a>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                </article>
+              ))}
+              {!accountKnowledgeForCurrentUser.length && !accountKnowledgeError && <p className="rounded-2xl bg-white p-6 text-sm text-[#7b8490]">还没有服务器长期记忆。完成一次有证据支持的研究后，这里会出现已确认的知识。</p>}
+              {accountKnowledgeError && <p className="rounded-2xl bg-white p-6 text-sm text-rose-700">长期记忆读取失败：{userFacingReason(accountKnowledgeError)}</p>}
+            </div>
+          </div>}
           {knowledge.knownInformation.length > 0 && <div><p className="text-xs font-black uppercase tracking-[.12em] text-[#7b8490]">已知信息</p><div className="mt-3 grid gap-2">{knowledge.knownInformation.map((item) => <div key={item} className="rounded-2xl bg-[#f1f3ef] p-4 text-sm leading-6">{item}</div>)}</div></div>}
           {knowledge.userJudgements.length > 0 && <div><p className="text-xs font-black uppercase tracking-[.12em] text-[#7b8490]">我的判断</p><div className="mt-3 grid gap-2">{knowledge.userJudgements.map((item) => <div key={item} className="rounded-2xl border border-[#e4e6e2] bg-white p-4 text-sm leading-6">{item}</div>)}</div></div>}
           <div className="flex gap-2"><input value={newJudgement} onChange={(event) => setNewJudgement(event.target.value)} placeholder="添加判断" className="min-h-12 min-w-0 flex-1 rounded-xl border border-[#dfe3e7] px-4 text-base"/><button onClick={() => addKnowledgeItem(newJudgement, "userJudgements", setNewJudgement)} className="min-h-12 rounded-xl bg-[#172033] px-4 text-sm font-black text-white">添加</button></div>
@@ -1515,7 +1593,19 @@ export default function HomePage() {
         <p className="signal-eyebrow">{loggedIn ? "已开启长期记忆" : "默认仅本地保存"}</p>
         <h1 className="signal-display mt-2 text-5xl">设置</h1>
         <p className="mt-3 text-sm leading-6 text-[#737c88]">管理你的过滤器、认知状态和测试数据。</p>
-        <a href="/control" className="mt-5 flex min-h-12 items-center justify-center rounded-xl border border-[#cfd8ff] bg-[#f4f6ff] text-sm font-black text-[#2359ff]">{loggedIn ? "查看账户与长期记忆" : "登录 / 注册，开启长期记忆"}</a>
+        {loggedIn ? (
+          <button
+            onClick={() => {
+              setLibraryView("knowledge");
+              navigate("library");
+            }}
+            className="mt-5 flex min-h-12 w-full items-center justify-center rounded-xl border border-[#cfd8ff] bg-[#f4f6ff] text-sm font-black text-[#2359ff]"
+          >
+            查看长期记忆
+          </button>
+        ) : (
+          <a href="/control" className="mt-5 flex min-h-12 items-center justify-center rounded-xl border border-[#cfd8ff] bg-[#f4f6ff] text-sm font-black text-[#2359ff]">登录 / 注册，开启长期记忆</a>
+        )}
 
         <div className="mt-8 grid gap-3">
           <details className={accordionClass}>
