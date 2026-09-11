@@ -29,7 +29,7 @@ type ProviderId = SocialProvider["id"];
 
 const guestAgentRepository = new InMemorySignalRepository();
 const SIGNALS_PERSISTENCE_TIMEOUT_MS = 4000;
-const CONTROL_PERSISTENCE_TIMEOUT_MS = 4000;
+const CONTROL_PERSISTENCE_TIMEOUT_MS = 10000;
 
 export function operationTimeoutError(code: string) {
   return Object.assign(new Error(code), { code });
