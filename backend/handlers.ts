@@ -26,6 +26,25 @@ import { toPublicConnectionStatus } from "../social/access/public-connection.ts"
 type ProviderId = SocialProvider["id"];
 
 const guestAgentRepository = new InMemorySignalRepository();
+const SIGNALS_PERSISTENCE_TIMEOUT_MS = 4000;
+
+export function operationTimeoutError(code: string) {
+  return Object.assign(new Error(code), { code });
+}
+
+export async function withOperationTimeout<T>(operation: Promise<T>, timeoutMs: number, code: string) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(operationTimeoutError(code)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 function agentRepository(): NonNullable<AgentRunOptions["repository"]> & ControlRepository {
   if (process.env.NODE_ENV === "production" && !databaseConfigured()) throw new Error("PostgreSQL is required for authenticated persistence");
@@ -174,9 +193,13 @@ export const handleSignals = withSession(async (request: Request) => {
         authenticatedUserId: identity.id,
         filterId: filterIdFromRequest(request, identity.id, body),
       };
-      if (!await ensureFilter(persistentRepository, context, {
+      tracer.mark({ phase: "persistence_started" });
+      const persistenceTimeoutMs = Math.max(500, Math.min(SIGNALS_PERSISTENCE_TIMEOUT_MS, deadlineAt - Date.now() - 1000));
+      const filterAllowed = await withOperationTimeout(ensureFilter(persistentRepository, context, {
         createIfMissing: context.filterId === `account-${identity.id}`,
-      })) return Response.json({ error: "Forbidden" }, { status: 403 });
+      }), persistenceTimeoutMs, "DB_TIMEOUT");
+      tracer.mark({ phase: "persistence_finished", success: filterAllowed, errorCode: filterAllowed ? undefined : "FORBIDDEN" });
+      if (!filterAllowed) return Response.json({ error: "Forbidden" }, { status: 403, headers: { "X-Signal-Map-Request-Id": requestId } });
       repository = persistentRepository;
     }
 

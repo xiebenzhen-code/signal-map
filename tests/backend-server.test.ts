@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { withOperationTimeout } from "../backend/handlers.ts";
 import { handleBackendRequest } from "../backend/node-server.ts";
 
 type QueryPlanResponse = {
@@ -13,6 +14,17 @@ type QueryPlanResponse = {
 type ErrorResponse = {
   error: string;
 };
+
+test("signals persistence setup returns a bounded DB_TIMEOUT instead of hanging", async () => {
+  await assert.rejects(
+    withOperationTimeout(new Promise(() => undefined), 5, "DB_TIMEOUT"),
+    (error: unknown) => {
+      assert.equal(error instanceof Error ? error.message : "", "DB_TIMEOUT");
+      assert.equal(error && typeof error === "object" && "code" in error ? error.code : undefined, "DB_TIMEOUT");
+      return true;
+    },
+  );
+});
 
 test("standalone backend refuses Knowledge State in GET query parameters", async () => {
   const response = await handleBackendRequest(
