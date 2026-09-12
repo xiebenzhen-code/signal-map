@@ -205,13 +205,22 @@ export const handleSignals = withSession(async (request: Request) => {
         authenticatedUserId: identity.id,
         filterId: filterIdFromRequest(request, identity.id, body),
       };
-      tracer.mark({ phase: "persistence_started" });
-      const persistenceTimeoutMs = Math.max(500, Math.min(SIGNALS_PERSISTENCE_TIMEOUT_MS, deadlineAt - Date.now() - 1000));
-      const filterAllowed = await withOperationTimeout(ensureFilter(persistentRepository, context, {
-        createIfMissing: context.filterId === `account-${identity.id}`,
-      }), persistenceTimeoutMs, "DB_TIMEOUT");
-      tracer.mark({ phase: "persistence_finished", success: filterAllowed, errorCode: filterAllowed ? undefined : "FORBIDDEN" });
-      if (!filterAllowed) return Response.json({ error: "Forbidden" }, { status: 403, headers: { "X-Signal-Map-Request-Id": requestId } });
+      if (context.filterId !== `account-${identity.id}`) {
+        tracer.mark({ phase: "persistence_started" });
+        const persistenceTimeoutMs = Math.max(500, Math.min(SIGNALS_PERSISTENCE_TIMEOUT_MS, deadlineAt - Date.now() - 1000));
+        const filterAllowed = await withOperationTimeout(ensureFilter(persistentRepository, context, {
+          createIfMissing: context.filterId === `account-${identity.id}`,
+        }), persistenceTimeoutMs, "DB_TIMEOUT").catch((error) => {
+          if (error && typeof error === "object" && "code" in error && error.code === "DB_TIMEOUT") return null;
+          throw error;
+        });
+        if (filterAllowed === null) {
+          tracer.mark({ phase: "persistence_finished", success: false, errorCode: "DB_TIMEOUT" });
+          return Response.json({ error: "Service temporarily unavailable", code: "DB_TIMEOUT" }, { status: 503, headers: { "X-Signal-Map-Request-Id": requestId } });
+        }
+        tracer.mark({ phase: "persistence_finished", success: filterAllowed, errorCode: filterAllowed ? undefined : "FORBIDDEN" });
+        if (!filterAllowed) return Response.json({ error: "Forbidden" }, { status: 403, headers: { "X-Signal-Map-Request-Id": requestId } });
+      }
       repository = persistentRepository;
     }
 
