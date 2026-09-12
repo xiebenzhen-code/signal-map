@@ -23,6 +23,7 @@ import {
   handleSocialPost,
   handleSocialProfile,
 } from "./handlers.ts";
+import { handlePostgresTransportProbe } from "./postgres-transport-probe.ts";
 
 const port = Number.parseInt(process.env.PORT || "8787", 10);
 
@@ -73,6 +74,8 @@ export async function handleBackendRequest(request: Request) {
     response = await handleAuthPasswordRecovery(request);
   } else if (url.pathname === "/api/connections") {
     response = await handleConnections();
+  } else if (url.pathname === "/api/diagnostics/postgres-transport") {
+    response = await handlePostgresTransportProbe(request);
   } else if (url.pathname === "/api/research/plan") {
     response = await handleResearchPlan(request);
   } else if (url.pathname === "/api/research/agent") {

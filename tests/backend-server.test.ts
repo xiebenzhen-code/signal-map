@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { withOperationTimeout } from "../backend/handlers.ts";
 import { handleBackendRequest } from "../backend/node-server.ts";
+import { sanitizePostgresTransportError } from "../backend/postgres-transport-probe.ts";
 
 type QueryPlanResponse = {
   queryPlan: {
@@ -77,6 +78,27 @@ test("standalone backend refuses GET signals requests", async () => {
   assert.equal(response.status, 405);
   const body = await response.json() as ErrorResponse;
   assert.match(body.error, /Method not allowed/);
+});
+
+test("postgres transport probe is login protected and POST only", async () => {
+  const getResponse = await handleBackendRequest(
+    new Request("http://localhost/api/diagnostics/postgres-transport"),
+  );
+  assert.equal(getResponse.status, 405);
+
+  const postResponse = await handleBackendRequest(
+    new Request("http://localhost/api/diagnostics/postgres-transport", { method: "POST" }),
+  );
+  assert.equal(postResponse.status, 401);
+});
+
+test("postgres transport probe redacts connection secrets in error text", () => {
+  const value = sanitizePostgresTransportError(
+    "postgresql://postgres.project:secret@example.supabase.com:6543/postgres password=secret token=abc",
+  );
+  assert.equal(value.includes("secret"), false);
+  assert.equal(value.includes("abc"), false);
+  assert.match(value, /\[redacted-database-url\]/);
 });
 
 test("standalone backend accepts anonymous POST signal runs without URL query state", async (t) => {
