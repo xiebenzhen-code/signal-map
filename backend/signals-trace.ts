@@ -15,6 +15,7 @@ export type SignalTracePhase =
   | "evidence_started"
   | "evidence_finished"
   | "agent_started"
+  | "agent_failed_before_source_selection"
   | "agent_finished"
   | "knowledge_started"
   | "knowledge_finished"
@@ -28,6 +29,10 @@ type TraceInput = {
   success?: boolean;
   itemCount?: number;
   errorCode?: string;
+  errorName?: string;
+  errorMessage?: string;
+  topStackFrame?: string;
+  failureKind?: "throw_exception" | "failure_result" | "empty_response";
 };
 
 export type SignalPhaseTrace = {
@@ -39,6 +44,10 @@ export type SignalPhaseTrace = {
   success: boolean;
   itemCount?: number;
   errorCode?: string;
+  errorName?: string;
+  errorMessage?: string;
+  topStackFrame?: string;
+  failureKind?: "throw_exception" | "failure_result" | "empty_response";
 };
 
 function nowMs() {
@@ -63,7 +72,7 @@ export function createSignalsRequestId(headerValue?: string | null) {
 export function createSignalTracer(requestId: string) {
   const startedByGroup = new Map<string, number>();
   const records: SignalPhaseTrace[] = [];
-  const mark = ({ phase, success = true, itemCount, errorCode }: TraceInput) => {
+  const mark = ({ phase, success = true, itemCount, errorCode, errorName, errorMessage, topStackFrame, failureKind }: TraceInput) => {
     const finished = nowMs();
     const group = phaseGroup(phase);
     const isStart = phase.endsWith("_started") || phase === "request_received";
@@ -80,6 +89,10 @@ export function createSignalTracer(requestId: string) {
       success,
       ...(typeof itemCount === "number" ? { itemCount } : {}),
       ...(errorCode ? { errorCode } : {}),
+      ...(errorName ? { errorName } : {}),
+      ...(errorMessage ? { errorMessage } : {}),
+      ...(topStackFrame ? { topStackFrame } : {}),
+      ...(failureKind ? { failureKind } : {}),
     };
     records.push(record);
     console.info(JSON.stringify({ event: "signals_phase_trace", ...record }));

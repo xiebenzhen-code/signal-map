@@ -190,7 +190,16 @@ export type AgentRunOptions = {
       plan?: Pick<ResearchPlan, "objective" | "queries" | "preferredSourceTypes" | "maxQueries">;
     }>;
   };
-  onPhase?: (event: { phase: string; success?: boolean; itemCount?: number; errorCode?: string }) => void;
+  onPhase?: (event: {
+    phase: string;
+    success?: boolean;
+    itemCount?: number;
+    errorCode?: string;
+    errorName?: string;
+    errorMessage?: string;
+    topStackFrame?: string;
+    failureKind?: "throw_exception" | "failure_result" | "empty_response";
+  }) => void;
   deadlineAt?: number;
   initialRevision?: number;
   research?: (input: ResearchInput, plan: ResearchPlan, round: number) => Promise<ResearchResponse>;

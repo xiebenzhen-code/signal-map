@@ -4,7 +4,7 @@ import test from "node:test";
 import { resolveResearchIdentity } from "../auth/request-identity.ts";
 import { handleBackendRequest } from "../backend/node-server.ts";
 import { runResearchPipeline } from "../research/research-pipeline.ts";
-import { executeResearch } from "../research/research-service.ts";
+import { executeResearch, summarizeAgentFailure } from "../research/research-service.ts";
 import { InMemorySignalRepository } from "../information/repositories/in-memory.ts";
 import type { ResearchInput } from "../research/types.ts";
 
@@ -123,4 +123,40 @@ test("authenticated main research enters the existing persistent Agent loop", as
   assert.equal(result.dataMode, "live");
   assert.ok((await repository.listPersonalKnowledge(context)).length > 0);
   assert.ok(await repository.getLatestRunMetadata(context));
+});
+
+test("agent failure tracing records sanitized early runAgent exceptions", async () => {
+  const error = new Error("repository failed token_hash=secret-token password=secret postgresql://user:pass@example/db");
+  const repository = {
+    listPersonalKnowledge: async () => { throw error; },
+  };
+  const phases: Array<Parameters<NonNullable<Parameters<typeof executeResearch>[0]["onPhase"]>>[0]> = [];
+  await assert.rejects(
+    executeResearch({
+      identity: { id: "account-trace", mode: "authenticated" },
+      input,
+      context: { authenticatedUserId: "account-trace", filterId: "account-account-trace" },
+      repository: repository as never,
+      onPhase: (event) => { phases.push(event); },
+    }),
+  );
+  const failure = phases.find((phase) => phase.phase === "agent_failed_before_source_selection");
+  assert.ok(failure);
+  assert.equal(failure.failureKind, "throw_exception");
+  assert.equal(failure.errorName, "Error");
+  assert.match(failure.errorMessage || "", /token_hash=\[redacted\]/);
+  assert.match(failure.errorMessage || "", /password=\[redacted\]/);
+  assert.doesNotMatch(failure.errorMessage || "", /secret-token|user:pass/);
+  assert.ok(failure.topStackFrame);
+});
+
+test("agent failure summary distinguishes failure results without exposing secrets", () => {
+  const summary = summarizeAgentFailure(
+    Object.assign(new Error("Agent returned failure result Authorization=Bearer secret-token"), { code: "UNKNOWN_RESEARCH_FAILURE" }),
+    "failure_result",
+  );
+  assert.equal(summary.phase, "agent_failed_before_source_selection");
+  assert.equal(summary.failureKind, "failure_result");
+  assert.equal(summary.errorCode, "UNKNOWN_RESEARCH_FAILURE");
+  assert.doesNotMatch(summary.errorMessage, /secret-token/);
 });

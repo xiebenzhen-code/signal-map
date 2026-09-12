@@ -150,7 +150,7 @@ export const handleSignals = withSession(async (request: Request) => {
   const requestId = createSignalsRequestId(request.headers.get("X-Signal-Map-Request-Id"));
   const tracer = createSignalTracer(requestId);
   const deadlineAt = Date.now() + 25000;
-  const markPhase = (event: { phase: string; success?: boolean; itemCount?: number; errorCode?: string }) => {
+  const markPhase: NonNullable<AgentRunOptions["onPhase"]> = (event) => {
     const allowed = [
       "source_selection_started",
       "source_selection_finished",
@@ -163,6 +163,7 @@ export const handleSignals = withSession(async (request: Request) => {
       "evidence_started",
       "evidence_finished",
       "agent_started",
+      "agent_failed_before_source_selection",
       "agent_finished",
       "knowledge_started",
       "knowledge_finished",
@@ -170,7 +171,16 @@ export const handleSignals = withSession(async (request: Request) => {
       "persistence_finished",
     ];
     if (allowed.includes(event.phase)) {
-      tracer.mark({ phase: event.phase as SignalTracePhase, success: event.success, itemCount: event.itemCount, errorCode: event.errorCode });
+      tracer.mark({
+        phase: event.phase as SignalTracePhase,
+        success: event.success,
+        itemCount: event.itemCount,
+        errorCode: event.errorCode,
+        errorName: event.errorName,
+        errorMessage: event.errorMessage,
+        topStackFrame: event.topStackFrame,
+        failureKind: event.failureKind,
+      });
     }
   };
   tracer.mark({ phase: "request_received" });

@@ -25,9 +25,37 @@ function enforceBudget(identity: ResearchExecution["identity"]) {
   attempts.set(identity.id, recent);
 }
 
+function sanitizeTraceText(value: unknown) {
+  return String(value ?? "")
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/postgres(?:ql)?:\/\/\S+/gi, "[redacted-database-url]")
+    .replace(/\b(token|token_hash|apikey|api_key|authorization|cookie|password)=([^&\s]+)/gi, "$1=[redacted]")
+    .slice(0, 240);
+}
+
+function topStackFrame(error: unknown) {
+  if (!(error instanceof Error) || !error.stack) return undefined;
+  const frame = error.stack.split("\n").slice(1).map((line) => line.trim()).find(Boolean);
+  return frame ? sanitizeTraceText(frame) : undefined;
+}
+
+export function summarizeAgentFailure(error: unknown, failureKind: "throw_exception" | "failure_result" | "empty_response") {
+  const code = error && typeof error === "object" && "code" in error ? String(error.code) : "UNKNOWN_RESEARCH_FAILURE";
+  return {
+    phase: "agent_failed_before_source_selection",
+    success: false,
+    errorCode: code,
+    errorName: error instanceof Error ? sanitizeTraceText(error.name || "Error") : typeof error,
+    errorMessage: error instanceof Error ? sanitizeTraceText(error.message) : sanitizeTraceText(error),
+    topStackFrame: topStackFrame(error),
+    failureKind,
+  } as const;
+}
+
 export async function executeResearch({ identity, input, debug, context, repository, modelAdapter, onPhase, deadlineAt }: ResearchExecution) {
   enforceBudget(identity);
   onPhase?.({ phase: "agent_started" });
+  let tracedAgentFailure = false;
   try {
     const result = await runAgent({
       input,
@@ -51,9 +79,21 @@ export async function executeResearch({ identity, input, debug, context, reposit
       ),
     });
     onPhase?.({ phase: "agent_finished", success: result.status !== "failed", itemCount: result.response?.signals.length });
-    if (!result.response) throw new Error("Agent research produced no response");
+    if (result.status === "failed") {
+      onPhase?.(summarizeAgentFailure(new Error("Agent returned failure result"), "failure_result"));
+      tracedAgentFailure = true;
+    }
+    if (!result.response) {
+      const error = new Error("Agent research produced no response");
+      if (!tracedAgentFailure) {
+        onPhase?.(summarizeAgentFailure(error, "empty_response"));
+        tracedAgentFailure = true;
+      }
+      throw error;
+    }
     return result.response;
   } catch (error) {
+    if (!tracedAgentFailure) onPhase?.(summarizeAgentFailure(error, "throw_exception"));
     onPhase?.({ phase: "agent_finished", success: false, errorCode: error && typeof error === "object" && "code" in error ? String(error.code) : "UNKNOWN_RESEARCH_FAILURE" });
     throw error;
   }
