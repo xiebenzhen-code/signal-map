@@ -79,6 +79,89 @@ test("Postgres read queries retry once after a connection-class error", async ()
   assert.equal(calls[1].sql, calls[0].sql);
 });
 
+test("Postgres read retry tracing records query name and sanitized retry outcome", async () => {
+  const logs: Array<Record<string, unknown>> = [];
+  const originalWarn = console.warn;
+  console.warn = (message?: unknown) => {
+    logs.push(JSON.parse(String(message)));
+  };
+  try {
+    const failingClient: PostgresClient = {
+      async query() {
+        throw new Error("Connection terminated unexpectedly for postgresql://user:secret@example.test/db");
+      },
+    };
+    const recoveredClient: PostgresClient = {
+      async query<T>() {
+        return { rows: [] as T[] };
+      },
+    };
+    const repository = new PostgresSignalRepository(failingClient, () => recoveredClient);
+
+    await repository.listPersonalKnowledge({
+      authenticatedUserId: "user-a",
+      filterId: "filter-a",
+    });
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(logs.length, 2);
+  assert.deepEqual(logs[0], {
+    phase: "postgres_read_retry_started",
+    queryName: "listPersonalKnowledge",
+    firstErrorName: "Error",
+    firstErrorMessage: "Connection terminated unexpectedly for [redacted-database-url]",
+  });
+  assert.deepEqual(logs[1], {
+    phase: "postgres_read_retry_finished",
+    queryName: "listPersonalKnowledge",
+    retrySuccess: true,
+    recoveredClientChanged: true,
+  });
+  assert.equal(JSON.stringify(logs).includes("user-a"), false);
+  assert.equal(JSON.stringify(logs).includes("filter-a"), false);
+  assert.equal(JSON.stringify(logs).includes("SELECT"), false);
+});
+
+test("Postgres read retry tracing records sanitized retry failure", async () => {
+  const logs: Array<Record<string, unknown>> = [];
+  const originalWarn = console.warn;
+  console.warn = (message?: unknown) => {
+    logs.push(JSON.parse(String(message)));
+  };
+  try {
+    const failingClient: PostgresClient = {
+      async query() {
+        throw Object.assign(new Error("first"), { code: "08006" });
+      },
+    };
+    const recoveredClient: PostgresClient = {
+      async query() {
+        throw new Error("Connection terminated unexpectedly token=secret");
+      },
+    };
+    const repository = new PostgresSignalRepository(failingClient, () => recoveredClient);
+
+    await assert.rejects(repository.getLatestRunMetadata({
+      authenticatedUserId: "user-a",
+      filterId: "filter-a",
+    }));
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(logs.length, 2);
+  assert.equal(logs[0].phase, "postgres_read_retry_started");
+  assert.equal(logs[0].queryName, "getLatestRunMetadata");
+  assert.equal(logs[1].phase, "postgres_read_retry_finished");
+  assert.equal(logs[1].queryName, "getLatestRunMetadata");
+  assert.equal(logs[1].retrySuccess, false);
+  assert.equal(logs[1].recoveredClientChanged, true);
+  assert.equal(logs[1].retryErrorName, "Error");
+  assert.equal(logs[1].retryErrorMessage, "Connection terminated unexpectedly token=[redacted]");
+});
+
 test("Postgres read retry covers run metadata and research context revision", async () => {
   const failingClient: PostgresClient = {
     async query() {

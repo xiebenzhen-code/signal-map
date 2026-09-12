@@ -32,6 +32,27 @@ export type PostgresClient = {
 
 type RecoverPostgresReadClient = (failedClient: PostgresClient, error: unknown) => PostgresClient;
 
+function sanitizePostgresTraceValue(value: unknown) {
+  return String(value ?? "")
+    .replace(/postgres(?:ql)?:\/\/\S+/gi, "[redacted-database-url]")
+    .replace(/\b(password|token|apikey|api_key|authorization|cookie)=([^&\s]+)/gi, "$1=[redacted]")
+    .slice(0, 240);
+}
+
+function postgresErrorName(error: unknown) {
+  return error instanceof Error ? error.name : "Error";
+}
+
+function postgresErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error) return String(error.message);
+  return "";
+}
+
+function logPostgresReadRetry(event: Record<string, unknown>) {
+  console.warn(JSON.stringify(event));
+}
+
 export function isPostgresConnectionError(error: unknown) {
   if (!error || typeof error !== "object") return false;
   const code = "code" in error ? String(error.code) : "";
@@ -255,14 +276,40 @@ export class PostgresSignalRepository implements
     this.recoverReadClient = recoverReadClient;
   }
 
-  private async readOnlyQuery<T>(sql: string, values?: unknown[]) {
+  private async readOnlyQuery<T>(queryName: string, sql: string, values?: unknown[]) {
     try {
       return await this.client.query<T>(sql, values);
     } catch (error) {
       if (!this.recoverReadClient || !isPostgresConnectionError(error)) throw error;
+      logPostgresReadRetry({
+        phase: "postgres_read_retry_started",
+        queryName,
+        firstErrorName: sanitizePostgresTraceValue(postgresErrorName(error)),
+        firstErrorMessage: sanitizePostgresTraceValue(postgresErrorMessage(error)),
+      });
       const nextClient = this.recoverReadClient(this.client, error);
+      const recoveredClientChanged = nextClient !== this.client;
       this.client = nextClient;
-      return await nextClient.query<T>(sql, values);
+      try {
+        const result = await nextClient.query<T>(sql, values);
+        logPostgresReadRetry({
+          phase: "postgres_read_retry_finished",
+          queryName,
+          retrySuccess: true,
+          recoveredClientChanged,
+        });
+        return result;
+      } catch (retryError) {
+        logPostgresReadRetry({
+          phase: "postgres_read_retry_finished",
+          queryName,
+          retrySuccess: false,
+          recoveredClientChanged,
+          retryErrorName: sanitizePostgresTraceValue(postgresErrorName(retryError)),
+          retryErrorMessage: sanitizePostgresTraceValue(postgresErrorMessage(retryError)),
+        });
+        throw retryError;
+      }
     }
   }
 
@@ -464,6 +511,7 @@ export class PostgresSignalRepository implements
 
   async listPersonalKnowledge(context: AuthenticatedFilterContext) {
     const result = await this.readOnlyQuery<KnowledgeRow>(
+      "listPersonalKnowledge",
       "SELECT * FROM personal_knowledge WHERE user_id = $1 AND filter_id = $2 ORDER BY created_at ASC",
       [context.authenticatedUserId, context.filterId],
     );
@@ -472,6 +520,7 @@ export class PostgresSignalRepository implements
 
   async getResearchContextRevision(context: AuthenticatedFilterContext) {
     const result = await this.readOnlyQuery<{ research_context_revision: number }>(
+      "getResearchContextRevision",
       `SELECT research_context_revision FROM research_context_revisions
       WHERE user_id = $1 AND filter_id = $2`,
       [context.authenticatedUserId, context.filterId],
@@ -510,6 +559,7 @@ export class PostgresSignalRepository implements
 
   async getLatestRunMetadata(context: AuthenticatedFilterContext) {
     const result = await this.readOnlyQuery<RunRow>(
+      "getLatestRunMetadata",
       `SELECT id, user_query, started_at, completed_at, status, rounds, evidence_ids, knowledge_changes,
         attention_result, strategies, trace, generated_from_research_context_revision, data_mode, fallback_reason, created_at
       FROM research_run_metadata
