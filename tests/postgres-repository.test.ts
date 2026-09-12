@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  isPostgresConnectionError,
   PostgresSignalRepository,
   type PostgresClient,
 } from "../information/repositories/postgres.ts";
@@ -44,6 +45,104 @@ test("Postgres run metadata reads are tenant and filter scoped", async () => {
 
   assert.match(calls[0].sql, /WHERE user_id = \$1 AND filter_id = \$2/);
   assert.deepEqual(calls[0].values, ["user-a", "filter-a"]);
+});
+
+test("Postgres read queries retry once after a connection-class error", async () => {
+  const calls: Call[] = [];
+  let recovered = false;
+  const failingClient: PostgresClient = {
+    async query(sql: string, values: unknown[] = []) {
+      calls.push({ sql, values });
+      throw new Error("Connection terminated unexpectedly");
+    },
+  };
+  const recoveredClient: PostgresClient = {
+    async query<T>(sql: string, values: unknown[] = []) {
+      calls.push({ sql, values });
+      return { rows: [] as T[] };
+    },
+  };
+  const repository = new PostgresSignalRepository(failingClient, () => {
+    recovered = true;
+    return recoveredClient;
+  });
+
+  const records = await repository.listPersonalKnowledge({
+    authenticatedUserId: "user-a",
+    filterId: "filter-a",
+  });
+
+  assert.deepEqual(records, []);
+  assert.equal(recovered, true);
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].sql, /FROM personal_knowledge/);
+  assert.equal(calls[1].sql, calls[0].sql);
+});
+
+test("Postgres read retry covers run metadata and research context revision", async () => {
+  const failingClient: PostgresClient = {
+    async query() {
+      throw Object.assign(new Error("read failed"), { code: "08006" });
+    },
+  };
+  const recoveredClient: PostgresClient = {
+    async query<T>() {
+      return { rows: [] as T[] };
+    },
+  };
+  let recoveries = 0;
+  const repository = new PostgresSignalRepository(failingClient, () => {
+    recoveries += 1;
+    return recoveredClient;
+  });
+  const context = { authenticatedUserId: "user-a", filterId: "filter-a" };
+
+  assert.equal(await repository.getLatestRunMetadata(context), null);
+  assert.equal(await repository.getResearchContextRevision(context), 1);
+  assert.equal(recoveries, 1);
+});
+
+test("Postgres writes are not retried on connection-class errors", async () => {
+  let recoveries = 0;
+  const failingClient: PostgresClient = {
+    async query() {
+      throw Object.assign(new Error("write failed"), { code: "ECONNRESET" });
+    },
+  };
+  const repository = new PostgresSignalRepository(failingClient, () => {
+    recoveries += 1;
+    return failingClient;
+  });
+
+  await assert.rejects(repository.saveRunMetadata({
+    authenticatedUserId: "user-a",
+    filterId: "filter-a",
+  }, {
+    id: "run-a",
+    userQuery: "query",
+    startedAt: "2026-09-12T00:00:00.000Z",
+    completedAt: "2026-09-12T00:00:01.000Z",
+    status: "completed",
+    rounds: 1,
+    evidenceIds: [],
+    knowledgeChanges: [],
+    attentionResult: [],
+    strategies: [],
+    trace: [],
+    generatedFromResearchContextRevision: 1,
+    dataMode: "live",
+    createdAt: "2026-09-12T00:00:01.000Z",
+  }));
+  assert.equal(recoveries, 0);
+});
+
+test("Postgres connection-class detector stays narrow", () => {
+  assert.equal(isPostgresConnectionError(new Error("Connection terminated unexpectedly")), true);
+  assert.equal(isPostgresConnectionError(Object.assign(new Error("reset"), { code: "ECONNRESET" })), true);
+  assert.equal(isPostgresConnectionError(Object.assign(new Error("timeout"), { code: "ETIMEDOUT" })), true);
+  assert.equal(isPostgresConnectionError(Object.assign(new Error("sqlstate"), { code: "08006" })), true);
+  assert.equal(isPostgresConnectionError(Object.assign(new Error("shutdown"), { code: "57P01" })), true);
+  assert.equal(isPostgresConnectionError(Object.assign(new Error("syntax"), { code: "42601" })), false);
 });
 
 test("Postgres run metadata list reads trace and stays tenant scoped", async () => {

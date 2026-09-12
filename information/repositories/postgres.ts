@@ -30,6 +30,19 @@ export type PostgresClient = {
   query<T>(sql: string, values?: unknown[]): Promise<QueryResult<T>>;
 };
 
+type RecoverPostgresReadClient = (failedClient: PostgresClient, error: unknown) => PostgresClient;
+
+export function isPostgresConnectionError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const code = "code" in error ? String(error.code) : "";
+  const message = error instanceof Error ? error.message : "message" in error ? String(error.message) : "";
+  return message.includes("Connection terminated unexpectedly") ||
+    code === "ECONNRESET" ||
+    code === "ETIMEDOUT" ||
+    code === "57P01" ||
+    /^08/.test(code);
+}
+
 type EventRow = {
   id: string;
   canonical_title: string;
@@ -235,9 +248,22 @@ export class PostgresSignalRepository implements
   PersonalKnowledgeRepository,
   ResearchContextRepository {
   private client: PostgresClient;
+  private recoverReadClient?: RecoverPostgresReadClient;
 
-  constructor(client: PostgresClient) {
+  constructor(client: PostgresClient, recoverReadClient?: RecoverPostgresReadClient) {
     this.client = client;
+    this.recoverReadClient = recoverReadClient;
+  }
+
+  private async readOnlyQuery<T>(sql: string, values?: unknown[]) {
+    try {
+      return await this.client.query<T>(sql, values);
+    } catch (error) {
+      if (!this.recoverReadClient || !isPostgresConnectionError(error)) throw error;
+      const nextClient = this.recoverReadClient(this.client, error);
+      this.client = nextClient;
+      return await nextClient.query<T>(sql, values);
+    }
   }
 
   async upsertEvent(event: EventRecord) {
@@ -437,7 +463,7 @@ export class PostgresSignalRepository implements
   }
 
   async listPersonalKnowledge(context: AuthenticatedFilterContext) {
-    const result = await this.client.query<KnowledgeRow>(
+    const result = await this.readOnlyQuery<KnowledgeRow>(
       "SELECT * FROM personal_knowledge WHERE user_id = $1 AND filter_id = $2 ORDER BY created_at ASC",
       [context.authenticatedUserId, context.filterId],
     );
@@ -445,7 +471,7 @@ export class PostgresSignalRepository implements
   }
 
   async getResearchContextRevision(context: AuthenticatedFilterContext) {
-    const result = await this.client.query<{ research_context_revision: number }>(
+    const result = await this.readOnlyQuery<{ research_context_revision: number }>(
       `SELECT research_context_revision FROM research_context_revisions
       WHERE user_id = $1 AND filter_id = $2`,
       [context.authenticatedUserId, context.filterId],
@@ -483,7 +509,7 @@ export class PostgresSignalRepository implements
   }
 
   async getLatestRunMetadata(context: AuthenticatedFilterContext) {
-    const result = await this.client.query<RunRow>(
+    const result = await this.readOnlyQuery<RunRow>(
       `SELECT id, user_query, started_at, completed_at, status, rounds, evidence_ids, knowledge_changes,
         attention_result, strategies, trace, generated_from_research_context_revision, data_mode, fallback_reason, created_at
       FROM research_run_metadata
