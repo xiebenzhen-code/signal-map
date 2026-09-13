@@ -1,7 +1,7 @@
 name: Signal Map Agent Loop E2E
 
-on:
-  workflow_dispatch:
+"on":
+  workflow_dispatch: {}
 
 concurrency:
   group: signal-map-agent-loop-e2e
