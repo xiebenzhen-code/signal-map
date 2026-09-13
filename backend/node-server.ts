@@ -25,7 +25,7 @@ import {
 } from "./handlers.ts";
 import { handlePostgresTransportProbe } from "./postgres-transport-probe.ts";
 
-const port = Number.parseInt(process.env.PORT || "8787", 10);
+const port = Number.parseInt(process.env.PORT || "8080", 10);
 
 function corsHeaders(request: Request) {
   const origin = request.headers.get("origin");
@@ -58,7 +58,9 @@ export async function handleBackendRequest(request: Request) {
   const url = new URL(request.url);
   let response: Response;
 
-  if (url.pathname === "/api/signals") {
+  if (url.pathname === "/health") {
+    response = Response.json({ status: "ok" }, { headers: { "Cache-Control": "no-store" } });
+  } else if (url.pathname === "/api/signals") {
     response = await handleSignals(request);
   } else if (url.pathname === "/api/auth/login") {
     response = await handleAuthLogin(request);

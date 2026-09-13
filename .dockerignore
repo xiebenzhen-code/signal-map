@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+node_modules
+dist
+dist-api
+.next
+.vinext
+.sites-package-stage*
+*.tar.gz
+*.zip
+coverage
+.git
+.gitignore

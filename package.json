@@ -10,7 +10,7 @@
     "build": "vinext build",
     "build:edgeone": "npm run build && node scripts/prepare-edgeone-drop.mjs",
     "package:edgeone": "npm run build:edgeone && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-edgeone-drop.ps1",
-    "api:build": "esbuild backend/node-server.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist-api/server.mjs",
+    "api:build": "esbuild backend/node-server.ts --bundle --platform=node --format=esm --target=node22 --external:pg --outfile=dist-api/server.mjs",
     "api:start": "node --experimental-strip-types backend/node-server.ts",
     "api:serve": "node dist-api/server.mjs",
     "db:migrate": "node --experimental-strip-types scripts/run-postgres-migrations.ts",
