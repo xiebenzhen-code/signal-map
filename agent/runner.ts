@@ -109,8 +109,8 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
   const runId = options.runId ?? `agent-run-${randomUUID()}`;
   const steps: AgentStep[] = [];
   const trace: AgentTraceEntry[] = [];
-  const markPhase = (phase: string, success = true, itemCount?: number, errorCode?: string) =>
-    options.onPhase?.({ phase, success, itemCount, errorCode });
+  const markPhase = (phase: string, success = true, itemCount?: number, errorCode?: string, diagnostic?: Record<string, unknown>) =>
+    options.onPhase?.({ phase, success, itemCount, errorCode, diagnostic });
   const deadlineAt = options.deadlineAt ?? startedAt + (options.maxExecutionTimeMs ?? 30000);
   const hasDeadlineBudget = (minimumMs: number) => Date.now() + minimumMs < deadlineAt;
   const add = (state: AgentState, status: AgentStep["status"], input: unknown, output: unknown, reason?: string) => {
@@ -150,7 +150,15 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     availableSourceCapabilities: options.availableSourceCapabilities,
     sourceProfile,
   });
-  markPhase("source_selection_finished", true, bootstrapSelection.allowedProviderIds.length);
+  markPhase("source_selection_finished", true, bootstrapSelection.allowedProviderIds.length, undefined, {
+    strategy: bootstrapStrategy,
+    intent: intent.primaryIntent,
+    selectedSourceType: bootstrapSelection.primarySourceType,
+    fallbackSourceTypes: bootstrapSelection.fallbackSourceTypes,
+    allowedProviderIds: bootstrapSelection.allowedProviderIds,
+    sourceGap: bootstrapSelection.sourceGap,
+    reason: bootstrapSelection.reason,
+  });
   add("SOURCE_SELECTOR", "completed", { round: 1, strategy: bootstrapStrategy }, bootstrapSelection, bootstrapSelection.reason);
   let plan = createResearchPlan(researchInput, 1, maxQueries, relatedKnowledge, bootstrapStrategy, bootstrapSelection, intent, sourceProfile);
   if (hasDeadlineBudget(9000)) {
@@ -283,7 +291,15 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       previousSourceOutcomes,
       sourceProfile,
     });
-    markPhase("source_selection_finished", true, sourceSelection.allowedProviderIds.length);
+    markPhase("source_selection_finished", true, sourceSelection.allowedProviderIds.length, undefined, {
+      strategy: policy.strategy,
+      intent: intent.primaryIntent,
+      selectedSourceType: sourceSelection.primarySourceType,
+      fallbackSourceTypes: sourceSelection.fallbackSourceTypes,
+      allowedProviderIds: sourceSelection.allowedProviderIds,
+      sourceGap: sourceSelection.sourceGap,
+      reason: sourceSelection.reason,
+    });
     add("SOURCE_SELECTOR", policy.strategy === "STOP" ? "skipped" : "completed", { round, strategy: policy.strategy }, sourceSelection, sourceSelection.reason);
     trace[trace.length - 1].selectedSourceType = sourceSelection.primarySourceType;
     trace[trace.length - 1].fallbackSourceTypes = sourceSelection.fallbackSourceTypes;

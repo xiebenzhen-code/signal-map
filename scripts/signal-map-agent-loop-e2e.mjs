@@ -472,6 +472,7 @@ function phaseTraceFor(requestId) {
     itemCount: unavailable(entry.itemCount),
     errorCode: unavailable(entry.errorCode),
     durationMs: unavailable(entry.durationMs),
+    diagnostic: unavailable(entry.diagnostic),
   }));
 }
 
@@ -649,17 +650,34 @@ function searchDiagnostics(data, phaseTrace) {
     ...(Array.isArray(queryPlan.searchCombinations) ? queryPlan.searchCombinations : []),
     ...(Array.isArray(queryPlan.knowledgeAwareQueries) ? queryPlan.knowledgeAwareQueries : []),
   ]);
+  const searchStarted = phaseTrace.filter((entry) => entry.phase === "search_started");
   const searchFinished = phaseTrace.filter((entry) => entry.phase === "search_finished");
+  const latestSearchStarted = searchStarted.at(-1);
+  const latestSearchFinished = searchFinished.at(-1);
   return {
     perRoundSearch: [{
       round: "unavailable",
       queries: queries.length
         ? queries.map((query) => ({ query, returnedCount: "unavailable" }))
+        : Array.isArray(latestSearchStarted?.diagnostic?.generatedSearchQueries)
+          ? latestSearchStarted.diagnostic.generatedSearchQueries.map((query) => ({ query, returnedCount: "unavailable" }))
         : "unavailable",
       returnedCountFromPhase: searchFinished.length
         ? searchFinished.map((entry) => entry.itemCount)
         : "unavailable",
     }],
+    selectedSourceTypes: unavailable(phaseTrace
+      .filter((entry) => entry.phase === "source_selection_finished")
+      .map((entry) => entry.diagnostic?.selectedSourceType)
+      .filter(Boolean)),
+    allowedProviderIds: unavailable(latestSearchStarted?.diagnostic?.allowedProviderIds),
+    generatedSearchQueryCount: unavailable(latestSearchStarted?.diagnostic?.generatedSearchQueryCount),
+    generatedSearchQueries: unavailable(latestSearchStarted?.diagnostic?.generatedSearchQueries),
+    providerPlan: unavailable(latestSearchStarted?.diagnostic?.providerPlan),
+    providerOutcomes: unavailable(latestSearchFinished?.diagnostic?.providerOutcomes),
+    providerResponseCount: unavailable(latestSearchFinished?.diagnostic?.providerResponseCount),
+    providerErrorCodes: unavailable(latestSearchFinished?.diagnostic?.providerErrorCodes),
+    emptyResultReason: unavailable(latestSearchFinished?.diagnostic?.emptyResultReason),
     providerReturnedCounts: Array.isArray(data.sourceDiagnostics)
       ? data.sourceDiagnostics.map((item) => ({
           providerId: unavailable(item.providerId),

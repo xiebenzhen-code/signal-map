@@ -54,7 +54,7 @@ type ProgressHandler = (progress: PipelineProgress) => void | Promise<void>;
 export type ResearchPipelineDebug = {
   onCandidateSelectionAudit?: (audit: CandidateSelectionAudit[]) => void;
   onEligibilityAudit?: (audit: EligibilityAuditFunnel) => void;
-  onPhase?: (event: { phase: string; success?: boolean; itemCount?: number; errorCode?: string }) => void;
+  onPhase?: (event: { phase: string; success?: boolean; itemCount?: number; errorCode?: string; diagnostic?: Record<string, unknown> }) => void;
   deadlineAt?: number;
 };
 
@@ -887,8 +887,8 @@ export async function runResearchPipeline(
   let scanned = 0;
   let counts = emptyCounts();
   const sourceOutcomes: SourceExecutionOutcome[] = [];
-  const markPhase = (phase: string, success = true, itemCount?: number, errorCode?: string) =>
-    debug?.onPhase?.({ phase, success, itemCount, errorCode });
+  const markPhase = (phase: string, success = true, itemCount?: number, errorCode?: string, diagnostic?: Record<string, unknown>) =>
+    debug?.onPhase?.({ phase, success, itemCount, errorCode, diagnostic });
   const remainingMs = () => Math.max(0, (debug?.deadlineAt ?? Date.now() + 30000) - Date.now());
   const emit = async (event: PipelineProgress) => {
     progress.push(event);
@@ -907,6 +907,36 @@ export async function runResearchPipeline(
     : undefined;
   const canExecute = (providerId: string) => !allowedProviderIds || allowedProviderIds.includes(providerId);
   const sourceConstrained = Boolean(sourceSelection?.primarySourceType || sourceSelection?.allowedProviderIds?.length);
+  const providerPlan = (providerId: string, providerName: string, configured: boolean | "runtime_status") => ({
+    providerId,
+    providerName,
+    configured,
+    callAttempted: canExecute(providerId),
+    emptyResultReason: canExecute(providerId) ? undefined : "not_allowed_by_source_selection",
+  });
+  const searchProviderPlan = () => [
+    providerPlan("primary-web-search", "Primary Sources", true),
+    providerPlan("company-registry", "Company Source Registry", true),
+    providerPlan("github-releases", "GitHub Releases", true),
+    providerPlan("official-update-pages", "Official Update Pages", true),
+    providerPlan("trusted-media", "Trusted Media", true),
+    providerPlan("industry-media", "Industry Media", true),
+    providerPlan("public-web", "General Web / Public Web Community", true),
+    providerPlan("product-hunt", "Product Hunt", true),
+    providerPlan("hacker-news", "Hacker News", true),
+    providerPlan("huggingface", "Hugging Face", true),
+    providerPlan("arxiv", "arXiv", true),
+    providerPlan("social-access", "Social Access Layer", "runtime_status"),
+    providerPlan("reddit", "Reddit", true),
+    providerPlan("reverse-primary", "Reverse Primary", true),
+  ];
+  const searchEmptyReason = (outcomes: SourceExecutionOutcome[], rawCount: number) => {
+    if (rawCount > 0) return undefined;
+    if (!outcomes.some((outcome) => outcome.searched)) return "no_provider_call_attempted";
+    if (outcomes.some((outcome) => outcome.execution === "failed")) return "all_results_empty_with_provider_failure";
+    if (!plan.entities.length && plan.selectedSourceType === "OFFICIAL") return "official_source_selected_but_no_resolved_entities";
+    return "providers_returned_zero_results";
+  };
   const emptySearchResult = () => ({
     scanned: 0,
     attempted: 0,
@@ -941,7 +971,17 @@ export async function runResearchPipeline(
     .slice(0, 5)
     .map((query) => `${query}${sourceHint} ${domains}`);
   const primaryWebEnabled = canExecute("primary-web-search");
-  markPhase("search_started");
+  markPhase("search_started", true, undefined, undefined, {
+    selectedSourceType: plan.selectedSourceType,
+    fallbackSourceTypes: plan.fallbackSourceTypes,
+    allowedProviderIds: allowedProviderIds ?? "all",
+    generatedSearchQueryCount: plan.searchCombinations.length,
+    generatedSearchQueries: plan.searchCombinations.slice(0, 10),
+    entityCount: plan.entities.length,
+    entities: plan.entities.slice(0, 10),
+    resolvedEntities: plan.resolvedEntities?.slice(0, 10),
+    providerPlan: searchProviderPlan(),
+  });
   const [primaryResult, companyRegistryResult, githubReleaseResult, officialUpdatePageResult] = await Promise.all([
     primaryWebEnabled
       ? searchQueries(primaryQueries, "primary", plan, failures, windowDays)
@@ -1168,7 +1208,26 @@ export async function runResearchPipeline(
     reversePrimary = unique([...reversePrimary, ...reverseResult.items]);
     scanned += reverseResult.scanned;
   }
-  markPhase("search_finished", true, scanned);
+  markPhase("search_finished", true, scanned, undefined, {
+    selectedSourceType: plan.selectedSourceType,
+    allowedProviderIds: allowedProviderIds ?? "all",
+    providerOutcomes: sourceOutcomes.map((outcome) => ({
+      providerName: outcome.source,
+      execution: outcome.execution,
+      searched: outcome.searched,
+      resultCount: outcome.resultCount,
+      rawResultCount: outcome.rawResultCount,
+      normalizedCandidateCount: outcome.normalizedCandidateCount,
+      requestCount: outcome.requestCount,
+      failureCode: outcome.failureCode,
+    })),
+    providerResponseCount: scanned,
+    failureCount: failures.length,
+    providerErrorCodes: sourceOutcomes
+      .filter((outcome) => outcome.failureCode)
+      .map((outcome) => ({ providerName: outcome.source, failureCode: outcome.failureCode })),
+    emptyResultReason: searchEmptyReason(sourceOutcomes, scanned),
+  });
   const allPrimary = unique([...primary, ...reversePrimary]);
   const primaryOutcome = sourceOutcomes.find((outcome) => outcome.source === "Primary Sources");
   if (primaryOutcome && primaryWebEnabled && primaryResult.items.length > 0) {

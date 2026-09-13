@@ -180,6 +180,7 @@ export const handleSignals = withSession(async (request: Request) => {
         errorMessage: event.errorMessage,
         topStackFrame: event.topStackFrame,
         failureKind: event.failureKind,
+        diagnostic: event.diagnostic,
       });
     }
   };

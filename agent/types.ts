@@ -199,6 +199,7 @@ export type AgentRunOptions = {
     errorMessage?: string;
     topStackFrame?: string;
     failureKind?: "throw_exception" | "failure_result" | "empty_response";
+    diagnostic?: Record<string, unknown>;
   }) => void;
   deadlineAt?: number;
   initialRevision?: number;
