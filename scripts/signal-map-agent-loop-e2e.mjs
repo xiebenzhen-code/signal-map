@@ -43,6 +43,7 @@ const created = {
 
 let serverProcess = null;
 let dbClient = null;
+let statefulSecondRunForQuality = null;
 
 function section(name) {
   return {
@@ -456,17 +457,31 @@ function phaseNamesFor(requestId) {
   return tracesForRequest(requestId).map((entry) => entry.phase);
 }
 
+function phaseTraceFor(requestId) {
+  return tracesForRequest(requestId).map((entry) => ({
+    phase: unavailable(entry.phase),
+    success: entry.success !== false,
+    itemCount: unavailable(entry.itemCount),
+    errorCode: unavailable(entry.errorCode),
+    durationMs: unavailable(entry.durationMs),
+  }));
+}
+
+function lastSuccessfulPhaseFromTrace(phaseTrace) {
+  return [...phaseTrace].reverse().find((entry) => entry.success)?.phase || "unavailable";
+}
+
 function summarizeSignalResponse(response) {
   const data = response.data || {};
+  const signals = Array.isArray(data.signals) ? data.signals : [];
   return {
     requestId: response.requestId || data.requestId || null,
     status: response.status,
     durationMs: response.durationMs,
-    signalCount: Array.isArray(data.signals) ? data.signals.length : 0,
+    signalCount: signals.length,
     dataMode: data.dataMode || null,
-    evidenceCount: Array.isArray(data.signals)
-      ? data.signals.reduce((count, signal) => count + (Array.isArray(signal.claims) ? signal.claims.length : 0), 0)
-      : 0,
+    claimCount: signals.reduce((count, signal) => count + (Array.isArray(signal.claims) ? signal.claims.length : 0), 0),
+    evidenceCount: evidenceItems(signals).length,
     errorCode: data.errorCode || null,
     error: data.error || null,
   };
@@ -552,13 +567,246 @@ function latestRunForQuality(agentRuns) {
   return Array.isArray(agentRuns) && agentRuns.length ? agentRuns[0] : null;
 }
 
-function buildQualityReport({ query, signalRun, agentRuns }) {
+function sumDiagnostics(sourceDiagnostics, field) {
+  return Array.isArray(sourceDiagnostics)
+    ? sourceDiagnostics.reduce((total, item) => total + (Number.isFinite(item?.[field]) ? item[field] : 0), 0)
+    : undefined;
+}
+
+function searchDiagnostics(data, phaseTrace) {
+  const queryPlan = data.queryPlan || {};
+  const queries = unique([
+    ...(Array.isArray(queryPlan.searchCombinations) ? queryPlan.searchCombinations : []),
+    ...(Array.isArray(queryPlan.knowledgeAwareQueries) ? queryPlan.knowledgeAwareQueries : []),
+  ]);
+  const searchFinished = phaseTrace.filter((entry) => entry.phase === "search_finished");
+  return {
+    perRoundSearch: [{
+      round: "unavailable",
+      queries: queries.length
+        ? queries.map((query) => ({ query, returnedCount: "unavailable" }))
+        : "unavailable",
+      returnedCountFromPhase: searchFinished.length
+        ? searchFinished.map((entry) => entry.itemCount)
+        : "unavailable",
+    }],
+    providerReturnedCounts: Array.isArray(data.sourceDiagnostics)
+      ? data.sourceDiagnostics.map((item) => ({
+          providerId: unavailable(item.providerId),
+          rawProviderResultCount: unavailable(item.rawProviderResultCount),
+          normalizedCandidateCount: unavailable(item.normalizedCandidateCount),
+          admittedCandidateCount: unavailable(item.admittedCandidateCount),
+          pipelineRetrievedCount: unavailable(item.pipelineRetrievedCount),
+          displayedCount: unavailable(item.displayedCount),
+        }))
+      : "unavailable",
+    sourceOutcomes: unavailable(data.sourceOutcomes),
+  };
+}
+
+function detailFetchDiagnostics(data) {
+  const detail = data.filteringSummary?.detailEnrichment || {};
+  return {
+    attemptedCount: unavailable(detail.detailAttempted ?? sumDiagnostics(data.sourceDiagnostics, "detailAttempted")),
+    successCount: unavailable(detail.detailSucceeded ?? sumDiagnostics(data.sourceDiagnostics, "detailSucceeded")),
+    failedCount: unavailable(detail.detailFailed ?? sumDiagnostics(data.sourceDiagnostics, "detailFailed")),
+    stillInsufficient: unavailable(detail.stillInsufficient),
+    byProvider: Array.isArray(data.sourceDiagnostics)
+      ? data.sourceDiagnostics.map((item) => ({
+          providerId: unavailable(item.providerId),
+          enrichmentEligibleCount: unavailable(item.enrichmentEligibleCount),
+          detailAttempted: unavailable(item.detailAttempted),
+          detailSucceeded: unavailable(item.detailSucceeded),
+          detailFailed: unavailable(item.detailFailed),
+        }))
+      : "unavailable",
+  };
+}
+
+function aggregationDiagnostics(data, summary) {
+  return {
+    inputCount: unavailable(summary.retrievedCount ?? data.overview?.scanned ?? data.counts?.candidates),
+    clusteredCount: unavailable(summary.clusteredCount ?? data.overview?.events),
+    deduplicatedCount: unavailable(data.overview?.deduplicated),
+  };
+}
+
+function filteringDiagnostics(data, summary, signals) {
+  const evaluatedCount = Array.isArray(summary.filteringDetails)
+    ? summary.filteringDetails.length
+    : undefined;
+  const keptCount = summary.displayedCount ?? signals.length;
+  const filteredCount = Number.isFinite(evaluatedCount) && Number.isFinite(keptCount)
+    ? Math.max(0, evaluatedCount - keptCount)
+    : undefined;
+  return {
+    evaluatedCount: unavailable(evaluatedCount),
+    keptCount: unavailable(keptCount),
+    filteredCount: unavailable(filteredCount),
+    reasonCounts: unavailable(summary.filteredReasons),
+    strongestHiddenSignal: unavailable(summary.strongestHiddenSignal),
+  };
+}
+
+function evidenceDiagnostics(data, summary, signals, latestRun) {
+  const accepted = evidenceItems(signals);
+  return {
+    candidateCount: unavailable(summary.clusteredCount ?? summary.filteringDetails?.length ?? data.overview?.events),
+    acceptedEvidenceCount: unavailable(latestRun?.evidenceCount ?? accepted.length),
+    rejectedReason: unavailable(summary.filteredReasons || summary.summaryText),
+    byDisplayedSignal: signals.map((signal) => ({
+      title: unavailable(signal.title),
+      claimCount: unavailable(Array.isArray(signal.claims) ? signal.claims.length : undefined),
+      evidenceSourceCount: unavailable(evidenceItems([signal]).length),
+      verificationStatus: unavailable(signal.verificationStatus),
+      contentQuality: unavailable(signal.contentQuality),
+      contentFailureReason: unavailable(signal.contentFailureReason),
+    })),
+  };
+}
+
+function statefulSecondRunDiagnostics(secondRun) {
+  if (!secondRun) return "unavailable";
+  return {
+    requestId: unavailable(secondRun.requestId),
+    httpStatus: unavailable(secondRun.httpStatus),
+    lastPhase: unavailable(secondRun.lastPhase),
+    latestStatus: unavailable(secondRun.latestStatus),
+    evidenceCount: unavailable(secondRun.evidenceCount),
+    knowledgeChanges: unavailable(secondRun.knowledgeChanges),
+    traceStates: unavailable(secondRun.traceStates),
+    reason: unavailable(secondRun.reason),
+  };
+}
+
+function qualityAcceptance(summary) {
+  if (summary.status !== 200) {
+    return {
+      status: statuses.fail,
+      reason: sanitize(summary.errorCode || summary.error || `HTTP ${summary.status}`),
+    };
+  }
+  if (summary.signalCount === 0 && summary.evidenceCount === 0) {
+    return {
+      status: statuses.partial,
+      reason: "HTTP 200 but signalCount=0 and evidenceCount=0; quality evidence was not produced",
+    };
+  }
+  if (summary.signalCount === 0 || summary.evidenceCount === 0) {
+    return {
+      status: statuses.partial,
+      reason: `HTTP 200 but incomplete quality output: signalCount=${summary.signalCount}, evidenceCount=${summary.evidenceCount}`,
+    };
+  }
+  return { status: statuses.pass, reason: null };
+}
+
+function emptyQualityReport(status, reason, state = {}) {
+  return {
+    generatedAt: new Date().toISOString(),
+    mode: "quality_acceptance",
+    acceptanceStatus: status,
+    query: { original: qualityQuery || "unavailable" },
+    inference: {
+      inferredIntent: "unavailable",
+      intentReason: "unavailable",
+      freshnessTimeRange: "unavailable",
+      sourcePreference: "unavailable",
+      sourceSelection: "unavailable",
+      entitiesTopic: "unavailable",
+    },
+    retrieval: {
+      retrievedCount: "unavailable",
+      evaluatedCount: "unavailable",
+      clusteredCount: "unavailable",
+      displayedCount: "unavailable",
+      search: "unavailable",
+      detailFetch: "unavailable",
+      aggregation: "unavailable",
+      keptSources: "unavailable",
+    },
+    sources: "unavailable",
+    filtered: {
+      summaryText: "unavailable",
+      reasonCounts: "unavailable",
+      strongestHiddenSignal: "unavailable",
+      evaluation: "unavailable",
+      sampleFilteredResults: "unavailable",
+    },
+    evidenceDiagnostics: {
+      candidateCount: "unavailable",
+      acceptedEvidenceCount: "unavailable",
+      rejectedReason: "unavailable",
+      byDisplayedSignal: "unavailable",
+    },
+    evidence: "unavailable",
+    result: {
+      finalNaturalLanguageConclusion: "unavailable",
+      recommendedUserTests: "unavailable",
+      outputMode: "unavailable",
+      intentOutput: "unavailable",
+    },
+    state: {
+      requestId: state.requestId ?? null,
+      httpStatus: state.httpStatus ?? null,
+      latencyMs: state.latencyMs ?? null,
+      lastPhase: state.lastPhase ?? "unavailable",
+      lastSuccessfulPhase: state.lastSuccessfulPhase ?? "unavailable",
+      phaseTrace: state.phaseTrace ?? "unavailable",
+      statefulSecondRun: statefulSecondRunDiagnostics(statefulSecondRunForQuality),
+    },
+    rawAvailability: {
+      hasIntent: false,
+      hasFilteringSummary: false,
+      hasAgentRun: false,
+      displayedSignals: 0,
+    },
+    failureReason: sanitize(reason),
+  };
+}
+
+async function runQualityAcceptance(session) {
+  if (!qualityQuery || qualityReport?.state?.requestId) return;
+  try {
+    const qualityFilter = `filter-${runId}-quality`;
+    await seedFilter(session.user.id, qualityFilter, `Agent quality report ${runId}`);
+    const qualityRun = await runQualityResearch(session, qualityFilter, qualityQuery);
+    let qualityRuns = [];
+    let agentRunsError = null;
+    try {
+      qualityRuns = await latestAgentRuns(session, qualityFilter);
+    } catch (error) {
+      agentRunsError = sanitize(error instanceof Error ? error.message : error);
+    }
+    qualityReport = buildQualityReport({
+      query: qualityQuery,
+      signalRun: qualityRun,
+      agentRuns: qualityRuns,
+      secondRun: statefulSecondRunForQuality,
+    });
+    const acceptance = qualityAcceptance(qualityRun.summary);
+    qualityReport.acceptanceStatus = acceptance.status;
+    qualityReport.failureReason = acceptance.reason;
+    if (agentRunsError) qualityReport.rawAvailability.agentRunsError = agentRunsError;
+    if (acceptance.status !== statuses.pass) process.exitCode = 1;
+  } catch (error) {
+    qualityReport = emptyQualityReport(
+      statuses.fail,
+      error instanceof Error ? error.message : error,
+      { lastPhase: "quality_acceptance" },
+    );
+    process.exitCode = 1;
+  }
+}
+
+function buildQualityReport({ query, signalRun, agentRuns, secondRun }) {
   const response = signalRun.response;
   const data = response.data || {};
   const signals = Array.isArray(data.signals) ? data.signals : [];
   const summary = data.filteringSummary || {};
   const latestRun = latestRunForQuality(agentRuns);
   const keptSources = signals.map(keptSource);
+  const phaseTrace = phaseTraceFor(signalRun.summary.requestId);
   const filteredDetails = Array.isArray(summary.filteringDetails)
     ? summary.filteringDetails
         .filter((item) => item.decision === "filtered")
@@ -589,6 +837,11 @@ function buildQualityReport({ query, signalRun, agentRuns }) {
       intentReason: unavailable(data.intent?.reason),
       freshnessTimeRange: unavailable(data.queryPlan?.requestedFreshnessWindow || data.sourceProfile?.freshnessRequirement),
       sourcePreference: unavailable(sourcePreference),
+      sourceSelection: unavailable(latestRun?.selectedSources || {
+        selectedSourceType: data.queryPlan?.selectedSourceType,
+        fallbackSourceTypes: data.queryPlan?.fallbackSourceTypes,
+        sourceSelectionReason: data.queryPlan?.sourceSelectionReason,
+      }),
       entitiesTopic: unavailable(data.queryPlan?.resolvedEntities || data.queryPlan?.entities || data.queryPlan?.coreKeywords),
     },
     retrieval: {
@@ -602,6 +855,9 @@ function buildQualityReport({ query, signalRun, agentRuns }) {
         sourceDiagnostics: unavailable(data.sourceDiagnostics),
         sourceOutcomes: unavailable(data.sourceOutcomes),
       },
+      search: searchDiagnostics(data, phaseTrace),
+      detailFetch: detailFetchDiagnostics(data),
+      aggregation: aggregationDiagnostics(data, summary),
       keptSources: keptSources.map((item) => ({
         title: item.title,
         url: item.url,
@@ -615,8 +871,10 @@ function buildQualityReport({ query, signalRun, agentRuns }) {
       summaryText: unavailable(summary.summaryText),
       reasonCounts: unavailable(summary.filteredReasons),
       strongestHiddenSignal: unavailable(summary.strongestHiddenSignal),
+      evaluation: filteringDiagnostics(data, summary, signals),
       sampleFilteredResults: filteredDetails,
     },
+    evidenceDiagnostics: evidenceDiagnostics(data, summary, signals, latestRun),
     evidence: evidenceItems(signals).slice(0, 20).map((item) => ({
       signal: unavailable(item.signal),
       claim: unavailable(item.claim),
@@ -640,7 +898,10 @@ function buildQualityReport({ query, signalRun, agentRuns }) {
       httpStatus: signalRun.summary.status,
       latencyMs: signalRun.summary.durationMs,
       lastPhase: signalRun.lastPhase,
+      lastSuccessfulPhase: lastSuccessfulPhaseFromTrace(phaseTrace),
+      phaseTrace,
       traceStates: unavailable(Array.isArray(latestRun?.trace) ? latestRun.trace.map((entry) => entry.state) : undefined),
+      statefulSecondRun: statefulSecondRunDiagnostics(secondRun),
     },
     rawAvailability: {
       hasIntent: Boolean(data.intent || data.sourceProfile),
@@ -671,10 +932,13 @@ function qualityMarkdown(report) {
   const lines = [
     "# Signal Map Agent Quality Report",
     "",
+    `- status: \`${report.acceptanceStatus || "unavailable"}\``,
     `- requestId: \`${report.state.requestId || "unavailable"}\``,
     `- HTTP: \`${report.state.httpStatus ?? "unavailable"}\``,
     `- latency: \`${report.state.latencyMs ?? "unavailable"}ms\``,
     `- lastPhase: \`${report.state.lastPhase || "unavailable"}\``,
+    `- lastSuccessfulPhase: \`${report.state.lastSuccessfulPhase || "unavailable"}\``,
+    `- failure: ${report.failureReason || "none"}`,
     "",
     "## QUERY",
     "",
@@ -685,6 +949,7 @@ function qualityMarkdown(report) {
     `- inferred intent: ${compact(report.inference.inferredIntent)}`,
     `- freshness / time range: ${compact(report.inference.freshnessTimeRange)}`,
     `- source preference: ${compact(report.inference.sourcePreference)}`,
+    `- source selection: ${compact(report.inference.sourceSelection, 1000)}`,
     `- entities / topic: ${compact(report.inference.entitiesTopic)}`,
     "",
     "## RETRIEVAL",
@@ -693,6 +958,9 @@ function qualityMarkdown(report) {
     `- evaluated: ${compact(report.retrieval.evaluatedCount)}`,
     `- clustered: ${compact(report.retrieval.clusteredCount)}`,
     `- displayed: ${compact(report.retrieval.displayedCount)}`,
+    `- search returned count: ${compact(report.retrieval.search, 1800)}`,
+    `- detail fetch: ${compact(report.retrieval.detailFetch, 1200)}`,
+    `- aggregation: ${compact(report.retrieval.aggregation, 1000)}`,
     "",
     "## SOURCES",
     "",
@@ -712,7 +980,14 @@ function qualityMarkdown(report) {
     "",
     `- summary: ${compact(report.filtered.summaryText, 500)}`,
     `- reason counts: ${compact(report.filtered.reasonCounts)}`,
+    `- evaluation: ${compact(report.filtered.evaluation, 1000)}`,
     `- sample filtered results: ${compact(report.filtered.sampleFilteredResults, 1600)}`,
+    "",
+    "## EVIDENCE DIAGNOSTICS",
+    "",
+    `- candidate / accepted: ${compact(report.evidenceDiagnostics.candidateCount)} / ${compact(report.evidenceDiagnostics.acceptedEvidenceCount)}`,
+    `- rejected reason: ${compact(report.evidenceDiagnostics.rejectedReason, 1000)}`,
+    `- by displayed signal: ${compact(report.evidenceDiagnostics.byDisplayedSignal, 1200)}`,
     "",
     "## EVIDENCE",
     "",
@@ -731,7 +1006,10 @@ function qualityMarkdown(report) {
     "",
     `- Knowledge writes: ${compact(report.state.knowledgeWriteCount)}`,
     `- Attention: ${compact(report.state.attentionDecision)}`,
+    `- final signals count: ${compact(report.rawAvailability?.displayedSignals)}`,
+    `- needs_more_evidence reason: ${compact(report.state.statefulSecondRun, 1200)}`,
     `- trace states: ${compact(report.state.traceStates)}`,
+    `- phase trace: ${compact(report.state.phaseTrace, 1800)}`,
     "",
   ];
   return `${lines.join("\n")}\n`;
@@ -923,6 +1201,13 @@ async function writeReport() {
   await writeFile(reportPathJson, `${JSON.stringify(report, null, 2)}\n`);
   await writeFile(reportPathMd, markdown);
   let stepSummary = markdown;
+  if (qualityQuery && !qualityReport) {
+    qualityReport = emptyQualityReport(
+      statuses.blocked,
+      "quality_query was provided, but quality research did not run before the E2E harness stopped",
+      { lastPhase: "quality_not_started" },
+    );
+  }
   if (qualityReport) {
     const qualityMd = qualityMarkdown(qualityReport);
     await writeFile(qualityReportPathJson, `${JSON.stringify(qualityReport, null, 2)}\n`);
@@ -1007,6 +1292,8 @@ async function main() {
       return;
     }
 
+    await runQualityAcceptance(accountA);
+
     let firstRun = null;
     try {
       firstRun = await runSignals(accountA, filterA, "first");
@@ -1053,6 +1340,20 @@ async function main() {
       const latest = runs[0];
       addEvidence(phaseReports.statefulSecondRun, `Readable persisted run count after second research: ${runs.length}`);
       addEvidence(phaseReports.statefulSecondRun, `Latest run status=${latest?.status || "missing"} evidenceCount=${latest?.evidenceCount ?? "n/a"} knowledgeChanges=${Array.isArray(latest?.knowledgeChanges) ? latest.knowledgeChanges.length : "n/a"}`);
+      const lastTraceEntry = Array.isArray(latest?.trace) ? latest.trace.at(-1) : null;
+      statefulSecondRunForQuality = {
+        requestId: secondRun.summary.requestId,
+        httpStatus: secondRun.summary.status,
+        lastPhase: secondRun.lastPhase,
+        latestStatus: latest?.status || "missing",
+        evidenceCount: latest?.evidenceCount,
+        knowledgeChanges: Array.isArray(latest?.knowledgeChanges) ? latest.knowledgeChanges.length : undefined,
+        traceStates: Array.isArray(latest?.trace) ? latest.trace.map((entry) => entry.state) : undefined,
+        reason: lastTraceEntry?.reason || lastTraceEntry?.result || latest?.status || secondRun.summary.errorCode || secondRun.summary.error,
+      };
+      if (qualityReport?.state) {
+        qualityReport.state.statefulSecondRun = statefulSecondRunDiagnostics(statefulSecondRunForQuality);
+      }
       if (secondRun.summary.status !== 200) {
         fail(phaseReports.statefulSecondRun, `Second research HTTP ${secondRun.summary.status}: ${secondRun.summary.errorCode || secondRun.summary.error || "unknown"}`);
         return;
@@ -1063,35 +1364,6 @@ async function main() {
         partial(phaseReports.statefulSecondRun, "Second run completed but readable comparison output was missing");
       } else {
         pass(phaseReports.statefulSecondRun);
-      }
-      if (qualityQuery) {
-        try {
-          const qualityFilter = `filter-${runId}-quality`;
-          await seedFilter(accountA.user.id, qualityFilter, `Agent quality report ${runId}`);
-          const qualityRun = await runQualityResearch(accountA, qualityFilter, qualityQuery);
-          const qualityRuns = await latestAgentRuns(accountA, qualityFilter);
-          qualityReport = buildQualityReport({ query: qualityQuery, signalRun: qualityRun, agentRuns: qualityRuns });
-          qualityReport.acceptanceStatus = qualityRun.summary.status === 200 ? statuses.pass : statuses.fail;
-          qualityReport.failureReason = qualityRun.summary.status === 200
-            ? null
-            : sanitize(qualityRun.summary.errorCode || qualityRun.summary.error || "quality research failed");
-          if (qualityRun.summary.status !== 200) process.exitCode = 1;
-        } catch (error) {
-          qualityReport = {
-            generatedAt: new Date().toISOString(),
-            mode: "quality_acceptance",
-            acceptanceStatus: statuses.fail,
-            query: { original: qualityQuery },
-            failureReason: sanitize(error instanceof Error ? error.message : error),
-            state: {
-              requestId: null,
-              httpStatus: null,
-              latencyMs: null,
-              lastPhase: "quality_acceptance",
-            },
-          };
-          process.exitCode = 1;
-        }
       }
       const logoutA = await accountA.request("/api/auth/logout", { method: "POST" });
       const logoutB = await accountB.request("/api/auth/logout", { method: "POST" });
