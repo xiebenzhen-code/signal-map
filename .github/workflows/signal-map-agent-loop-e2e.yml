@@ -1,0 +1,79 @@
+name: Signal Map Agent Loop E2E
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: signal-map-agent-loop-e2e
+  cancel-in-progress: false
+
+jobs:
+  agent-loop-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      CI: "true"
+      NODE_ENV: production
+      PORT: "18080"
+      SIGNAL_MAP_ALLOWED_ORIGIN: http://127.0.0.1:18080
+      DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+      POSTGRES_SSL: ${{ secrets.POSTGRES_SSL }}
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.TEST_SUPABASE_PUBLISHABLE_KEY }}
+      TEST_SUPABASE_PROJECT_REF: ${{ secrets.TEST_SUPABASE_PROJECT_REF }}
+      TEST_DATABASE_SAFETY_ACK: ${{ secrets.TEST_DATABASE_SAFETY_ACK }}
+      TEST_ACCOUNT_A_EMAIL: ${{ secrets.TEST_ACCOUNT_A_EMAIL }}
+      TEST_ACCOUNT_A_PASSWORD: ${{ secrets.TEST_ACCOUNT_A_PASSWORD }}
+      TEST_ACCOUNT_B_EMAIL: ${{ secrets.TEST_ACCOUNT_B_EMAIL }}
+      TEST_ACCOUNT_B_PASSWORD: ${{ secrets.TEST_ACCOUNT_B_PASSWORD }}
+      MODEL_PROVIDER: ${{ secrets.MODEL_PROVIDER }}
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      DEEPSEEK_MODEL: ${{ secrets.DEEPSEEK_MODEL }}
+      DEEPSEEK_SYNTHESIS_MODEL: ${{ secrets.DEEPSEEK_SYNTHESIS_MODEL }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
+      OPENAI_SYNTHESIS_MODEL: ${{ secrets.OPENAI_SYNTHESIS_MODEL }}
+      MODEL_REQUEST_TIMEOUT_MS: ${{ secrets.MODEL_REQUEST_TIMEOUT_MS }}
+      X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+      XHS_ACCESS_TOKEN: ${{ secrets.XHS_ACCESS_TOKEN }}
+      XHS_CLIENT_ID: ${{ secrets.XHS_CLIENT_ID }}
+      XHS_CLIENT_SECRET: ${{ secrets.XHS_CLIENT_SECRET }}
+      XHS_OAUTH_API_BASE_URL: ${{ secrets.XHS_OAUTH_API_BASE_URL }}
+      XHS_CONNECTION_ADAPTER: ${{ secrets.XHS_CONNECTION_ADAPTER }}
+      TRANSLATION_ENABLED: ${{ secrets.TRANSLATION_ENABLED }}
+      TRANSLATION_SERVICE_URL: ${{ secrets.TRANSLATION_SERVICE_URL }}
+      TRANSLATION_FALLBACK_SERVICE_URL: ${{ secrets.TRANSLATION_FALLBACK_SERVICE_URL }}
+      TRANSLATION_TARGET_LANGUAGE: ${{ secrets.TRANSLATION_TARGET_LANGUAGE }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Node API
+        run: npm run api:build
+
+      - name: Validate acceptance harness
+        run: node --check scripts/signal-map-agent-loop-e2e.mjs
+
+      - name: Run Agent loop E2E
+        run: node scripts/signal-map-agent-loop-e2e.mjs
+
+      - name: Upload acceptance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: signal-map-agent-loop-e2e-report
+          path: |
+            signal-map-agent-loop-e2e-report.json
+            signal-map-agent-loop-e2e-report.md
+          if-no-files-found: warn
