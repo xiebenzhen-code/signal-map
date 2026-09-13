@@ -12,6 +12,9 @@ const baseUrl = `http://127.0.0.1:${port}`;
 const origin = process.env.SIGNAL_MAP_ALLOWED_ORIGIN || baseUrl;
 const reportPathJson = "signal-map-agent-loop-e2e-report.json";
 const reportPathMd = "signal-map-agent-loop-e2e-report.md";
+const qualityQuery = (process.env.SIGNAL_MAP_QUALITY_QUERY || "").trim();
+const qualityReportPathJson = "signal-map-agent-quality-report.json";
+const qualityReportPathMd = "signal-map-agent-quality-report.md";
 
 const statuses = {
   pass: "PASS",
@@ -28,6 +31,8 @@ const phaseReports = {
   realResearch: section("Real Research"),
   statefulSecondRun: section("Stateful Second Run"),
 };
+
+let qualityReport = null;
 
 const serverLogs = [];
 const created = {
@@ -417,6 +422,19 @@ async function seedKnowledge(userId, filterId) {
   );
 }
 
+async function seedFilter(userId, filterId, name) {
+  const now = new Date().toISOString();
+  created.userIds.add(userId);
+  created.filterIds.add(filterId);
+  await query(
+    `INSERT INTO filters (id, user_id, name, created_at, updated_at)
+     VALUES ($1,$2,$3,$4,$4)
+     ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, updated_at = EXCLUDED.updated_at
+     WHERE filters.user_id = EXCLUDED.user_id`,
+    [filterId, userId, name, now],
+  );
+}
+
 function tracesForRequest(requestId) {
   return serverLogs
     .map((line) => {
@@ -454,6 +472,271 @@ function summarizeSignalResponse(response) {
   };
 }
 
+function unavailable(value) {
+  if (value === undefined || value === null) return "unavailable";
+  if (Array.isArray(value) && value.length === 0) return "unavailable";
+  if (typeof value === "string" && !value.trim()) return "unavailable";
+  return value;
+}
+
+function compact(value, maxLength = 1200) {
+  if (value === undefined || value === null) return "unavailable";
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  return sanitize(text).slice(0, maxLength);
+}
+
+function domainFromUrl(value) {
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return "unavailable";
+  }
+}
+
+function unique(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function keptSource(signal) {
+  return {
+    title: unavailable(signal?.title),
+    url: unavailable(signal?.sourceUrl),
+    domain: signal?.sourceUrl ? domainFromUrl(signal.sourceUrl) : "unavailable",
+    sourceType: unavailable(signal?.sourceType),
+    sourceTier: unavailable(signal?.sourceTier),
+    publisher: unavailable(signal?.publisher),
+    publishedAt: unavailable(signal?.publishedAt || signal?.eventOccurredAt),
+    freshness: unavailable(signal?.time || signal?.freshnessScore),
+    whyKept: unavailable(signal?.why || signal?.whyItMatters),
+    reliability: unavailable(signal?.reliabilityScore ?? signal?.truth),
+    verificationStatus: unavailable(signal?.verificationStatus),
+    evidence: Array.isArray(signal?.claims)
+      ? signal.claims.slice(0, 3).map((claim) => ({
+          claim: unavailable(claim.claimText),
+          verificationStatus: unavailable(claim.verificationStatus),
+          sourceTier: unavailable(claim.sourceTier),
+          independentEvidenceCount: unavailable(claim.independentEvidenceCount),
+          snippet: unavailable(claim.evidenceSnippet),
+        }))
+      : "unavailable",
+  };
+}
+
+function evidenceItems(signals) {
+  return signals.flatMap((signal) => Array.isArray(signal.claims)
+    ? signal.claims.flatMap((claim) => {
+        const sources = Array.isArray(claim.evidenceSources) ? claim.evidenceSources : [];
+        if (!sources.length) {
+          return [{
+            signal: signal.title,
+            claim: claim.claimText,
+            source: claim.sourceUrl,
+            publisher: claim.publisher,
+            snippet: claim.evidenceSnippet,
+            verificationStatus: claim.verificationStatus,
+          }];
+        }
+        return sources.slice(0, 3).map((source) => ({
+          signal: signal.title,
+          claim: claim.claimText,
+          source: source.sourceUrl,
+          publisher: source.publisher,
+          snippet: source.evidenceSnippet,
+          verificationStatus: source.verificationStatus,
+        }));
+      })
+    : []);
+}
+
+function latestRunForQuality(agentRuns) {
+  return Array.isArray(agentRuns) && agentRuns.length ? agentRuns[0] : null;
+}
+
+function buildQualityReport({ query, signalRun, agentRuns }) {
+  const response = signalRun.response;
+  const data = response.data || {};
+  const signals = Array.isArray(data.signals) ? data.signals : [];
+  const summary = data.filteringSummary || {};
+  const latestRun = latestRunForQuality(agentRuns);
+  const keptSources = signals.map(keptSource);
+  const filteredDetails = Array.isArray(summary.filteringDetails)
+    ? summary.filteringDetails
+        .filter((item) => item.decision === "filtered")
+        .slice(0, 12)
+        .map((item) => ({
+          title: unavailable(item.title),
+          reason: unavailable(item.reason),
+          explanation: unavailable(item.explanation),
+          sources: Array.isArray(item.sources)
+            ? item.sources.slice(0, 3).map((source) => ({
+                publisher: unavailable(source.publisher),
+                domain: source.sourceUrl ? domainFromUrl(source.sourceUrl) : "unavailable",
+              }))
+            : "unavailable",
+        }))
+    : "unavailable";
+  const sourcePreference = data.sourceProfile?.preferredSourceTypes
+    || data.queryPlan?.allowedProviderIds
+    || unique([data.queryPlan?.selectedSourceType, ...(data.queryPlan?.fallbackSourceTypes || [])]);
+  return {
+    generatedAt: new Date().toISOString(),
+    mode: "quality_acceptance",
+    query: {
+      original: query,
+    },
+    inference: {
+      inferredIntent: unavailable(data.intent?.primaryIntent || data.sourceProfile?.intent),
+      intentReason: unavailable(data.intent?.reason),
+      freshnessTimeRange: unavailable(data.queryPlan?.requestedFreshnessWindow || data.sourceProfile?.freshnessRequirement),
+      sourcePreference: unavailable(sourcePreference),
+      entitiesTopic: unavailable(data.queryPlan?.resolvedEntities || data.queryPlan?.entities || data.queryPlan?.coreKeywords),
+    },
+    retrieval: {
+      retrievedCount: unavailable(summary.retrievedCount ?? data.overview?.scanned ?? data.counts?.candidates),
+      evaluatedCount: unavailable(summary.filteringDetails?.length),
+      clusteredCount: unavailable(summary.clusteredCount ?? data.overview?.events),
+      displayedCount: unavailable(summary.displayedCount ?? signals.length),
+      evaluatedByCurrentFields: {
+        counts: unavailable(data.counts),
+        overview: unavailable(data.overview),
+        sourceDiagnostics: unavailable(data.sourceDiagnostics),
+        sourceOutcomes: unavailable(data.sourceOutcomes),
+      },
+      keptSources: keptSources.map((item) => ({
+        title: item.title,
+        url: item.url,
+        domain: item.domain,
+        sourceType: item.sourceType,
+        publishedAt: item.publishedAt,
+      })),
+    },
+    sources: keptSources,
+    filtered: {
+      summaryText: unavailable(summary.summaryText),
+      reasonCounts: unavailable(summary.filteredReasons),
+      strongestHiddenSignal: unavailable(summary.strongestHiddenSignal),
+      sampleFilteredResults: filteredDetails,
+    },
+    evidence: evidenceItems(signals).slice(0, 20).map((item) => ({
+      signal: unavailable(item.signal),
+      claim: unavailable(item.claim),
+      source: unavailable(item.source),
+      domain: item.source ? domainFromUrl(item.source) : "unavailable",
+      publisher: unavailable(item.publisher),
+      verificationStatus: unavailable(item.verificationStatus),
+      snippet: unavailable(item.snippet),
+    })),
+    result: {
+      finalNaturalLanguageConclusion: unavailable(data.finalConclusion || data.summary || data.answer),
+      recommendedUserTests: unavailable(signals.map((signal) => signal.action).filter(Boolean)),
+      outputMode: unavailable(data.outputMode || data.intentOutput?.mode),
+      intentOutput: unavailable(data.intentOutput),
+    },
+    state: {
+      knowledgeWriteCount: unavailable(Array.isArray(latestRun?.knowledgeChanges) ? latestRun.knowledgeChanges.length : undefined),
+      knowledgeChanges: unavailable(latestRun?.knowledgeChanges),
+      attentionDecision: unavailable(latestRun?.finalAttention || signals.map((signal) => signal.attentionDecision)),
+      requestId: signalRun.summary.requestId,
+      httpStatus: signalRun.summary.status,
+      latencyMs: signalRun.summary.durationMs,
+      lastPhase: signalRun.lastPhase,
+      traceStates: unavailable(Array.isArray(latestRun?.trace) ? latestRun.trace.map((entry) => entry.state) : undefined),
+    },
+    rawAvailability: {
+      hasIntent: Boolean(data.intent || data.sourceProfile),
+      hasFilteringSummary: Boolean(data.filteringSummary),
+      hasAgentRun: Boolean(latestRun),
+      displayedSignals: signals.length,
+    },
+  };
+}
+
+function qualityMarkdown(report) {
+  if (report.acceptanceStatus === statuses.fail && !report.inference) {
+    return [
+      "# Signal Map Agent Quality Report",
+      "",
+      `- status: \`${report.acceptanceStatus}\``,
+      `- requestId: \`${report.state?.requestId || "unavailable"}\``,
+      `- HTTP: \`${report.state?.httpStatus ?? "unavailable"}\``,
+      `- lastPhase: \`${report.state?.lastPhase || "unavailable"}\``,
+      `- failure: ${report.failureReason || "unavailable"}`,
+      "",
+      "## QUERY",
+      "",
+      report.query?.original || "unavailable",
+      "",
+    ].join("\n");
+  }
+  const lines = [
+    "# Signal Map Agent Quality Report",
+    "",
+    `- requestId: \`${report.state.requestId || "unavailable"}\``,
+    `- HTTP: \`${report.state.httpStatus ?? "unavailable"}\``,
+    `- latency: \`${report.state.latencyMs ?? "unavailable"}ms\``,
+    `- lastPhase: \`${report.state.lastPhase || "unavailable"}\``,
+    "",
+    "## QUERY",
+    "",
+    report.query.original,
+    "",
+    "## INFERENCE",
+    "",
+    `- inferred intent: ${compact(report.inference.inferredIntent)}`,
+    `- freshness / time range: ${compact(report.inference.freshnessTimeRange)}`,
+    `- source preference: ${compact(report.inference.sourcePreference)}`,
+    `- entities / topic: ${compact(report.inference.entitiesTopic)}`,
+    "",
+    "## RETRIEVAL",
+    "",
+    `- retrieved: ${compact(report.retrieval.retrievedCount)}`,
+    `- evaluated: ${compact(report.retrieval.evaluatedCount)}`,
+    `- clustered: ${compact(report.retrieval.clusteredCount)}`,
+    `- displayed: ${compact(report.retrieval.displayedCount)}`,
+    "",
+    "## SOURCES",
+    "",
+    ...(Array.isArray(report.sources) && report.sources.length
+      ? report.sources.flatMap((source, index) => [
+          `${index + 1}. ${compact(source.title, 220)}`,
+          `   - domain: ${compact(source.domain)}`,
+          `   - url: ${compact(source.url)}`,
+          `   - source type: ${compact(source.sourceType)}`,
+          `   - published / freshness: ${compact(source.publishedAt)} / ${compact(source.freshness)}`,
+          `   - why kept: ${compact(source.whyKept, 350)}`,
+          `   - reliability / evidence: ${compact(source.reliability)} / ${compact(source.verificationStatus)}`,
+        ])
+      : ["unavailable"]),
+    "",
+    "## FILTERED",
+    "",
+    `- summary: ${compact(report.filtered.summaryText, 500)}`,
+    `- reason counts: ${compact(report.filtered.reasonCounts)}`,
+    `- sample filtered results: ${compact(report.filtered.sampleFilteredResults, 1600)}`,
+    "",
+    "## EVIDENCE",
+    "",
+    ...(Array.isArray(report.evidence) && report.evidence.length
+      ? report.evidence.slice(0, 10).map((item, index) =>
+          `${index + 1}. ${compact(item.claim, 260)} — ${compact(item.publisher)} (${compact(item.domain)})`,
+        )
+      : ["unavailable"]),
+    "",
+    "## RESULT",
+    "",
+    `- final conclusion: ${compact(report.result.finalNaturalLanguageConclusion, 800)}`,
+    `- recommended user tests: ${compact(report.result.recommendedUserTests, 800)}`,
+    "",
+    "## STATE",
+    "",
+    `- Knowledge writes: ${compact(report.state.knowledgeWriteCount)}`,
+    `- Attention: ${compact(report.state.attentionDecision)}`,
+    `- trace states: ${compact(report.state.traceStates)}`,
+    "",
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
 async function runSignals(session, filterId, label) {
   const requestId = `${runId}-${label}`;
   const response = await session.request(`/api/signals?filterId=${encodeURIComponent(filterId)}`, {
@@ -468,6 +751,36 @@ async function runSignals(session, filterId, label) {
       knownInformation: "Do not use fixtures; use live public sources and keep evidence-bound conclusions.",
       informationGaps: "Which recent AI video tools or updates are important enough to affect testing priorities?",
       freshnessWindow: "7d",
+      sourceScope: "hybrid",
+    },
+  });
+  await delay(250);
+  return {
+    response,
+    summary: summarizeSignalResponse(response),
+    phases: phaseNamesFor(response.requestId || requestId),
+    lastPhase: lastPhaseFor(response.requestId || requestId),
+  };
+}
+
+async function runQualityResearch(session, filterId, query) {
+  const requestId = `${runId}-quality`;
+  const response = await session.request(`/api/signals?filterId=${encodeURIComponent(filterId)}`, {
+    method: "POST",
+    requestId,
+    body: {
+      filterId,
+      identity: "Signal Map quality acceptance reviewer",
+      industry: query,
+      focusAreas: query,
+      currentQuestions: query,
+      knownInformation: "Use only the authenticated test account state and live public evidence. Do not use fixtures or mocks.",
+      informationGaps: "What evidence-backed changes or opportunities should a user pay attention to?",
+      trackedEntities: "",
+      trackedEvents: "",
+      userJudgements: "",
+      evidenceHistory: "",
+      freshnessWindow: "30d",
       sourceScope: "hybrid",
     },
   });
@@ -585,6 +898,7 @@ async function writeReport() {
     totalStatus,
     generatedAt: new Date().toISOString(),
     durationMs: Date.now() - startedAt,
+    qualityMode: qualityQuery ? { enabled: true, query: qualityQuery } : { enabled: false },
     phases: phaseReports,
   };
   const markdown = [
@@ -608,8 +922,16 @@ async function writeReport() {
   ].join("\n");
   await writeFile(reportPathJson, `${JSON.stringify(report, null, 2)}\n`);
   await writeFile(reportPathMd, markdown);
+  let stepSummary = markdown;
+  if (qualityReport) {
+    const qualityMd = qualityMarkdown(qualityReport);
+    await writeFile(qualityReportPathJson, `${JSON.stringify(qualityReport, null, 2)}\n`);
+    await writeFile(qualityReportPathMd, qualityMd);
+    stepSummary = `${markdown}\n${qualityMd}`;
+    console.log(qualityMd);
+  }
   if (process.env.GITHUB_STEP_SUMMARY) {
-    await writeFile(process.env.GITHUB_STEP_SUMMARY, markdown);
+    await writeFile(process.env.GITHUB_STEP_SUMMARY, stepSummary);
   }
   console.log(markdown);
   if (totalStatus !== statuses.pass) process.exitCode = 1;
@@ -741,6 +1063,35 @@ async function main() {
         partial(phaseReports.statefulSecondRun, "Second run completed but readable comparison output was missing");
       } else {
         pass(phaseReports.statefulSecondRun);
+      }
+      if (qualityQuery) {
+        try {
+          const qualityFilter = `filter-${runId}-quality`;
+          await seedFilter(accountA.user.id, qualityFilter, `Agent quality report ${runId}`);
+          const qualityRun = await runQualityResearch(accountA, qualityFilter, qualityQuery);
+          const qualityRuns = await latestAgentRuns(accountA, qualityFilter);
+          qualityReport = buildQualityReport({ query: qualityQuery, signalRun: qualityRun, agentRuns: qualityRuns });
+          qualityReport.acceptanceStatus = qualityRun.summary.status === 200 ? statuses.pass : statuses.fail;
+          qualityReport.failureReason = qualityRun.summary.status === 200
+            ? null
+            : sanitize(qualityRun.summary.errorCode || qualityRun.summary.error || "quality research failed");
+          if (qualityRun.summary.status !== 200) process.exitCode = 1;
+        } catch (error) {
+          qualityReport = {
+            generatedAt: new Date().toISOString(),
+            mode: "quality_acceptance",
+            acceptanceStatus: statuses.fail,
+            query: { original: qualityQuery },
+            failureReason: sanitize(error instanceof Error ? error.message : error),
+            state: {
+              requestId: null,
+              httpStatus: null,
+              latencyMs: null,
+              lastPhase: "quality_acceptance",
+            },
+          };
+          process.exitCode = 1;
+        }
       }
       const logoutA = await accountA.request("/api/auth/logout", { method: "POST" });
       const logoutB = await accountB.request("/api/auth/logout", { method: "POST" });

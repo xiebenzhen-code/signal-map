@@ -1,7 +1,13 @@
 name: Signal Map Agent Loop E2E
 
 "on":
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      quality_query:
+        description: "Optional real research query for a redacted Agent quality report"
+        required: false
+        type: string
+        default: ""
 
 concurrency:
   group: signal-map-agent-loop-e2e
@@ -44,6 +50,7 @@ jobs:
       TRANSLATION_SERVICE_URL: ${{ secrets.TRANSLATION_SERVICE_URL }}
       TRANSLATION_FALLBACK_SERVICE_URL: ${{ secrets.TRANSLATION_FALLBACK_SERVICE_URL }}
       TRANSLATION_TARGET_LANGUAGE: ${{ secrets.TRANSLATION_TARGET_LANGUAGE }}
+      SIGNAL_MAP_QUALITY_QUERY: ${{ inputs.quality_query }}
 
     steps:
       - name: Checkout
@@ -77,4 +84,6 @@ jobs:
           path: |
             signal-map-agent-loop-e2e-report.json
             signal-map-agent-loop-e2e-report.md
+            signal-map-agent-quality-report.json
+            signal-map-agent-quality-report.md
           if-no-files-found: warn
