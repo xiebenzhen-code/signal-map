@@ -51,6 +51,7 @@ jobs:
       TRANSLATION_FALLBACK_SERVICE_URL: ${{ secrets.TRANSLATION_FALLBACK_SERVICE_URL }}
       TRANSLATION_TARGET_LANGUAGE: ${{ secrets.TRANSLATION_TARGET_LANGUAGE }}
       SIGNAL_MAP_QUALITY_QUERY: ${{ inputs.quality_query }}
+      SIGNAL_MAP_QUALITY_MODEL_REQUEST_TIMEOUT_MS: ${{ inputs.quality_query != '' && '6000' || '' }}
 
     steps:
       - name: Checkout

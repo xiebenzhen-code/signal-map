@@ -13,8 +13,13 @@ const origin = process.env.SIGNAL_MAP_ALLOWED_ORIGIN || baseUrl;
 const reportPathJson = "signal-map-agent-loop-e2e-report.json";
 const reportPathMd = "signal-map-agent-loop-e2e-report.md";
 const qualityQuery = (process.env.SIGNAL_MAP_QUALITY_QUERY || "").trim();
+const qualityModelRequestTimeoutMs = qualityQuery
+  ? (process.env.SIGNAL_MAP_QUALITY_MODEL_REQUEST_TIMEOUT_MS || "6000")
+  : "";
 const qualityReportPathJson = "signal-map-agent-quality-report.json";
 const qualityReportPathMd = "signal-map-agent-quality-report.md";
+const signalsDeadlineBudgetMs = 25_000;
+const minimumRetrievalBudgetMs = 4_000;
 
 const statuses = {
   pass: "PASS",
@@ -231,7 +236,7 @@ async function waitForHealth(timeoutMs = 15_000) {
   throw new Error(`Server health did not pass: ${lastError}`);
 }
 
-function startServer() {
+function startServer(envOverrides = {}) {
   if (serverProcess) throw new Error("Server already running");
   serverLogs.length = 0;
   serverProcess = spawn(process.execPath, ["dist-api/server.mjs"], {
@@ -239,6 +244,7 @@ function startServer() {
       ...process.env,
       PORT: String(port),
       SIGNAL_MAP_ALLOWED_ORIGIN: origin,
+      ...envOverrides,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -460,6 +466,8 @@ function phaseNamesFor(requestId) {
 function phaseTraceFor(requestId) {
   return tracesForRequest(requestId).map((entry) => ({
     phase: unavailable(entry.phase),
+    startedAt: unavailable(entry.startedAt),
+    finishedAt: unavailable(entry.finishedAt),
     success: entry.success !== false,
     itemCount: unavailable(entry.itemCount),
     errorCode: unavailable(entry.errorCode),
@@ -469,6 +477,68 @@ function phaseTraceFor(requestId) {
 
 function lastSuccessfulPhaseFromTrace(phaseTrace) {
   return [...phaseTrace].reverse().find((entry) => entry.success)?.phase || "unavailable";
+}
+
+function timestampMs(value) {
+  if (typeof value !== "string") return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function tracePhase(phaseTrace, phase) {
+  return phaseTrace.find((entry) => entry.phase === phase);
+}
+
+function durationBetween(startValue, endValue) {
+  const start = timestampMs(startValue);
+  const end = timestampMs(endValue);
+  if (start === null || end === null || end < start) return "unavailable";
+  return end - start;
+}
+
+function remainingDeadlineFrom(requestEntry, targetEntry) {
+  const start = timestampMs(requestEntry?.startedAt) ?? timestampMs(requestEntry?.finishedAt);
+  const target = timestampMs(targetEntry?.startedAt) ?? timestampMs(targetEntry?.finishedAt);
+  if (start === null || target === null || target < start) return "unavailable";
+  return Math.max(0, signalsDeadlineBudgetMs - (target - start));
+}
+
+function planningTimingDiagnostics(phaseTrace) {
+  const requestReceived = tracePhase(phaseTrace, "request_received");
+  const sourceSelectionStarted = tracePhase(phaseTrace, "source_selection_started");
+  const sourceSelectionFinished = tracePhase(phaseTrace, "source_selection_finished");
+  const searchStarted = tracePhase(phaseTrace, "search_started");
+  const agentFinished = [...phaseTrace].reverse().find((entry) => entry.phase === "agent_finished");
+  const preRetrievalEnd = searchStarted || agentFinished;
+  const preRetrievalWindowMs = sourceSelectionFinished && preRetrievalEnd
+    ? durationBetween(sourceSelectionFinished.finishedAt, preRetrievalEnd.startedAt)
+    : "unavailable";
+  return {
+    modelRequestTimeoutMs: qualityModelRequestTimeoutMs || unavailable(process.env.MODEL_REQUEST_TIMEOUT_MS) || "8000(default)",
+    signalsDeadlineBudgetMs,
+    minimumRetrievalBudgetMs,
+    createResearchPlan: {
+      startedAt: "unavailable",
+      finishedAt: "unavailable",
+      durationMs: "unavailable",
+    },
+    applyModelPlanning: {
+      startedAt: "unavailable",
+      finishedAt: "unavailable",
+      durationMs: "unavailable",
+    },
+    modelPlanningTimedOut: "unavailable",
+    fallbackToDeterministicPlan: "unavailable",
+    sourceSelectionDurationMs: unavailable(sourceSelectionFinished?.durationMs),
+    postSourceSelectionPreRetrievalWindowMs: unavailable(preRetrievalWindowMs),
+    remainingDeadlineMsBeforeRunResearchPipeline: remainingDeadlineFrom(requestReceived, preRetrievalEnd),
+    retrievalStarted: Boolean(searchStarted),
+    deadlineErrorCode: unavailable(agentFinished?.errorCode),
+    observabilityNote: "Function-level createResearchPlan/applyModelPlanning timings are unavailable without AgentRunner instrumentation; this harness reports the observable window between source selection and retrieval/deadline.",
+    sourceSelectionStartedAt: unavailable(sourceSelectionStarted?.startedAt),
+    sourceSelectionFinishedAt: unavailable(sourceSelectionFinished?.finishedAt),
+    preRetrievalEndedAt: unavailable(preRetrievalEnd?.startedAt || preRetrievalEnd?.finishedAt),
+  };
 }
 
 function summarizeSignalResponse(response) {
@@ -715,6 +785,7 @@ function emptyQualityReport(status, reason, state = {}) {
       sourceSelection: "unavailable",
       entitiesTopic: "unavailable",
     },
+    planning: planningTimingDiagnostics([]),
     retrieval: {
       retrievedCount: "unavailable",
       evaluatedCount: "unavailable",
@@ -767,7 +838,12 @@ function emptyQualityReport(status, reason, state = {}) {
 
 async function runQualityAcceptance(session) {
   if (!qualityQuery || qualityReport?.state?.requestId) return;
+  let restartedForQuality = false;
   try {
+    await stopServer();
+    startServer({ MODEL_REQUEST_TIMEOUT_MS: qualityModelRequestTimeoutMs });
+    restartedForQuality = true;
+    await waitForHealth();
     const qualityFilter = `filter-${runId}-quality`;
     await seedFilter(session.user.id, qualityFilter, `Agent quality report ${runId}`);
     const qualityRun = await runQualityResearch(session, qualityFilter, qualityQuery);
@@ -796,6 +872,22 @@ async function runQualityAcceptance(session) {
       { lastPhase: "quality_acceptance" },
     );
     process.exitCode = 1;
+  } finally {
+    if (restartedForQuality) {
+      try {
+        await stopServer();
+        startServer();
+        await waitForHealth();
+      } catch (error) {
+        const reason = `Quality server restore failed: ${sanitize(error instanceof Error ? error.message : error)}`;
+        if (qualityReport?.rawAvailability) {
+          qualityReport.rawAvailability.serverRestoreError = reason;
+        } else {
+          qualityReport = emptyQualityReport(statuses.fail, reason, { lastPhase: "quality_server_restore" });
+        }
+        process.exitCode = 1;
+      }
+    }
   }
 }
 
@@ -826,6 +918,7 @@ function buildQualityReport({ query, signalRun, agentRuns, secondRun }) {
   const sourcePreference = data.sourceProfile?.preferredSourceTypes
     || data.queryPlan?.allowedProviderIds
     || unique([data.queryPlan?.selectedSourceType, ...(data.queryPlan?.fallbackSourceTypes || [])]);
+  const planningTiming = planningTimingDiagnostics(phaseTrace);
   return {
     generatedAt: new Date().toISOString(),
     mode: "quality_acceptance",
@@ -844,6 +937,7 @@ function buildQualityReport({ query, signalRun, agentRuns, secondRun }) {
       }),
       entitiesTopic: unavailable(data.queryPlan?.resolvedEntities || data.queryPlan?.entities || data.queryPlan?.coreKeywords),
     },
+    planning: planningTiming,
     retrieval: {
       retrievedCount: unavailable(summary.retrievedCount ?? data.overview?.scanned ?? data.counts?.candidates),
       evaluatedCount: unavailable(summary.filteringDetails?.length),
@@ -961,6 +1055,22 @@ function qualityMarkdown(report) {
     `- search returned count: ${compact(report.retrieval.search, 1800)}`,
     `- detail fetch: ${compact(report.retrieval.detailFetch, 1200)}`,
     `- aggregation: ${compact(report.retrieval.aggregation, 1000)}`,
+    "",
+    "## PLANNING TIMING",
+    "",
+    `- quality MODEL_REQUEST_TIMEOUT_MS: ${compact(report.planning?.modelRequestTimeoutMs)}`,
+    `- /api/signals deadline budget: ${compact(report.planning?.signalsDeadlineBudgetMs)}ms`,
+    `- minimum retrieval budget: ${compact(report.planning?.minimumRetrievalBudgetMs)}ms`,
+    `- createResearchPlan: ${compact(report.planning?.createResearchPlan)}`,
+    `- applyModelPlanning: ${compact(report.planning?.applyModelPlanning)}`,
+    `- model planning timed out: ${compact(report.planning?.modelPlanningTimedOut)}`,
+    `- deterministic fallback used: ${compact(report.planning?.fallbackToDeterministicPlan)}`,
+    `- source selection duration: ${compact(report.planning?.sourceSelectionDurationMs)}ms`,
+    `- post-source-selection pre-retrieval window: ${compact(report.planning?.postSourceSelectionPreRetrievalWindowMs)}ms`,
+    `- remaining deadline before runResearchPipeline: ${compact(report.planning?.remainingDeadlineMsBeforeRunResearchPipeline)}ms`,
+    `- retrieval started: ${compact(report.planning?.retrievalStarted)}`,
+    `- deadline error code: ${compact(report.planning?.deadlineErrorCode)}`,
+    `- note: ${compact(report.planning?.observabilityNote, 500)}`,
     "",
     "## SOURCES",
     "",
@@ -1176,7 +1286,9 @@ async function writeReport() {
     totalStatus,
     generatedAt: new Date().toISOString(),
     durationMs: Date.now() - startedAt,
-    qualityMode: qualityQuery ? { enabled: true, query: qualityQuery } : { enabled: false },
+    qualityMode: qualityQuery
+      ? { enabled: true, query: qualityQuery, modelRequestTimeoutMs: qualityModelRequestTimeoutMs }
+      : { enabled: false },
     phases: phaseReports,
   };
   const markdown = [
