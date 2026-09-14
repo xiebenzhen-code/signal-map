@@ -26,8 +26,8 @@ const trace = [
     },
   },
   { phase: "search_finished", round: 1, attemptId: "round-1-primary", attemptType: "primary", itemCount: 12, durationMs: 10, diagnostic: { providerResponseCount: 12, providerOutcomes: [] } },
-  { phase: "detail_fetch_finished", round: 1, attemptId: "round-1-primary", attemptType: "primary", itemCount: 5, durationMs: 5 },
-  { phase: "aggregation_finished", round: 1, attemptId: "round-1-primary", attemptType: "primary", itemCount: 2, durationMs: 1 },
+  { phase: "detail_fetch_finished", round: 1, attemptId: "round-1-primary", attemptType: "primary", itemCount: 5, durationMs: 5, diagnostic: { detailAttempted: 5, detailSucceeded: 5, detailFailed: 0 } },
+  { phase: "aggregation_finished", round: 1, attemptId: "round-1-primary", attemptType: "primary", itemCount: 2, durationMs: 1, diagnostic: { inputCount: 5, deduplicatedCount: 2 } },
   { phase: "evidence_preservation_finished", round: 1, attemptId: "round-1-primary", attemptType: "primary", diagnostic: { roundEvidenceCount: 2, cumulativeEvidenceCount: 2, producedEvidenceCount: 2, acceptedEvidenceCount: 0, rejectedEvidenceCount: 2 } },
   { phase: "plan_finished", round: 1, attemptId: "round-1-fallback", attemptType: "fallback", diagnostic: { fallback: true, agentGeneratedQueries: ["verify"], selectedSourceType: "PRIMARY" } },
   { phase: "search_started", round: 1, attemptId: "round-1-fallback", attemptType: "fallback", diagnostic: { pipelineActualQueries: ["verify"], providerPlan: [{ providerId: "primary-web-search", callAttempted: true }] } },
@@ -40,6 +40,10 @@ test("quality report groups primary and fallback attempts without mixing counts"
   assert.equal(attempts.length, 2);
   assert.equal(attempts[0].search.returnedCount, 12);
   assert.equal(attempts[0].detailFetch.successCount, 5);
+  assert.equal(attempts[0].detailFetch.attemptedCount, 5);
+  assert.equal(attempts[0].detailFetch.failedCount, 0);
+  assert.equal(attempts[0].aggregation.inputCount, 5);
+  assert.equal(attempts[0].aggregation.deduplicatedCount, 2);
   assert.equal(attempts[0].evidence.preservation.cumulativeEvidenceCount, 2);
   assert.equal(attempts[1].search.returnedCount, 0);
   assert.equal(attempts[1].evidence.preservation.cumulativeEvidenceCount, 2);
@@ -47,7 +51,7 @@ test("quality report groups primary and fallback attempts without mixing counts"
 
 test("quality acceptance requires final evidence and signal output", () => {
   assert.equal(qualityAcceptance({ status: 200, signalCount: 0, evidenceCount: 0 }, {
-    evidenceDiagnostics: { producedEvidenceCount: 2, acceptedEvidenceCount: 0, rejectedEvidenceCount: 2, rejectedReason: { insufficientVerification: 2 } },
+    evidenceDiagnostics: { producedEvidenceCount: 2, acceptedEvidenceCount: 0, rejectedEvidenceCount: 2, rejectedReason: { insufficientVerification: 2 }, rejectionAccountingComplete: true },
   }).status, "PARTIAL");
   assert.equal(qualityAcceptance({ status: 200, signalCount: 0, evidenceCount: 0 }, {
     evidenceDiagnostics: { producedEvidenceCount: 2, acceptedEvidenceCount: 0, rejectedEvidenceCount: 0, rejectedReason: "unavailable" },
@@ -55,6 +59,18 @@ test("quality acceptance requires final evidence and signal output", () => {
   assert.equal(qualityAcceptance({ status: 200, signalCount: 1, evidenceCount: 1 }, {
     evidenceDiagnostics: { acceptedEvidenceCount: 1 },
   }).status, "PASS");
+});
+
+test("quality acceptance fails when rejection reasons do not cover rejected evidence", () => {
+  assert.equal(qualityAcceptance({ status: 200, signalCount: 0, evidenceCount: 0 }, {
+    evidenceDiagnostics: {
+      producedEvidenceCount: 11,
+      acceptedEvidenceCount: 0,
+      rejectedEvidenceCount: 11,
+      rejectedReason: "unavailable",
+      rejectionAccountingComplete: false,
+    },
+  }).status, "FAIL");
 });
 
 test("markdown uses the same request and final counts", () => {

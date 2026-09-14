@@ -536,11 +536,15 @@ function attemptDiagnostics(phaseTrace) {
           durationMs: searchFinished?.durationMs ?? "unavailable",
         },
         detailFetch: {
-          successCount: detailFinished?.itemCount ?? "unavailable",
+          attemptedCount: detailFinished?.diagnostic?.detailAttempted ?? "unavailable",
+          successCount: detailFinished?.diagnostic?.detailSucceeded ?? detailFinished?.itemCount ?? "unavailable",
+          failedCount: detailFinished?.diagnostic?.detailFailed ?? "unavailable",
           durationMs: detailFinished?.durationMs ?? "unavailable",
         },
         aggregation: {
+          inputCount: aggregationFinished?.diagnostic?.inputCount ?? "unavailable",
           clusteredCount: aggregationFinished?.itemCount ?? "unavailable",
+          deduplicatedCount: aggregationFinished?.diagnostic?.deduplicatedCount ?? "unavailable",
           durationMs: aggregationFinished?.durationMs ?? "unavailable",
         },
         evidence: {
@@ -823,19 +827,25 @@ function searchDiagnostics(data, phaseTrace) {
 
 function detailFetchDiagnostics(data, attempts = []) {
   const detail = data.filteringSummary?.detailEnrichment || {};
+  const attemptValue = (field) => {
+    const values = attempts.map((attempt) => Number(attempt.detailFetch[field])).filter(Number.isFinite);
+    return values.length ? values.reduce((total, value) => total + value, 0) : undefined;
+  };
   return {
-    attemptedCount: unavailable(detail.detailAttempted ?? sumDiagnostics(data.sourceDiagnostics, "detailAttempted")),
-    successCount: unavailable(detail.detailSucceeded ?? sumDiagnostics(data.sourceDiagnostics, "detailSucceeded")),
-    failedCount: unavailable(detail.detailFailed ?? sumDiagnostics(data.sourceDiagnostics, "detailFailed")),
+    attemptedCount: unavailable(attemptValue("attemptedCount") ?? detail.detailAttempted ?? sumDiagnostics(data.sourceDiagnostics, "detailAttempted")),
+    successCount: unavailable(attemptValue("successCount") ?? detail.detailSucceeded ?? sumDiagnostics(data.sourceDiagnostics, "detailSucceeded")),
+    failedCount: unavailable(attemptValue("failedCount") ?? detail.detailFailed ?? sumDiagnostics(data.sourceDiagnostics, "detailFailed")),
     stillInsufficient: unavailable(detail.stillInsufficient),
     byAttempt: attempts.length
       ? attempts.map((attempt) => ({
           attemptId: attempt.attemptId,
           round: attempt.round,
           attemptType: attempt.attemptType,
+          attemptedCount: attempt.detailFetch.attemptedCount,
           successCount: attempt.detailFetch.successCount,
+          failedCount: attempt.detailFetch.failedCount,
           durationMs: attempt.detailFetch.durationMs,
-        }))
+      }))
       : "unavailable",
     byProvider: Array.isArray(data.sourceDiagnostics)
       ? data.sourceDiagnostics.map((item) => ({
@@ -850,16 +860,22 @@ function detailFetchDiagnostics(data, attempts = []) {
 }
 
 function aggregationDiagnostics(data, summary, attempts = []) {
+  const attemptValue = (field) => {
+    const values = attempts.map((attempt) => Number(attempt.aggregation[field])).filter(Number.isFinite);
+    return values.length ? values.reduce((total, value) => total + value, 0) : undefined;
+  };
   return {
-    inputCount: unavailable(summary.retrievedCount ?? data.overview?.scanned ?? data.counts?.candidates),
-    clusteredCount: unavailable(summary.clusteredCount ?? data.overview?.events),
-    deduplicatedCount: unavailable(data.overview?.deduplicated),
+    inputCount: unavailable(attemptValue("inputCount") ?? summary.retrievedCount ?? data.overview?.scanned ?? data.counts?.candidates),
+    clusteredCount: unavailable(attemptValue("clusteredCount") ?? summary.clusteredCount ?? data.overview?.events),
+    deduplicatedCount: unavailable(attemptValue("deduplicatedCount") ?? data.overview?.deduplicated),
     byAttempt: attempts.length
       ? attempts.map((attempt) => ({
           attemptId: attempt.attemptId,
           round: attempt.round,
           attemptType: attempt.attemptType,
+          inputCount: attempt.aggregation.inputCount,
           clusteredCount: attempt.aggregation.clusteredCount,
+          deduplicatedCount: attempt.aggregation.deduplicatedCount,
           durationMs: attempt.aggregation.durationMs,
         }))
       : "unavailable",
@@ -888,15 +904,24 @@ function preservationDiagnostics(phaseTrace) {
     .filter((entry) => entry.phase === "evidence_preservation_finished")
     .map((entry) => entry.diagnostic || {});
   const latest = preservation.at(-1) || {};
+  const cumulative = preservation
+    .map((entry) => Number(entry.cumulativeEvidenceCount))
+    .filter(Number.isFinite);
+  const carriedForward = preservation
+    .map((entry) => Number(entry.carriedForwardEvidenceCount))
+    .filter(Number.isFinite);
+  const finalCounts = preservation
+    .map((entry) => Number(entry.finalEvidenceCount))
+    .filter(Number.isFinite);
   return {
     roundEvidenceCount: unavailable(latest.roundEvidenceCount),
     producedEvidenceCount: unavailable(latest.producedEvidenceCount),
-    cumulativeEvidenceCount: unavailable(latest.cumulativeEvidenceCount),
-    carriedForwardEvidenceCount: unavailable(latest.carriedForwardEvidenceCount),
+    cumulativeEvidenceCount: unavailable(cumulative.length ? Math.max(...cumulative) : latest.cumulativeEvidenceCount),
+    carriedForwardEvidenceCount: unavailable(carriedForward.length ? Math.max(...carriedForward) : latest.carriedForwardEvidenceCount),
     acceptedEvidenceCount: unavailable(latest.acceptedEvidenceCount),
     rejectedEvidenceCount: unavailable(latest.rejectedEvidenceCount),
     verificationOutcome: unavailable(latest.verificationOutcome),
-    finalEvidenceCount: unavailable(latest.finalEvidenceCount),
+    finalEvidenceCount: unavailable(finalCounts.length ? Math.max(...finalCounts) : latest.finalEvidenceCount),
     rejectionReason: unavailable(latest.rejectionReason),
     perRound: preservation.length ? preservation : "unavailable",
   };
@@ -909,25 +934,50 @@ function evidenceDiagnostics(data, summary, signals, latestRun, phaseTrace) {
   const hasPreservation = Array.isArray(preservation.perRound);
   const latestPreservation = hasPreservation ? preservation.perRound.at(-1) : {};
   const attempts = attemptDiagnostics(phaseTrace);
+  const producedByAttempt = attempts
+    .map((attempt) => Number(attempt.evidence.preservation?.producedEvidenceCount))
+    .filter(Number.isFinite);
+  const rejectedByAttempt = attempts
+    .map((attempt) => Number(attempt.evidence.preservation?.rejectedEvidenceCount))
+    .filter(Number.isFinite);
+  const acceptedByAttempt = attempts
+    .map((attempt) => Number(attempt.evidence.preservation?.acceptedEvidenceCount))
+    .filter(Number.isFinite);
+  const producedEvidenceCount = Number.isFinite(Number(accounting.producedEvidenceCount))
+    ? Number(accounting.producedEvidenceCount)
+    : (producedByAttempt.length ? Math.max(...producedByAttempt) : undefined);
+  const rejectedEvidenceCount = Number.isFinite(Number(accounting.rejectedEvidenceCount))
+    ? Number(accounting.rejectedEvidenceCount)
+    : (rejectedByAttempt.length ? Math.max(...rejectedByAttempt) : undefined);
+  const acceptedEvidenceCount = Number.isFinite(Number(accounting.acceptedEvidenceCount))
+    ? Number(accounting.acceptedEvidenceCount)
+    : (acceptedByAttempt.length ? Math.max(...acceptedByAttempt) : undefined);
+  const observedReasons = hasPreservation ? latestPreservation.rejectionReason : accounting.rejectionReasons;
+  const reasonTotal = observedReasons && typeof observedReasons === "object"
+    ? Object.values(observedReasons).reduce((sum, value) => sum + (Number.isFinite(Number(value)) ? Number(value) : 0), 0)
+    : undefined;
+  const rejectionAccountingComplete = Number.isFinite(rejectedEvidenceCount)
+    && Number.isFinite(reasonTotal)
+    && rejectedEvidenceCount === reasonTotal;
   return {
     candidateCount: unavailable(summary.clusteredCount ?? summary.filteringDetails?.length ?? data.overview?.events),
     discoveredCandidateCount: unavailable(accounting.discoveredCandidateCount ?? summary.retrievedCount ?? data.overview?.scanned),
-    producedEvidenceCount: unavailable(accounting.producedEvidenceCount ?? (hasPreservation ? latestPreservation.producedEvidenceCount : undefined)),
-    cumulativeEvidenceCount: unavailable(hasPreservation ? latestPreservation.cumulativeEvidenceCount : accounting.cumulativeEvidenceCount),
+    producedEvidenceCount: unavailable(producedEvidenceCount),
+    cumulativeEvidenceCount: unavailable(hasPreservation ? preservation.cumulativeEvidenceCount : accounting.cumulativeEvidenceCount),
     evaluatedEvidenceCount: unavailable(hasPreservation ? latestPreservation.evaluatedEvidenceCount : accounting.evaluatedEvidenceCount),
-    acceptedEvidenceCount: unavailable(hasPreservation ? latestPreservation.acceptedEvidenceCount : (accounting.acceptedEvidenceCount ?? (preservation.acceptedEvidenceCount === "unavailable"
-      ? latestRun?.evidenceCount ?? accepted.length
-      : preservation.acceptedEvidenceCount))),
-    rejectedEvidenceCount: unavailable(hasPreservation ? latestPreservation.rejectedEvidenceCount : (accounting.rejectedEvidenceCount ?? preservation.rejectedEvidenceCount)),
-    finalEvidenceCount: unavailable(hasPreservation ? latestPreservation.finalEvidenceCount : (accounting.finalEvidenceCount ?? preservation.finalEvidenceCount)),
-    rejectedReason: unavailable((hasPreservation ? latestPreservation.rejectionReason : accounting.rejectionReasons) || summary.filteredReasons || summary.summaryText),
+    acceptedEvidenceCount: unavailable(acceptedEvidenceCount ?? (preservation.acceptedEvidenceCount === "unavailable" ? latestRun?.evidenceCount ?? accepted.length : preservation.acceptedEvidenceCount)),
+    rejectedEvidenceCount: unavailable(rejectedEvidenceCount),
+    finalEvidenceCount: unavailable(hasPreservation ? preservation.finalEvidenceCount : (accounting.finalEvidenceCount ?? preservation.finalEvidenceCount)),
+    rejectedReason: rejectionAccountingComplete ? observedReasons : "unavailable",
+    rejectionReasonObserved: unavailable(observedReasons),
+    rejectionAccountingComplete,
     run: {
-      cumulativeEvidenceCount: unavailable(hasPreservation ? latestPreservation.cumulativeEvidenceCount : accounting.cumulativeEvidenceCount),
-      carriedForwardEvidenceCount: unavailable(hasPreservation ? latestPreservation.carriedForwardEvidenceCount : undefined),
+      cumulativeEvidenceCount: unavailable(hasPreservation ? preservation.cumulativeEvidenceCount : accounting.cumulativeEvidenceCount),
+      carriedForwardEvidenceCount: unavailable(hasPreservation ? preservation.carriedForwardEvidenceCount : undefined),
     },
     final: {
       acceptedEvidenceCount: unavailable(hasPreservation ? latestPreservation.acceptedEvidenceCount : accounting.acceptedEvidenceCount),
-      finalEvidenceCount: unavailable(hasPreservation ? latestPreservation.finalEvidenceCount : accounting.finalEvidenceCount),
+      finalEvidenceCount: unavailable(hasPreservation ? preservation.finalEvidenceCount : accounting.finalEvidenceCount),
     },
     byAttempt: attempts.length
       ? attempts.map((attempt) => ({
@@ -978,7 +1028,8 @@ function qualityAcceptance(summary, report) {
   const hasCompleteRejectionAccounting = Number.isFinite(produced)
     && Number.isFinite(rejected)
     && rejected === produced
-    && accounting.rejectedReason !== "unavailable";
+    && accounting.rejectedReason !== "unavailable"
+    && accounting.rejectionAccountingComplete === true;
   if (summary.signalCount > 0 && summary.evidenceCount > 0 && (!Number.isFinite(accepted) || accepted > 0)) {
     return { status: statuses.pass, reason: null };
   }
@@ -1383,10 +1434,12 @@ function qualityMarkdown(report) {
     `- carriedForwardEvidenceCount: ${compact(report.evidenceDiagnostics.preservation?.carriedForwardEvidenceCount)}`,
     `- acceptedEvidenceCount: ${compact(report.evidenceDiagnostics.acceptedEvidenceCount)}`,
     `- rejectedEvidenceCount: ${compact(report.evidenceDiagnostics.rejectedEvidenceCount)}`,
+    `- rejectionAccountingComplete: ${compact(report.evidenceDiagnostics.rejectionAccountingComplete)}`,
     `- verificationOutcome: ${compact(report.evidenceDiagnostics.preservation?.verificationOutcome)}`,
     `- finalEvidenceCount: ${compact(report.evidenceDiagnostics.finalEvidenceCount)}`,
     `- rejectionReason: ${compact(report.evidenceDiagnostics.preservation?.rejectionReason, 1000)}`,
     `- rejected reason: ${compact(report.evidenceDiagnostics.rejectedReason, 1000)}`,
+    `- observed rejection reason: ${compact(report.evidenceDiagnostics.rejectionReasonObserved, 1000)}`,
     `- run cumulative: ${compact(report.evidenceDiagnostics.run)}`,
     `- final: ${compact(report.evidenceDiagnostics.final)}`,
     `- by attempt: ${compact(report.evidenceDiagnostics.byAttempt, 2200)}`,

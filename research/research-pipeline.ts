@@ -1377,7 +1377,12 @@ export async function runResearchPipeline(
     failures,
     Math.min(12000, Math.max(0, remainingMs() - 7000)),
   );
-  markPhase("detail_fetch_finished", true, detailEnrichment.detailSucceeded);
+  markPhase("detail_fetch_finished", true, detailEnrichment.detailSucceeded, undefined, {
+    detailAttempted: detailEnrichment.detailAttempted,
+    detailSucceeded: detailEnrichment.detailSucceeded,
+    detailFailed: detailEnrichment.detailFailed,
+    stillInsufficient: detailEnrichment.stillInsufficient,
+  });
   markPhase("aggregation_started");
   await emit({
     stage: "deduplication",
@@ -1385,7 +1390,11 @@ export async function runResearchPipeline(
     counts,
   });
   const eventClusters = clusterEvents(candidates);
-  markPhase("aggregation_finished", true, eventClusters.length);
+  markPhase("aggregation_finished", true, eventClusters.length, undefined, {
+    inputCount: candidates.length,
+    clusteredCount: eventClusters.length,
+    deduplicatedCount: eventClusters.length,
+  });
   await emit({
     stage: "clustering",
     label: `事件聚合完成 · ${eventClusters.length} 个独立事件`,
