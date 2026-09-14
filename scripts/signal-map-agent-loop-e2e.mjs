@@ -795,12 +795,28 @@ function filteringDiagnostics(data, summary, signals) {
   };
 }
 
-function evidenceDiagnostics(data, summary, signals, latestRun) {
+function preservationDiagnostics(phaseTrace) {
+  const preservation = phaseTrace
+    .filter((entry) => entry.phase === "evidence_preservation_finished")
+    .map((entry) => entry.diagnostic || {});
+  const latest = preservation.at(-1) || {};
+  return {
+    roundEvidenceCount: unavailable(latest.roundEvidenceCount),
+    cumulativeEvidenceCount: unavailable(latest.cumulativeEvidenceCount),
+    carriedForwardEvidenceCount: unavailable(latest.carriedForwardEvidenceCount),
+    verificationOutcome: unavailable(latest.verificationOutcome),
+    finalEvidenceCount: unavailable(latest.finalEvidenceCount),
+    perRound: unavailable(preservation),
+  };
+}
+
+function evidenceDiagnostics(data, summary, signals, latestRun, phaseTrace) {
   const accepted = evidenceItems(signals);
   return {
     candidateCount: unavailable(summary.clusteredCount ?? summary.filteringDetails?.length ?? data.overview?.events),
     acceptedEvidenceCount: unavailable(latestRun?.evidenceCount ?? accepted.length),
     rejectedReason: unavailable(summary.filteredReasons || summary.summaryText),
+    preservation: preservationDiagnostics(phaseTrace),
     byDisplayedSignal: signals.map((signal) => ({
       title: unavailable(signal.title),
       claimCount: unavailable(Array.isArray(signal.claims) ? signal.claims.length : undefined),
@@ -1045,7 +1061,7 @@ function buildQualityReport({ query, signalRun, agentRuns, secondRun }) {
       evaluation: filteringDiagnostics(data, summary, signals),
       sampleFilteredResults: filteredDetails,
     },
-    evidenceDiagnostics: evidenceDiagnostics(data, summary, signals, latestRun),
+    evidenceDiagnostics: evidenceDiagnostics(data, summary, signals, latestRun, phaseTrace),
     evidence: evidenceItems(signals).slice(0, 20).map((item) => ({
       signal: unavailable(item.signal),
       claim: unavailable(item.claim),
@@ -1187,6 +1203,11 @@ function qualityMarkdown(report) {
     "## EVIDENCE DIAGNOSTICS",
     "",
     `- candidate / accepted: ${compact(report.evidenceDiagnostics.candidateCount)} / ${compact(report.evidenceDiagnostics.acceptedEvidenceCount)}`,
+    `- roundEvidenceCount: ${compact(report.evidenceDiagnostics.preservation?.roundEvidenceCount)}`,
+    `- cumulativeEvidenceCount: ${compact(report.evidenceDiagnostics.preservation?.cumulativeEvidenceCount)}`,
+    `- carriedForwardEvidenceCount: ${compact(report.evidenceDiagnostics.preservation?.carriedForwardEvidenceCount)}`,
+    `- verificationOutcome: ${compact(report.evidenceDiagnostics.preservation?.verificationOutcome)}`,
+    `- finalEvidenceCount: ${compact(report.evidenceDiagnostics.preservation?.finalEvidenceCount)}`,
     `- rejected reason: ${compact(report.evidenceDiagnostics.rejectedReason, 1000)}`,
     `- by displayed signal: ${compact(report.evidenceDiagnostics.byDisplayedSignal, 1200)}`,
     "",

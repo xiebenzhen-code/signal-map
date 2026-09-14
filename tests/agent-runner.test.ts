@@ -36,6 +36,33 @@ function response(signals: ResearchSignal[]): ResearchResponse {
   };
 }
 
+function evidenceSignal(overrides: Partial<ResearchSignal> = {}): ResearchSignal {
+  const base = signal(overrides);
+  return {
+    ...base,
+    claims: overrides.claims ?? [{
+      claimText: base.title,
+      sourceUrl: base.sourceUrl,
+      publisher: base.publisher,
+      publishedAt: base.publishedAt,
+      sourceType: base.sourceType,
+      sourceTier: base.sourceTier,
+      evidenceSnippet: base.summary,
+      verificationStatus: base.verificationStatus,
+      contentType: base.informationType === "SIGNAL" ? "SIGNAL" : "FACT",
+      independentEvidenceCount: base.independentEvidenceCount,
+      evidenceSources: [],
+    }],
+    sources: overrides.sources ?? [{
+      sourceUrl: base.sourceUrl,
+      publisher: base.publisher,
+      publishedAt: base.publishedAt,
+      sourceType: base.sourceType,
+      sourceTier: base.sourceTier,
+    }],
+  };
+}
+
 const context = { authenticatedUserId: "guest-alpha", filterId: "filter-agent" };
 
 test("stops after one round when reliable evidence is sufficient", async () => {
@@ -72,6 +99,83 @@ test("CONTINUE persists evidence only and delays formal attention", async () => 
   assert.equal(repository.listPersonalKnowledge(context).length, 0);
   assert.equal(result.steps.filter((step) => step.state === "ATTENTION").length, 1);
   assert.deepEqual(result.attention, []);
+});
+
+test("multi-round research preserves round one evidence when round two has zero results", async () => {
+  let round = 0;
+  const result = await runAgent({
+    input,
+    maxRounds: 2,
+    research: async () => {
+      round += 1;
+      return round === 1
+        ? response([evidenceSignal({ sourceType: "social", sourceTier: "C", informationType: "SIGNAL", verificationStatus: "unverified", attentionDecision: "WORTH_WATCHING" })])
+        : response([]);
+    },
+  });
+
+  assert.equal(result.response?.signals.length, 1);
+  assert.equal(result.response?.signals.flatMap((item) => item.claims).length, 1);
+  assert.equal(result.evaluation.informationGain, 1);
+});
+
+test("multi-round research preserves evidence when later provider throws", async () => {
+  let round = 0;
+  const result = await runAgent({
+    input,
+    maxRounds: 2,
+    research: async () => {
+      round += 1;
+      if (round === 1) {
+        return response([evidenceSignal({ sourceType: "social", sourceTier: "C", informationType: "SIGNAL", verificationStatus: "unverified", attentionDecision: "WORTH_WATCHING" })]);
+      }
+      throw Object.assign(new Error("provider unavailable"), { code: "PROVIDER_UNAVAILABLE" });
+    },
+  });
+
+  assert.notEqual(result.status, "failed");
+  assert.equal(result.response?.signals.length, 1);
+  assert.equal(result.response?.signals.flatMap((item) => item.claims).length, 1);
+});
+
+test("verification of the same evidence updates metadata without duplicate accumulation", async () => {
+  let round = 0;
+  const sameSource = "https://example.com/same-evidence";
+  const result = await runAgent({
+    input,
+    maxRounds: 2,
+    research: async () => {
+      round += 1;
+      return round === 1
+        ? response([evidenceSignal({
+            id: "same-signal",
+            sourceUrl: sameSource,
+            sourceType: "social",
+            sourceTier: "C",
+            informationType: "SIGNAL",
+            verificationStatus: "unverified",
+            reliabilityScore: 35,
+            confidence: 40,
+            attentionDecision: "WORTH_WATCHING",
+          })])
+        : response([evidenceSignal({
+            id: "same-signal-verified",
+            sourceUrl: sameSource,
+            sourceType: "primary",
+            sourceTier: "S",
+            informationType: "FACT",
+            verificationStatus: "verified",
+            reliabilityScore: 92,
+            confidence: 92,
+          })]);
+    },
+  });
+
+  assert.equal(result.response?.signals.length, 1);
+  assert.equal(result.response?.signals[0]?.claims.length, 1);
+  assert.equal(result.response?.signals[0]?.verificationStatus, "verified");
+  assert.equal(result.response?.signals[0]?.claims[0]?.verificationStatus, "verified");
+  assert.equal(result.response?.signals[0]?.reliabilityScore, 92);
 });
 
 test("partially verified evidence is not committed while policy continues", async () => {

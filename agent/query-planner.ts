@@ -9,6 +9,24 @@ function appendLines(existing: string, values: string[]) {
   return [existing, ...values].map((value) => value.trim()).filter(Boolean).join("\n");
 }
 
+function normalizeText(value: string) {
+  return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
+function joinDistinctSegments(values: string[]) {
+  const segments: string[] = [];
+  for (const value of values.map((item) => item.trim()).filter(Boolean)) {
+    const normalized = normalizeText(value);
+    if (!normalized) continue;
+    if (segments.some((segment) => {
+      const existing = normalizeText(segment);
+      return existing === normalized || existing.includes(normalized) || normalized.includes(existing);
+    })) continue;
+    segments.push(value);
+  }
+  return segments.join(" ");
+}
+
 export function createResearchPlan(
   input: ResearchInput,
   round: number,
@@ -28,7 +46,7 @@ export function createResearchPlan(
   const question = input.currentQuestions?.trim() || "";
   const subject = (question && planned.resolvedEntities?.some((entity) => question.toLocaleLowerCase().includes(entity.canonicalEntity.toLocaleLowerCase()))
     ? question
-    : [canonicalSubject, question].filter(Boolean).join(" ")).trim();
+    : joinDistinctSegments([canonicalSubject, question])).trim();
   const strategyQueries: Record<Exclude<ResearchStrategy, "STOP">, string[]> = {
     INITIAL: [`${subject} recent changes`, `${subject} official documentation`, `${subject} release notes`],
     REFRESH: [`${subject} latest update`, `${subject} official announcement`, `${subject} recent release notes`],

@@ -137,3 +137,16 @@ Rules:
 - Minimal Fix: For `INITIAL` research with no resolved entity and an OFFICIAL-first profile, select a discovery-capable first source while retaining OFFICIAL / PRIMARY as verification sources after candidates exist.
 - Re-test Result: Local SourceSelector regression now verifies broad no-entity PRODUCT_UPDATE is not OFFICIAL-only, explicit Runway update can still prefer OFFICIAL, discovered entities can route to OFFICIAL / PRIMARY verification, and Agent Plan → Retrieval contract tests remain passing.
 - Status: PASS
+
+## 2026-09-14 — Multi-round Evidence preservation
+
+- Date: 2026-09-14
+- Test / Run ID: Local AgentRunner cumulative evidence regression
+- Commit SHA: same commit as this record
+- Layer: AgentRunner / multi-round evidence lifecycle
+- Symptom / Failure: Quality E2E round 1 produced discovery evidence, but round 2 verification returned zero results / upstream failure; final HTTP response was `200` with `signalCount=0` and `evidenceCount=0`.
+- Evidence: Trace showed round 1 search/detail/aggregation/evidence succeeded, then round 2 `PRIMARY` search returned zero results with provider failure; final acceptance stayed `PARTIAL`.
+- Root Cause: `runAgent` replaced the run response with each latest round response. Later empty verification responses could therefore overwrite previously collected evidence before final evaluation and response generation.
+- Minimal Fix: Keep a run-level cumulative response, merge each round's signals/claims/sources by stable source identity, update verification metadata for duplicate evidence, and evaluate / return / formally persist from cumulative evidence while intermediate provenance persistence uses only the current round.
+- Re-test Result: Targeted tests now verify round 1 evidence survives round 2 zero results, later provider errors do not clear existing evidence, duplicate verification updates metadata without double counting, and final evaluation uses cumulative evidence.
+- Status: PASS

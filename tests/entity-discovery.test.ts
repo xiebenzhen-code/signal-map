@@ -71,6 +71,26 @@ test("quality harness scaffolding does not pollute query entities or agent queri
   assert.equal(/Signal Map|What evidence|Use only|Do not/.test(queryText), false);
 });
 
+test("agent query subject does not duplicate the same user question", () => {
+  const question = "最近有什么值得测试的 AI 视频工具？";
+  const plan = createResearchPlan({
+    identity: "researcher",
+    industry: question,
+    focusAreas: question,
+    currentQuestions: question,
+    knownInformation: "",
+    informationGaps: "",
+    trackedEntities: "",
+    trackedEvents: "",
+    userJudgements: "",
+    evidenceHistory: "",
+    freshnessWindow: "30d",
+  }, 1, 5, [], "INITIAL");
+  const repeated = `${question} ${question}`;
+
+  assert.equal(plan.queries.some((query) => query.includes(repeated)), false);
+});
+
 test("valid company and product names remain entity candidates", () => {
   const plan = planQuery({
     identity: "researcher",
