@@ -138,6 +138,83 @@ test("multi-round research preserves evidence when later provider throws", async
   assert.equal(result.response?.signals.flatMap((item) => item.claims).length, 1);
 });
 
+test("cumulative evidence completes gracefully when next round planning budget is unsafe", async () => {
+  let calls = 0;
+  const phases: Array<Parameters<NonNullable<Parameters<typeof runAgent>[0]["onPhase"]>>[0]> = [];
+  const result = await runAgent({
+    input,
+    maxRounds: 2,
+    deadlineAt: Date.now() + 8500,
+    onPhase: (event) => phases.push(event),
+    research: async () => {
+      calls += 1;
+      return response([evidenceSignal({
+        sourceType: "social",
+        sourceTier: "C",
+        informationType: "SIGNAL",
+        verificationStatus: "unverified",
+        attentionDecision: "WORTH_WATCHING",
+      })]);
+    },
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(result.status, "needs_more_evidence");
+  assert.equal(result.response?.signals.flatMap((item) => item.claims).length, 1);
+  assert.ok(phases.some((event) =>
+    event.phase === "budget_checked" &&
+    event.diagnostic?.skippedNextRoundDueToBudget === true &&
+    event.diagnostic?.cumulativeEvidenceCount === 1));
+});
+
+test("planning WORKER_DEADLINE after evidence returns cumulative result", async () => {
+  let calls = 0;
+  const result = await runAgent({
+    input,
+    maxRounds: 2,
+    deadlineAt: Date.now() + 30000,
+    modelAdapter: {
+      status: "configured",
+      async planResearch(request) {
+        if (request.round === 2) throw Object.assign(new Error("planning deadline"), { code: "WORKER_DEADLINE" });
+        return { status: "not_configured" };
+      },
+    },
+    research: async () => {
+      calls += 1;
+      return response([evidenceSignal({
+        sourceType: "social",
+        sourceTier: "C",
+        informationType: "SIGNAL",
+        verificationStatus: "unverified",
+        attentionDecision: "WORTH_WATCHING",
+      })]);
+    },
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(result.status, "needs_more_evidence");
+  assert.equal(result.response?.signals.length, 1);
+  assert.equal(result.response?.signals.flatMap((item) => item.claims).length, 1);
+});
+
+test("deadline without cumulative evidence does not fabricate a response", async () => {
+  let calls = 0;
+  const result = await runAgent({
+    input,
+    maxRounds: 2,
+    deadlineAt: Date.now() + 1000,
+    research: async () => {
+      calls += 1;
+      return response([evidenceSignal()]);
+    },
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.status, "failed");
+  assert.equal(result.response, undefined);
+});
+
 test("verification of the same evidence updates metadata without duplicate accumulation", async () => {
   let round = 0;
   const sameSource = "https://example.com/same-evidence";

@@ -40,10 +40,14 @@ function topStackFrame(error: unknown) {
   return frame ? sanitizeTraceText(frame) : undefined;
 }
 
-export function summarizeAgentFailure(error: unknown, failureKind: "throw_exception" | "failure_result" | "empty_response") {
+export function summarizeAgentFailure(
+  error: unknown,
+  failureKind: "throw_exception" | "failure_result" | "empty_response",
+  phase: "agent_failed_before_source_selection" | "agent_failed" = "agent_failed_before_source_selection",
+) {
   const code = error && typeof error === "object" && "code" in error ? String(error.code) : "UNKNOWN_RESEARCH_FAILURE";
   return {
-    phase: "agent_failed_before_source_selection",
+    phase,
     success: false,
     errorCode: code,
     errorName: error instanceof Error ? sanitizeTraceText(error.name || "Error") : typeof error,
@@ -57,39 +61,58 @@ export async function executeResearch({ identity, input, debug, context, reposit
   enforceBudget(identity);
   onPhase?.({ phase: "agent_started" });
   let tracedAgentFailure = false;
+  let progressedPastSourceSelection = false;
+  const tracePhase: AgentRunOptions["onPhase"] = (event) => {
+    if ([
+      "source_selection_finished",
+      "search_started",
+      "search_finished",
+      "detail_fetch_started",
+      "detail_fetch_finished",
+      "aggregation_started",
+      "aggregation_finished",
+      "evidence_started",
+      "evidence_finished",
+      "plan_finished",
+    ].includes(event.phase)) {
+      progressedPastSourceSelection = true;
+    }
+    onPhase?.(event);
+  };
+  const agentFailurePhase = () => progressedPastSourceSelection ? "agent_failed" : "agent_failed_before_source_selection";
   try {
     const result = await runAgent({
       input,
       context,
       repository,
       modelAdapter,
-      onPhase,
+      onPhase: tracePhase,
       deadlineAt,
       maxExecutionTimeMs: deadlineAt ? Math.max(1000, deadlineAt - Date.now()) : undefined,
       userQuery: input.currentQuestions || input.industry,
       research: (researchInput, plan) => runResearchPipeline(
         researchInput,
         undefined,
-        { ...debug, onPhase, deadlineAt },
+        { ...debug, onPhase: tracePhase, deadlineAt },
         toRetrievalPlan(plan),
       ),
     });
     onPhase?.({ phase: "agent_finished", success: result.status !== "failed", itemCount: result.response?.signals.length });
     if (result.status === "failed") {
-      onPhase?.(summarizeAgentFailure(new Error("Agent returned failure result"), "failure_result"));
+      onPhase?.(summarizeAgentFailure(new Error("Agent returned failure result"), "failure_result", agentFailurePhase()));
       tracedAgentFailure = true;
     }
     if (!result.response) {
       const error = new Error("Agent research produced no response");
       if (!tracedAgentFailure) {
-        onPhase?.(summarizeAgentFailure(error, "empty_response"));
+        onPhase?.(summarizeAgentFailure(error, "empty_response", agentFailurePhase()));
         tracedAgentFailure = true;
       }
       throw error;
     }
     return result.response;
   } catch (error) {
-    if (!tracedAgentFailure) onPhase?.(summarizeAgentFailure(error, "throw_exception"));
+    if (!tracedAgentFailure) onPhase?.(summarizeAgentFailure(error, "throw_exception", agentFailurePhase()));
     onPhase?.({ phase: "agent_finished", success: false, errorCode: error && typeof error === "object" && "code" in error ? String(error.code) : "UNKNOWN_RESEARCH_FAILURE" });
     throw error;
   }

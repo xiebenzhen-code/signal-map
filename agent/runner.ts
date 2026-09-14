@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { runResearchPipeline } from "../research/research-pipeline.ts";
 import type { ResearchResponse } from "../research/types.ts";
+import { BudgetManager, type BudgetSnapshot } from "./budget-manager.ts";
 import { compareKnowledge, evaluateEvidence } from "./evaluation.ts";
 import { persistResearchRecords, updateKnowledgeFromChanges } from "./knowledge-updater.ts";
 import { createResearchPlan } from "./query-planner.ts";
@@ -91,7 +92,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
   const markPhase = (phase: string, success = true, itemCount?: number, errorCode?: string, diagnostic?: Record<string, unknown>) =>
     options.onPhase?.({ phase, success, itemCount, errorCode, diagnostic });
   const deadlineAt = options.deadlineAt ?? startedAt + (options.maxExecutionTimeMs ?? 30000);
-  const hasDeadlineBudget = (minimumMs: number) => Date.now() + minimumMs < deadlineAt;
+  const budget = new BudgetManager({ deadlineAt });
   const add = (state: AgentState, status: AgentStep["status"], input: unknown, output: unknown, reason?: string) => {
     steps.push({ state, status, input, output });
     trace.push({ state, status, action: state.toLowerCase(), inputSummary: JSON.stringify(input).slice(0, 500), outputSummary: JSON.stringify(output).slice(0, 500), decisionReason: reason, timestamp: now() });
@@ -153,7 +154,49 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     reason: bootstrapSelection.reason,
     sourceSelectionReason: bootstrapSelection.reason,
   };
-  if (hasDeadlineBudget(9000)) {
+  let response: ResearchResponse | undefined;
+  const runState = new ResearchRunState();
+  let evaluation = evaluateEvidence({ signals: [], status: [], queryPlan: {} as never, progress: [], failures: [], counts: {} as never, overview: {} as never, coverage: {} as never, fetchedAt: now(), dataMode: "demo" }, 1, maxRounds);
+  let allKnowledgeChanges: AgentRunResult["knowledgeChanges"] = [];
+  let allEvidenceIds: string[] = [];
+  let previousSourceOutcomes: SourceOutcome[] = [];
+  let previousStrategies: ResearchStrategy[] = (previousRun?.strategies ?? []).filter((strategy): strategy is ResearchStrategy => [
+    "STOP", "REFRESH", "DEEPEN", "BROADEN", "ESCALATE_SOURCE", "VERIFY_CONFLICT", "INITIAL",
+  ].includes(strategy));
+  let rounds = 0;
+  const budgetDiagnostics = (snapshot: BudgetSnapshot, extra: Record<string, unknown> = {}) => ({
+    remainingDeadlineMsBeforeRound: snapshot.remainingDeadlineMs,
+    canStartModelPlanning: snapshot.canStartModelPlanning,
+    canStartRetrieval: snapshot.canStartRetrieval,
+    cumulativeEvidenceCount: runState.cumulativeEvidenceCount,
+    finalEvidenceCount: runState.cumulativeEvidenceCount,
+    ...extra,
+  });
+  const completeWithCumulativeResponse = (round: number, reason: string, extra: Record<string, unknown> = {}): AgentRunResult => {
+    const cumulativeResponse = runState.cumulativeResponse;
+    if (!cumulativeResponse) {
+      return { status: "failed", rounds, plan, evaluation, knowledgeChanges: allKnowledgeChanges, attention: [], steps, trace };
+    }
+    response = cumulativeResponse;
+    evaluation = evaluateEvidence(response, round, maxRounds);
+    const status = evaluation.sufficientEvidence ? "completed" : "needs_more_evidence";
+    markPhase("agent_finished", true, response.signals.length, undefined, {
+      deadlineDegradedGracefully: true,
+      cumulativeEvidenceCount: runState.cumulativeEvidenceCount,
+      finalEvidenceCount: runState.cumulativeEvidenceCount,
+      reason,
+      ...extra,
+    });
+    add("COMPLETE", status === "completed" ? "completed" : "needs_more_evidence", { round }, {
+      reason: evaluation.reason,
+      carriedForwardEvidence: true,
+      deadlineDegradedGracefully: true,
+    });
+    return { status, rounds, response, plan, evaluation, knowledgeChanges: allKnowledgeChanges, attention: [], steps, trace };
+  };
+  const initialPlanningBudget = budget.snapshot();
+  markPhase("budget_checked", true, undefined, undefined, budgetDiagnostics(initialPlanningBudget, { round: 1, stage: "initial_planning" }));
+  if (initialPlanningBudget.canStartModelPlanning) {
     plan = await applyModelPlanning({
       plan,
       adapter: options.modelAdapter,
@@ -173,16 +216,6 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     strategy: plan.strategy,
   });
   add("PLAN", "completed", { round: 1 }, plan);
-  let response: ResearchResponse | undefined;
-  const runState = new ResearchRunState();
-  let evaluation = evaluateEvidence({ signals: [], status: [], queryPlan: {} as never, progress: [], failures: [], counts: {} as never, overview: {} as never, coverage: {} as never, fetchedAt: now(), dataMode: "demo" }, 1, maxRounds);
-  let allKnowledgeChanges: AgentRunResult["knowledgeChanges"] = [];
-  let allEvidenceIds: string[] = [];
-  let previousSourceOutcomes: SourceOutcome[] = [];
-  let previousStrategies: ResearchStrategy[] = (previousRun?.strategies ?? []).filter((strategy): strategy is ResearchStrategy => [
-    "STOP", "REFRESH", "DEEPEN", "BROADEN", "ESCALATE_SOURCE", "VERIFY_CONFLICT", "INITIAL",
-  ].includes(strategy));
-  let rounds = 0;
   for (let round = 1; round <= maxRounds; round += 1) {
     if (Date.now() - startedAt > (options.maxExecutionTimeMs ?? 30000)) break;
     rounds = round;
@@ -190,7 +223,9 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     let roundResponse: ResearchResponse | undefined;
     try {
       const executeResearch = (currentPlan: typeof plan) => (options.research ?? ((input, selectedPlan) => runResearchPipeline(input, undefined, undefined, toRetrievalPlan(selectedPlan))))(researchInput, currentPlan, round);
-      if (!hasDeadlineBudget(4000)) {
+      const retrievalBudget = budget.snapshot();
+      markPhase("budget_checked", true, undefined, undefined, budgetDiagnostics(retrievalBudget, { round, stage: "retrieval" }));
+      if (!retrievalBudget.canStartRetrieval) {
         throw Object.assign(new Error("Worker deadline budget exhausted before research"), { code: "WORKER_DEADLINE" });
       }
       roundResponse = await executeResearch(plan);
@@ -227,14 +262,18 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
         });
         if (fallbackSelection.primarySourceType && fallbackSelection.primarySourceType !== plan.selectedSourceType) {
           plan = createResearchPlan(researchInput, round, maxQueries, relatedKnowledge, plan.strategy, fallbackSelection, intent, sourceProfile);
-          plan = await applyModelPlanning({
-            plan,
-            adapter: options.modelAdapter,
-            userQuery: (options.userQuery ?? options.input.currentQuestions) || options.input.industry,
-            relatedKnowledge,
-            previousQueries: plan.queries,
-            round,
-          });
+          const fallbackPlanningBudget = budget.snapshot();
+          markPhase("budget_checked", true, undefined, undefined, budgetDiagnostics(fallbackPlanningBudget, { round, stage: "fallback_planning" }));
+          if (fallbackPlanningBudget.canStartModelPlanning) {
+            plan = await applyModelPlanning({
+              plan,
+              adapter: options.modelAdapter,
+              userQuery: (options.userQuery ?? options.input.currentQuestions) || options.input.industry,
+              relatedKnowledge,
+              previousQueries: plan.queries,
+              round,
+            });
+          }
           markPhase("plan_finished", true, plan.queries.length, undefined, {
             round,
             fallback: true,
@@ -245,7 +284,9 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
             strategy: plan.strategy,
           });
           add("SOURCE_SELECTOR", "completed", { round, fallback: true }, fallbackSelection, "首选来源无有效结果，执行 fallback 来源");
-          if (!hasDeadlineBudget(4000)) {
+          const fallbackRetrievalBudget = budget.snapshot();
+          markPhase("budget_checked", true, undefined, undefined, budgetDiagnostics(fallbackRetrievalBudget, { round, stage: "fallback_retrieval" }));
+          if (!fallbackRetrievalBudget.canStartRetrieval) {
             throw Object.assign(new Error("Worker deadline budget exhausted before fallback research"), { code: "WORKER_DEADLINE" });
           }
           roundResponse = await executeResearch(plan);
@@ -257,9 +298,23 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
         }
       }
     } catch (error) {
-      markPhase("agent_finished", false, undefined, error && typeof error === "object" && "code" in error ? String(error.code) : "UNKNOWN_RESEARCH_FAILURE");
-      add("RESEARCH", "failed", { round }, { error: "research failed" }, error instanceof Error ? error.message : "unknown error");
+      const errorCode = error && typeof error === "object" && "code" in error ? String(error.code) : "UNKNOWN_RESEARCH_FAILURE";
       const preservedResponse = runState.cumulativeResponse;
+      if (errorCode === "WORKER_DEADLINE" && runState.cumulativeEvidenceCount > 0 && preservedResponse) {
+        const snapshot = budget.snapshot();
+        markPhase("budget_checked", false, runState.cumulativeEvidenceCount, errorCode, budgetDiagnostics(snapshot, {
+          round,
+          stage: "deadline_degrade_after_research_error",
+          deadlineDegradedGracefully: true,
+          skippedNextRoundDueToBudget: true,
+        }));
+        add("RESEARCH", "needs_more_evidence", { round }, { error: "deadline degraded gracefully" }, error instanceof Error ? error.message : "unknown error");
+        return completeWithCumulativeResponse(round, "worker deadline after cumulative evidence", budgetDiagnostics(snapshot, {
+          skippedNextRoundDueToBudget: true,
+        }));
+      }
+      markPhase("agent_finished", false, undefined, errorCode);
+      add("RESEARCH", "failed", { round }, { error: "research failed" }, error instanceof Error ? error.message : "unknown error");
       if (runState.cumulativeEvidenceCount > 0 && preservedResponse) {
         response = preservedResponse;
         evaluation = evaluateEvidence(response, round, maxRounds);
@@ -421,16 +476,49 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
         return { status: "failed", rounds, response, plan, evaluation, knowledgeChanges: allKnowledgeChanges, attention: [], steps, trace };
       }
     }
+    const nextRoundBudget = budget.snapshot();
+    markPhase("budget_checked", true, runState.cumulativeEvidenceCount, undefined, budgetDiagnostics(nextRoundBudget, {
+      round: round + 1,
+      stage: "next_round_planning",
+      skippedNextRoundDueToBudget: budget.shouldGracefullyStop(runState.cumulativeEvidenceCount),
+    }));
+    if (budget.shouldGracefullyStop(runState.cumulativeEvidenceCount)) {
+      return completeWithCumulativeResponse(round, "insufficient budget before next round planning", budgetDiagnostics(nextRoundBudget, {
+        skippedNextRoundDueToBudget: true,
+      }));
+    }
     plan = createResearchPlan(researchInput, round + 1, maxQueries, relatedKnowledge, policy.strategy, sourceSelection, intent, sourceProfile);
-    if (hasDeadlineBudget(9000)) {
-      plan = await applyModelPlanning({
-        plan,
-        adapter: options.modelAdapter,
-        userQuery: (options.userQuery ?? options.input.currentQuestions) || options.input.industry,
-        relatedKnowledge,
-        previousQueries: plan.queries,
-        round: round + 1,
-      });
+    const nextPlanningBudget = budget.snapshot();
+    markPhase("budget_checked", true, runState.cumulativeEvidenceCount, undefined, budgetDiagnostics(nextPlanningBudget, {
+      round: round + 1,
+      stage: "model_planning",
+    }));
+    if (nextPlanningBudget.canStartModelPlanning) {
+      try {
+        plan = await applyModelPlanning({
+          plan,
+          adapter: options.modelAdapter,
+          userQuery: (options.userQuery ?? options.input.currentQuestions) || options.input.industry,
+          relatedKnowledge,
+          previousQueries: plan.queries,
+          round: round + 1,
+        });
+      } catch (error) {
+        const errorCode = error && typeof error === "object" && "code" in error ? String(error.code) : "UNKNOWN_RESEARCH_FAILURE";
+        if (errorCode === "WORKER_DEADLINE" && runState.cumulativeEvidenceCount > 0) {
+          const snapshot = budget.snapshot();
+          markPhase("budget_checked", false, runState.cumulativeEvidenceCount, errorCode, budgetDiagnostics(snapshot, {
+            round: round + 1,
+            stage: "model_planning",
+            deadlineDegradedGracefully: true,
+            skippedNextRoundDueToBudget: true,
+          }));
+          return completeWithCumulativeResponse(round, "worker deadline during next round planning", budgetDiagnostics(snapshot, {
+            skippedNextRoundDueToBudget: true,
+          }));
+        }
+        throw error;
+      }
     }
     options.onPlan?.(plan, researchInput, round + 1);
     markPhase("plan_finished", true, plan.queries.length, undefined, {

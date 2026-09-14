@@ -163,3 +163,16 @@ Rules:
 - Minimal Fix: Extract `ResearchRunState` with `mergeRoundResponse()`, `cumulativeResponse`, cumulative evidence counts, carried-forward counts, provider-failure snapshot, and duplicate evidence verification upgrade semantics.
 - Re-test Result: Dedicated ResearchRunState tests and existing AgentRunner cumulative evidence regressions passed locally without changing SourceSelection, RetrievalPlan, QueryPlanner, provider, deadline, STOP, Knowledge, Attention, or persistence contracts.
 - Status: PASS
+
+## 2026-09-14 — Agent deadline graceful completion
+
+- Date: 2026-09-14
+- Test / Run ID: Local BudgetManager / AgentRunner Phase 2A regression
+- Commit SHA: same commit as this record
+- Layer: AgentRunner / deadline and budget boundary
+- Symptom / Failure: Real quality E2E collected round 1 evidence, then started another planning round and hit `WORKER_DEADLINE`, which was surfaced as HTTP `502` instead of returning the cumulative evidence already collected.
+- Evidence: Quality diagnostics showed round 1 search/detail/aggregation/evidence succeeded, followed by next-round planning and `WORKER_DEADLINE`.
+- Root Cause: Deadline and guard checks were scattered in `runAgent`; there was no explicit budget boundary that could stop safely before next-round planning when cumulative evidence already existed.
+- Minimal Fix: Add `BudgetManager` with existing `9000ms` model-planning and `4000ms` retrieval guards, check budget before next-round planning, and return `ResearchRunState.cumulativeResponse` when evidence exists but budget is unsafe.
+- Re-test Result: Targeted tests verify next-round budget exhaustion does not start model planning, planning `WORKER_DEADLINE` after evidence returns cumulative evidence, no-evidence deadline does not fabricate a response, and budget-sufficient multi-round behavior continues.
+- Status: PASS

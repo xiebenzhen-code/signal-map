@@ -160,3 +160,13 @@ test("agent failure summary distinguishes failure results without exposing secre
   assert.equal(summary.errorCode, "UNKNOWN_RESEARCH_FAILURE");
   assert.doesNotMatch(summary.errorMessage, /secret-token/);
 });
+
+test("agent failure summary can label failures after source selection", () => {
+  const summary = summarizeAgentFailure(
+    Object.assign(new Error("deadline after evidence"), { code: "WORKER_DEADLINE" }),
+    "throw_exception",
+    "agent_failed",
+  );
+  assert.equal(summary.phase, "agent_failed");
+  assert.equal(summary.errorCode, "WORKER_DEADLINE");
+});

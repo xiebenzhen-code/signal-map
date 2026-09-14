@@ -64,6 +64,15 @@ When a valid upstream plan exists, the trace must record:
 - Provider failure or zero-result verification can lower confidence / keep `needs_more_evidence`, but must preserve previously collected evidence in the final run response.
 - Final evaluation and final response must read from run-level cumulative state, not only the latest round-local response.
 
+## Multi-round Budget Boundary
+
+- Deadline and guard reads are owned by `BudgetManager`.
+- `BudgetManager` does not choose research strategy, source routing, evidence thresholds, Knowledge updates, or Attention behavior.
+- Current guard values remain `9000ms` before model planning and `4000ms` before retrieval.
+- When run-level cumulative evidence already exists and the remaining budget is insufficient to safely start another planning round, AgentRunner may gracefully stop and return the cumulative response.
+- A deadline after successful evidence collection must not clear cumulative evidence or be reported as an early source-selection failure.
+- With no cumulative evidence, deadline failures must not fabricate evidence or a completed result.
+
 ## Required Contract Regression Tests
 
 Any migration or Agent/Retrieval refactor must pass tests that prove:
@@ -76,3 +85,5 @@ Any migration or Agent/Retrieval refactor must pass tests that prove:
 - runtime environment changes do not change query or routing semantics.
 - round-local empty or failed verification does not clear run-level cumulative evidence;
 - duplicate evidence can be verification-upgraded without double counting.
+- existing cumulative evidence can gracefully complete when next-round planning budget is unsafe;
+- deadline without cumulative evidence does not fabricate results.
