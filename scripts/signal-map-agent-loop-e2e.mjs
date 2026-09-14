@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import pg from "pg";
 
 const { Client } = pg;
@@ -466,6 +467,9 @@ function phaseNamesFor(requestId) {
 function phaseTraceFor(requestId) {
   return tracesForRequest(requestId).map((entry) => ({
     phase: unavailable(entry.phase),
+    round: typeof entry.round === "number" ? entry.round : undefined,
+    attemptId: typeof entry.attemptId === "string" ? entry.attemptId : undefined,
+    attemptType: typeof entry.attemptType === "string" ? entry.attemptType : undefined,
     startedAt: unavailable(entry.startedAt),
     finishedAt: unavailable(entry.finishedAt),
     success: entry.success !== false,
@@ -474,6 +478,77 @@ function phaseTraceFor(requestId) {
     durationMs: unavailable(entry.durationMs),
     diagnostic: unavailable(entry.diagnostic),
   }));
+}
+
+function attemptTraceGroups(phaseTrace) {
+  const groups = new Map();
+  let currentKey = "round-1-primary";
+  let searchCount = 0;
+  for (const entry of phaseTrace) {
+    if (entry.attemptId) currentKey = entry.attemptId;
+    if (entry.phase === "plan_finished" && entry.diagnostic?.fallback === true) {
+      currentKey = `round-${entry.round || 1}-fallback`;
+    }
+    if (entry.phase === "search_started" && !entry.attemptId) {
+      searchCount += 1;
+      currentKey = `round-${entry.round || 1}-${searchCount === 1 ? "primary" : "fallback"}`;
+    }
+    const group = groups.get(currentKey) || [];
+    group.push(entry);
+    groups.set(currentKey, group);
+  }
+  return [...groups.entries()].map(([attemptId, entries]) => ({ attemptId, entries }));
+}
+
+function attemptDiagnostics(phaseTrace) {
+  return attemptTraceGroups(phaseTrace)
+    .filter(({ entries }) => entries.some((entry) => [
+      "search_started",
+      "search_finished",
+      "evidence_preservation_finished",
+    ].includes(entry.phase)))
+    .map(({ attemptId, entries }) => {
+      const first = entries[0] || {};
+      const sourceSelection = [...entries].reverse().find((entry) => entry.phase === "source_selection_finished")?.diagnostic;
+      const plan = [...entries].reverse().find((entry) => entry.phase === "plan_finished")?.diagnostic;
+      const searchStarted = entries.find((entry) => entry.phase === "search_started");
+      const searchFinished = [...entries].reverse().find((entry) => entry.phase === "search_finished");
+      const detailFinished = [...entries].reverse().find((entry) => entry.phase === "detail_fetch_finished");
+      const aggregationFinished = [...entries].reverse().find((entry) => entry.phase === "aggregation_finished");
+      const evidenceFinished = [...entries].reverse().find((entry) => entry.phase === "evidence_finished");
+      const preservation = [...entries].reverse().find((entry) => entry.phase === "evidence_preservation_finished");
+      return {
+        round: first.round || sourceSelection?.round || plan?.round || 1,
+        attemptId,
+        attemptType: first.attemptType || (plan?.fallback ? "fallback" : "primary"),
+        sourceSelection: searchStarted?.diagnostic || sourceSelection || "unavailable",
+        plan: plan || "unavailable",
+        searchStarted: searchStarted?.diagnostic || "unavailable",
+        queries: {
+          agentGeneratedQueries: searchStarted?.diagnostic?.agentGeneratedQueries || plan?.agentGeneratedQueries || "unavailable",
+          pipelineActualQueries: searchStarted?.diagnostic?.pipelineActualQueries || "unavailable",
+        },
+        search: {
+          returnedCount: searchFinished?.itemCount ?? "unavailable",
+          providerOutcomes: searchFinished?.diagnostic?.providerOutcomes || "unavailable",
+          providerResponseCount: searchFinished?.diagnostic?.providerResponseCount ?? "unavailable",
+          providerErrorCodes: searchFinished?.diagnostic?.providerErrorCodes || "unavailable",
+          durationMs: searchFinished?.durationMs ?? "unavailable",
+        },
+        detailFetch: {
+          successCount: detailFinished?.itemCount ?? "unavailable",
+          durationMs: detailFinished?.durationMs ?? "unavailable",
+        },
+        aggregation: {
+          clusteredCount: aggregationFinished?.itemCount ?? "unavailable",
+          durationMs: aggregationFinished?.durationMs ?? "unavailable",
+        },
+        evidence: {
+          phaseItemCount: evidenceFinished?.itemCount ?? "unavailable",
+          preservation: preservation?.diagnostic || "unavailable",
+        },
+      };
+    });
 }
 
 function lastSuccessfulPhaseFromTrace(phaseTrace) {
@@ -650,94 +725,89 @@ function searchDiagnostics(data, phaseTrace) {
     ...(Array.isArray(queryPlan.searchCombinations) ? queryPlan.searchCombinations : []),
     ...(Array.isArray(queryPlan.knowledgeAwareQueries) ? queryPlan.knowledgeAwareQueries : []),
   ]);
-  const searchStarted = phaseTrace.filter((entry) => entry.phase === "search_started");
-  const searchFinished = phaseTrace.filter((entry) => entry.phase === "search_finished");
-  const latestSearchStarted = searchStarted.at(-1);
-  const latestSearchFinished = searchFinished.at(-1);
-  const planFinished = phaseTrace.filter((entry) => entry.phase === "plan_finished");
-  const latestPlanFinished = planFinished.at(-1);
+  const attempts = attemptDiagnostics(phaseTrace);
+  const primaryAttempt = attempts.find((attempt) => attempt.attemptType === "primary") || attempts[0];
+  const finalAttempt = attempts.at(-1);
   const sourceSelections = phaseTrace
     .filter((entry) => entry.phase === "source_selection_finished")
     .map((entry) => entry.diagnostic || {});
-  const latestSourceSelection = sourceSelections.at(-1) || {};
-  const providerPlan = Array.isArray(latestSearchStarted?.diagnostic?.providerPlan)
-    ? latestSearchStarted.diagnostic.providerPlan
-    : [];
-  const providerOutcomes = Array.isArray(latestSearchFinished?.diagnostic?.providerOutcomes)
-    ? latestSearchFinished.diagnostic.providerOutcomes
-    : [];
-  const providerCallAttempted = providerPlan.length
-    ? providerPlan.map((provider) => ({
-        providerId: unavailable(provider.providerId),
-        providerName: unavailable(provider.providerName),
-        configured: unavailable(provider.configured),
-        callAttempted: unavailable(provider.callAttempted),
-        emptyResultReason: unavailable(provider.emptyResultReason),
-      }))
-    : providerOutcomes.length
-      ? providerOutcomes.map((provider) => ({
-          providerName: unavailable(provider.providerName),
-          callAttempted: unavailable(provider.searched),
-          execution: unavailable(provider.execution),
-        }))
-      : "unavailable";
-  const providerReturnedCount = providerOutcomes.length
-    ? providerOutcomes.map((provider) => ({
-        providerName: unavailable(provider.providerName),
-        execution: unavailable(provider.execution),
-        searched: unavailable(provider.searched),
-        resultCount: unavailable(provider.resultCount),
-        rawResultCount: unavailable(provider.rawResultCount),
-        normalizedCandidateCount: unavailable(provider.normalizedCandidateCount),
-        requestCount: unavailable(provider.requestCount),
-      }))
-    : "unavailable";
+  const providerPlans = attempts.map((attempt) => attempt.searchStarted?.providerPlan).filter(Boolean);
+  const providerOutcomes = attempts.map((attempt) => ({
+    attemptId: attempt.attemptId,
+    round: attempt.round,
+    attemptType: attempt.attemptType,
+    outcomes: attempt.search.providerOutcomes,
+  }));
+  const providerCallAttempted = attempts.map((attempt) => ({
+    attemptId: attempt.attemptId,
+    round: attempt.round,
+    attemptType: attempt.attemptType,
+    providers: attempt.searchStarted?.providerPlan || "unavailable",
+  }));
+  const providerReturnedCount = providerOutcomes;
+  const finalProviderErrors = finalAttempt?.search.providerErrorCodes;
+  const finalProviderFailed = Array.isArray(finalProviderErrors)
+    ? finalProviderErrors.length > 0
+    : finalProviderErrors !== "unavailable";
   return {
-    perRoundSearch: [{
-      round: "unavailable",
-      queries: queries.length
-        ? queries.map((query) => ({ query, returnedCount: "unavailable" }))
-        : Array.isArray(latestSearchStarted?.diagnostic?.generatedSearchQueries)
-          ? latestSearchStarted.diagnostic.generatedSearchQueries.map((query) => ({ query, returnedCount: "unavailable" }))
-        : "unavailable",
-      returnedCountFromPhase: searchFinished.length
-        ? searchFinished.map((entry) => entry.itemCount)
-        : "unavailable",
-    }],
-    agentGeneratedQueries: unavailable(latestSearchStarted?.diagnostic?.agentGeneratedQueries || latestPlanFinished?.diagnostic?.agentGeneratedQueries),
-    agentPlanSelectedSourceType: unavailable(latestPlanFinished?.diagnostic?.selectedSourceType),
-    pipelineActualQueries: unavailable(latestSearchStarted?.diagnostic?.pipelineActualQueries || latestSearchStarted?.diagnostic?.generatedSearchQueries),
-    fallbackUsed: unavailable(latestSearchStarted?.diagnostic?.fallbackUsed ?? latestSearchFinished?.diagnostic?.fallbackUsed),
-    retrievalPlanSource: unavailable(latestSearchStarted?.diagnostic?.retrievalPlanSource ?? latestSearchFinished?.diagnostic?.retrievalPlanSource),
-    fallbackReason: unavailable(latestSearchStarted?.diagnostic?.fallbackReason ?? latestSearchFinished?.diagnostic?.fallbackReason),
-    resolvedEntities: unavailable(latestSearchStarted?.diagnostic?.resolvedEntities || queryPlan.resolvedEntities || queryPlan.entities),
-    selectedSourceTypes: unavailable(sourceSelections.map((entry) => entry.selectedSourceType).filter(Boolean)),
-    discoveryMode: unavailable(latestSourceSelection.discoveryMode),
-    verificationSourceTypes: unavailable(latestSourceSelection.verificationSourceTypes),
-    sourceSelectionReason: unavailable(latestSourceSelection.sourceSelectionReason || latestSourceSelection.reason),
-    searchProvider: unavailable(providerOutcomes.length
-      ? providerOutcomes.map((provider) => ({
-          providerName: provider.providerName,
-          execution: provider.execution,
-          searched: provider.searched,
+    attempts,
+    perRoundSearch: attempts.length
+      ? attempts.map((attempt) => ({
+          round: attempt.round,
+          attemptId: attempt.attemptId,
+          attemptType: attempt.attemptType,
+          queries: attempt.queries.pipelineActualQueries,
+          returnedCount: attempt.search.returnedCount,
         }))
-      : providerPlan.map((provider) => ({
-          providerId: provider.providerId,
-          providerName: provider.providerName,
-          configured: provider.configured,
-          callAttempted: provider.callAttempted,
-        }))),
+      : [{
+          round: "unavailable",
+          queries: queries.length ? queries.map((query) => ({ query, returnedCount: "unavailable" })) : "unavailable",
+          returnedCount: "unavailable",
+        }],
+    agentGeneratedQueries: primaryAttempt?.queries.agentGeneratedQueries || "unavailable",
+    agentPlanSelectedSourceType: primaryAttempt?.plan?.selectedSourceType || "unavailable",
+    pipelineActualQueries: primaryAttempt?.queries.pipelineActualQueries || "unavailable",
+    fallbackUsed: attempts.length
+      ? attempts.some((attempt) => attempt.attemptType === "fallback" || attempt.plan?.fallback === true)
+      : "unavailable",
+    retrievalPlanSource: primaryAttempt?.searchStarted?.retrievalPlanSource || "unavailable",
+    fallbackReason: finalAttempt?.searchStarted?.fallbackReason || "unavailable",
+    resolvedEntities: primaryAttempt?.searchStarted?.resolvedEntities ?? queryPlan.resolvedEntities ?? queryPlan.entities ?? "unavailable",
+    selectedSourceTypes: sourceSelections.map((entry) => entry.selectedSourceType).filter(Boolean).length
+      ? sourceSelections.map((entry) => entry.selectedSourceType).filter(Boolean)
+      : "unavailable",
+    discoveryMode: sourceSelections.find((entry) => entry.discoveryMode !== undefined)?.discoveryMode ?? "unavailable",
+    verificationSourceTypes: sourceSelections.find((entry) => entry.verificationSourceTypes !== undefined)?.verificationSourceTypes ?? "unavailable",
+    sourceSelectionReason: sourceSelections[0]?.sourceSelectionReason || sourceSelections[0]?.reason || "unavailable",
+    searchProvider: attempts.map((attempt) => ({
+      attemptId: attempt.attemptId,
+      round: attempt.round,
+      attemptType: attempt.attemptType,
+      providers: attempt.search.providerOutcomes,
+    })),
     providerCallAttempted,
     providerReturnedCount,
-    allowedProviderIds: unavailable(latestSearchStarted?.diagnostic?.allowedProviderIds),
-    generatedSearchQueryCount: unavailable(latestSearchStarted?.diagnostic?.generatedSearchQueryCount),
-    generatedSearchQueries: unavailable(latestSearchStarted?.diagnostic?.generatedSearchQueries),
-    providerPlan: unavailable(providerPlan),
-    providerOutcomes: unavailable(providerOutcomes),
-    providerResponseCount: unavailable(latestSearchFinished?.diagnostic?.providerResponseCount),
-    providerErrorCodes: unavailable(latestSearchFinished?.diagnostic?.providerErrorCodes),
-    emptyResultReason: unavailable(latestSearchFinished?.diagnostic?.emptyResultReason),
-    providerReturnedCounts: Array.isArray(data.sourceDiagnostics)
+    allowedProviderIds: primaryAttempt?.plan?.allowedProviderIds || "unavailable",
+    generatedSearchQueryCount: Array.isArray(primaryAttempt?.queries.pipelineActualQueries)
+      ? primaryAttempt.queries.pipelineActualQueries.length
+      : "unavailable",
+    generatedSearchQueries: primaryAttempt?.queries.pipelineActualQueries || "unavailable",
+    providerPlan: providerPlans.length ? providerPlans : "unavailable",
+    providerOutcomes,
+    providerResponseCount: finalAttempt?.search.providerResponseCount ?? "unavailable",
+    providerErrorCodes: finalAttempt?.search.providerErrorCodes ?? "unavailable",
+    emptyResultReason: finalAttempt?.search.providerResponseCount === 0
+      ? (finalProviderFailed ? "all_results_empty_with_provider_failure" : "all_results_empty")
+      : "unavailable",
+    providerReturnedCounts: attempts.length
+      ? attempts.map((attempt) => ({
+          attemptId: attempt.attemptId,
+          round: attempt.round,
+          attemptType: attempt.attemptType,
+          providers: attempt.search.providerOutcomes,
+        }))
+      : "unavailable",
+    sourceDiagnostics: Array.isArray(data.sourceDiagnostics)
       ? data.sourceDiagnostics.map((item) => ({
           providerId: unavailable(item.providerId),
           rawProviderResultCount: unavailable(item.rawProviderResultCount),
@@ -751,13 +821,22 @@ function searchDiagnostics(data, phaseTrace) {
   };
 }
 
-function detailFetchDiagnostics(data) {
+function detailFetchDiagnostics(data, attempts = []) {
   const detail = data.filteringSummary?.detailEnrichment || {};
   return {
     attemptedCount: unavailable(detail.detailAttempted ?? sumDiagnostics(data.sourceDiagnostics, "detailAttempted")),
     successCount: unavailable(detail.detailSucceeded ?? sumDiagnostics(data.sourceDiagnostics, "detailSucceeded")),
     failedCount: unavailable(detail.detailFailed ?? sumDiagnostics(data.sourceDiagnostics, "detailFailed")),
     stillInsufficient: unavailable(detail.stillInsufficient),
+    byAttempt: attempts.length
+      ? attempts.map((attempt) => ({
+          attemptId: attempt.attemptId,
+          round: attempt.round,
+          attemptType: attempt.attemptType,
+          successCount: attempt.detailFetch.successCount,
+          durationMs: attempt.detailFetch.durationMs,
+        }))
+      : "unavailable",
     byProvider: Array.isArray(data.sourceDiagnostics)
       ? data.sourceDiagnostics.map((item) => ({
           providerId: unavailable(item.providerId),
@@ -770,11 +849,20 @@ function detailFetchDiagnostics(data) {
   };
 }
 
-function aggregationDiagnostics(data, summary) {
+function aggregationDiagnostics(data, summary, attempts = []) {
   return {
     inputCount: unavailable(summary.retrievedCount ?? data.overview?.scanned ?? data.counts?.candidates),
     clusteredCount: unavailable(summary.clusteredCount ?? data.overview?.events),
     deduplicatedCount: unavailable(data.overview?.deduplicated),
+    byAttempt: attempts.length
+      ? attempts.map((attempt) => ({
+          attemptId: attempt.attemptId,
+          round: attempt.round,
+          attemptType: attempt.attemptType,
+          clusteredCount: attempt.aggregation.clusteredCount,
+          durationMs: attempt.aggregation.durationMs,
+        }))
+      : "unavailable",
   };
 }
 
@@ -810,7 +898,7 @@ function preservationDiagnostics(phaseTrace) {
     verificationOutcome: unavailable(latest.verificationOutcome),
     finalEvidenceCount: unavailable(latest.finalEvidenceCount),
     rejectionReason: unavailable(latest.rejectionReason),
-    perRound: unavailable(preservation),
+    perRound: preservation.length ? preservation : "unavailable",
   };
 }
 
@@ -818,18 +906,38 @@ function evidenceDiagnostics(data, summary, signals, latestRun, phaseTrace) {
   const accepted = evidenceItems(signals);
   const preservation = preservationDiagnostics(phaseTrace);
   const accounting = data.evidenceAccounting || {};
+  const hasPreservation = Array.isArray(preservation.perRound);
+  const latestPreservation = hasPreservation ? preservation.perRound.at(-1) : {};
+  const attempts = attemptDiagnostics(phaseTrace);
   return {
     candidateCount: unavailable(summary.clusteredCount ?? summary.filteringDetails?.length ?? data.overview?.events),
     discoveredCandidateCount: unavailable(accounting.discoveredCandidateCount ?? summary.retrievedCount ?? data.overview?.scanned),
-    producedEvidenceCount: unavailable(accounting.producedEvidenceCount ?? preservation.producedEvidenceCount),
-    cumulativeEvidenceCount: unavailable(accounting.cumulativeEvidenceCount ?? preservation.cumulativeEvidenceCount),
-    evaluatedEvidenceCount: unavailable(accounting.evaluatedEvidenceCount),
-    acceptedEvidenceCount: unavailable(accounting.acceptedEvidenceCount ?? (preservation.acceptedEvidenceCount === "unavailable"
+    producedEvidenceCount: unavailable(accounting.producedEvidenceCount ?? (hasPreservation ? latestPreservation.producedEvidenceCount : undefined)),
+    cumulativeEvidenceCount: unavailable(hasPreservation ? latestPreservation.cumulativeEvidenceCount : accounting.cumulativeEvidenceCount),
+    evaluatedEvidenceCount: unavailable(hasPreservation ? latestPreservation.evaluatedEvidenceCount : accounting.evaluatedEvidenceCount),
+    acceptedEvidenceCount: unavailable(hasPreservation ? latestPreservation.acceptedEvidenceCount : (accounting.acceptedEvidenceCount ?? (preservation.acceptedEvidenceCount === "unavailable"
       ? latestRun?.evidenceCount ?? accepted.length
-      : preservation.acceptedEvidenceCount)),
-    rejectedEvidenceCount: unavailable(accounting.rejectedEvidenceCount ?? preservation.rejectedEvidenceCount),
-    finalEvidenceCount: unavailable(accounting.finalEvidenceCount ?? preservation.finalEvidenceCount),
-    rejectedReason: unavailable(accounting.rejectionReasons || summary.filteredReasons || summary.summaryText),
+      : preservation.acceptedEvidenceCount))),
+    rejectedEvidenceCount: unavailable(hasPreservation ? latestPreservation.rejectedEvidenceCount : (accounting.rejectedEvidenceCount ?? preservation.rejectedEvidenceCount)),
+    finalEvidenceCount: unavailable(hasPreservation ? latestPreservation.finalEvidenceCount : (accounting.finalEvidenceCount ?? preservation.finalEvidenceCount)),
+    rejectedReason: unavailable((hasPreservation ? latestPreservation.rejectionReason : accounting.rejectionReasons) || summary.filteredReasons || summary.summaryText),
+    run: {
+      cumulativeEvidenceCount: unavailable(hasPreservation ? latestPreservation.cumulativeEvidenceCount : accounting.cumulativeEvidenceCount),
+      carriedForwardEvidenceCount: unavailable(hasPreservation ? latestPreservation.carriedForwardEvidenceCount : undefined),
+    },
+    final: {
+      acceptedEvidenceCount: unavailable(hasPreservation ? latestPreservation.acceptedEvidenceCount : accounting.acceptedEvidenceCount),
+      finalEvidenceCount: unavailable(hasPreservation ? latestPreservation.finalEvidenceCount : accounting.finalEvidenceCount),
+    },
+    byAttempt: attempts.length
+      ? attempts.map((attempt) => ({
+          attemptId: attempt.attemptId,
+          round: attempt.round,
+          attemptType: attempt.attemptType,
+          phaseItemCount: attempt.evidence.phaseItemCount,
+          preservation: attempt.evidence.preservation,
+        }))
+      : "unavailable",
     preservation,
     byDisplayedSignal: signals.map((signal) => ({
       title: unavailable(signal.title),
@@ -856,31 +964,45 @@ function statefulSecondRunDiagnostics(secondRun) {
   };
 }
 
-function qualityAcceptance(summary) {
+function qualityAcceptance(summary, report) {
   if (summary.status !== 200) {
     return {
       status: statuses.fail,
       reason: sanitize(summary.errorCode || summary.error || `HTTP ${summary.status}`),
     };
   }
-  if (summary.signalCount === 0 && summary.evidenceCount === 0) {
+  const accounting = report?.evidenceDiagnostics || {};
+  const produced = Number(accounting.producedEvidenceCount);
+  const accepted = Number(accounting.acceptedEvidenceCount);
+  const rejected = Number(accounting.rejectedEvidenceCount);
+  const hasCompleteRejectionAccounting = Number.isFinite(produced)
+    && Number.isFinite(rejected)
+    && rejected === produced
+    && accounting.rejectedReason !== "unavailable";
+  if (summary.signalCount > 0 && summary.evidenceCount > 0 && (!Number.isFinite(accepted) || accepted > 0)) {
+    return { status: statuses.pass, reason: null };
+  }
+  if (hasCompleteRejectionAccounting) {
     return {
       status: statuses.partial,
-      reason: "HTTP 200 but signalCount=0 and evidenceCount=0; quality evidence was not produced",
+      reason: `HTTP 200; produced Evidence was rejected with complete accounting (produced=${produced}, rejected=${rejected})`,
     };
   }
-  if (summary.signalCount === 0 || summary.evidenceCount === 0) {
-    return {
-      status: statuses.partial,
-      reason: `HTTP 200 but incomplete quality output: signalCount=${summary.signalCount}, evidenceCount=${summary.evidenceCount}`,
-    };
-  }
-  return { status: statuses.pass, reason: null };
+  return {
+    status: statuses.fail,
+    reason: `HTTP 200 but incomplete quality output: signalCount=${summary.signalCount}, evidenceCount=${summary.evidenceCount}, producedEvidenceCount=${Number.isFinite(produced) ? produced : "unavailable"}`,
+  };
 }
 
 function emptyQualityReport(status, reason, state = {}) {
   return {
     generatedAt: new Date().toISOString(),
+    reportSchemaVersion: 2,
+    buildCommitSha: process.env.GITHUB_SHA || "unavailable",
+    sourceTraceRequestId: state.requestId ?? "unavailable",
+    attempts: "unavailable",
+    run: { cumulativeEvidenceCount: "unavailable", carriedForwardEvidenceCount: "unavailable" },
+    final: { acceptedEvidenceCount: "unavailable", finalEvidenceCount: "unavailable" },
     mode: "quality_acceptance",
     acceptanceStatus: status,
     query: { original: qualityQuery || "unavailable" },
@@ -921,6 +1043,15 @@ function emptyQualityReport(status, reason, state = {}) {
       rejectedEvidenceCount: "unavailable",
       finalEvidenceCount: "unavailable",
       rejectedReason: "unavailable",
+      run: {
+        cumulativeEvidenceCount: "unavailable",
+        carriedForwardEvidenceCount: "unavailable",
+      },
+      final: {
+        acceptedEvidenceCount: "unavailable",
+        finalEvidenceCount: "unavailable",
+      },
+      byAttempt: "unavailable",
       preservation: "unavailable",
       byDisplayedSignal: "unavailable",
     },
@@ -974,7 +1105,7 @@ async function runQualityAcceptance(session) {
       agentRuns: qualityRuns,
       secondRun: statefulSecondRunForQuality,
     });
-    const acceptance = qualityAcceptance(qualityRun.summary);
+    const acceptance = qualityAcceptance(qualityRun.summary, qualityReport);
     qualityReport.acceptanceStatus = acceptance.status;
     qualityReport.failureReason = acceptance.reason;
     if (agentRunsError) qualityReport.rawAvailability.agentRunsError = agentRunsError;
@@ -1013,6 +1144,7 @@ function buildQualityReport({ query, signalRun, agentRuns, secondRun }) {
   const latestRun = latestRunForQuality(agentRuns);
   const keptSources = signals.map(keptSource);
   const phaseTrace = phaseTraceFor(signalRun.summary.requestId);
+  const search = searchDiagnostics(data, phaseTrace);
   const filteredDetails = Array.isArray(summary.filteringDetails)
     ? summary.filteringDetails
         .filter((item) => item.decision === "filtered")
@@ -1033,8 +1165,15 @@ function buildQualityReport({ query, signalRun, agentRuns, secondRun }) {
     || data.queryPlan?.allowedProviderIds
     || unique([data.queryPlan?.selectedSourceType, ...(data.queryPlan?.fallbackSourceTypes || [])]);
   const planningTiming = planningTimingDiagnostics(phaseTrace);
+  const evidence = evidenceDiagnostics(data, summary, signals, latestRun, phaseTrace);
   return {
     generatedAt: new Date().toISOString(),
+    reportSchemaVersion: 2,
+    buildCommitSha: process.env.GITHUB_SHA || "unavailable",
+    sourceTraceRequestId: signalRun.summary.requestId || "unavailable",
+    attempts: search.attempts,
+    run: evidence.run,
+    final: evidence.final,
     mode: "quality_acceptance",
     query: {
       original: query,
@@ -1043,13 +1182,20 @@ function buildQualityReport({ query, signalRun, agentRuns, secondRun }) {
       inferredIntent: unavailable(data.intent?.primaryIntent || data.sourceProfile?.intent),
       intentReason: unavailable(data.intent?.reason),
       freshnessTimeRange: unavailable(data.queryPlan?.requestedFreshnessWindow || data.sourceProfile?.freshnessRequirement),
+      freshnessMentionedByUser: query,
+      freshnessInferred: data.queryPlan?.requestedFreshnessWindow || data.sourceProfile?.freshnessRequirement || "unavailable",
       sourcePreference: unavailable(sourcePreference),
-      sourceSelection: unavailable(latestRun?.selectedSources || {
-        selectedSourceType: data.queryPlan?.selectedSourceType,
-        fallbackSourceTypes: data.queryPlan?.fallbackSourceTypes,
-        sourceSelectionReason: data.queryPlan?.sourceSelectionReason,
-      }),
-      entitiesTopic: unavailable(data.queryPlan?.resolvedEntities || data.queryPlan?.entities || data.queryPlan?.coreKeywords),
+      sourceSelection: search.selectedSourceTypes?.length
+        ? {
+            selectedSourceTypes: search.selectedSourceTypes,
+            sourceSelectionReason: search.sourceSelectionReason,
+          }
+        : unavailable(latestRun?.selectedSources || {
+            selectedSourceType: data.queryPlan?.selectedSourceType,
+            fallbackSourceTypes: data.queryPlan?.fallbackSourceTypes,
+            sourceSelectionReason: data.queryPlan?.sourceSelectionReason,
+          }),
+      entitiesTopic: data.queryPlan?.resolvedEntities ?? data.queryPlan?.entities ?? data.queryPlan?.coreKeywords ?? "unavailable",
     },
     planning: planningTiming,
     retrieval: {
@@ -1063,9 +1209,9 @@ function buildQualityReport({ query, signalRun, agentRuns, secondRun }) {
         sourceDiagnostics: unavailable(data.sourceDiagnostics),
         sourceOutcomes: unavailable(data.sourceOutcomes),
       },
-      search: searchDiagnostics(data, phaseTrace),
-      detailFetch: detailFetchDiagnostics(data),
-      aggregation: aggregationDiagnostics(data, summary),
+      search,
+      detailFetch: detailFetchDiagnostics(data, search.attempts),
+      aggregation: aggregationDiagnostics(data, summary, search.attempts),
       keptSources: keptSources.map((item) => ({
         title: item.title,
         url: item.url,
@@ -1082,7 +1228,7 @@ function buildQualityReport({ query, signalRun, agentRuns, secondRun }) {
       evaluation: filteringDiagnostics(data, summary, signals),
       sampleFilteredResults: filteredDetails,
     },
-    evidenceDiagnostics: evidenceDiagnostics(data, summary, signals, latestRun, phaseTrace),
+    evidenceDiagnostics: evidence,
     evidence: evidenceItems(signals).slice(0, 20).map((item) => ({
       signal: unavailable(item.signal),
       claim: unavailable(item.claim),
@@ -1115,6 +1261,7 @@ function buildQualityReport({ query, signalRun, agentRuns, secondRun }) {
       hasIntent: Boolean(data.intent || data.sourceProfile),
       hasFilteringSummary: Boolean(data.filteringSummary),
       hasAgentRun: Boolean(latestRun),
+      hasPreservationTrace: phaseTrace.some((entry) => entry.phase === "evidence_preservation_finished"),
       displayedSignals: signals.length,
     },
   };
@@ -1141,6 +1288,9 @@ function qualityMarkdown(report) {
     "# Signal Map Agent Quality Report",
     "",
     `- status: \`${report.acceptanceStatus || "unavailable"}\``,
+    `- reportSchemaVersion: \`${report.reportSchemaVersion || "unavailable"}\``,
+    `- buildCommitSha: \`${report.buildCommitSha || "unavailable"}\``,
+    `- sourceTraceRequestId: \`${report.sourceTraceRequestId || "unavailable"}\``,
     `- requestId: \`${report.state.requestId || "unavailable"}\``,
     `- HTTP: \`${report.state.httpStatus ?? "unavailable"}\``,
     `- latency: \`${report.state.latencyMs ?? "unavailable"}ms\``,
@@ -1155,7 +1305,7 @@ function qualityMarkdown(report) {
     "## INFERENCE",
     "",
     `- inferred intent: ${compact(report.inference.inferredIntent)}`,
-    `- freshness / time range: ${compact(report.inference.freshnessTimeRange)}`,
+    `- freshness mentioned / inferred: ${compact(report.inference.freshnessMentionedByUser, 500)} / ${compact(report.inference.freshnessInferred)}`,
     `- source preference: ${compact(report.inference.sourcePreference)}`,
     `- source selection: ${compact(report.inference.sourceSelection, 1000)}`,
     `- entities / topic: ${compact(report.inference.entitiesTopic)}`,
@@ -1183,6 +1333,7 @@ function qualityMarkdown(report) {
     `- search returned count: ${compact(report.retrieval.search, 1800)}`,
     `- detail fetch: ${compact(report.retrieval.detailFetch, 1200)}`,
     `- aggregation: ${compact(report.retrieval.aggregation, 1000)}`,
+    `- attempts: ${compact(report.retrieval.search?.attempts, 2600)}`,
     "",
     "## PLANNING TIMING",
     "",
@@ -1236,6 +1387,9 @@ function qualityMarkdown(report) {
     `- finalEvidenceCount: ${compact(report.evidenceDiagnostics.finalEvidenceCount)}`,
     `- rejectionReason: ${compact(report.evidenceDiagnostics.preservation?.rejectionReason, 1000)}`,
     `- rejected reason: ${compact(report.evidenceDiagnostics.rejectedReason, 1000)}`,
+    `- run cumulative: ${compact(report.evidenceDiagnostics.run)}`,
+    `- final: ${compact(report.evidenceDiagnostics.final)}`,
+    `- by attempt: ${compact(report.evidenceDiagnostics.byAttempt, 2200)}`,
     `- by displayed signal: ${compact(report.evidenceDiagnostics.byDisplayedSignal, 1200)}`,
     "",
     "## EVIDENCE",
@@ -1633,8 +1787,12 @@ async function main() {
   }
 }
 
-main().catch(async (error) => {
-  fail(phaseReports.runtimeDb, sanitize(error instanceof Error ? error.message : error), { lastPhase: "uncaught" });
-  await writeReport();
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(async (error) => {
+    fail(phaseReports.runtimeDb, sanitize(error instanceof Error ? error.message : error), { lastPhase: "uncaught" });
+    await writeReport();
+    process.exitCode = 1;
+  });
+}
+
+export { attemptDiagnostics, attemptTraceGroups, qualityAcceptance, qualityMarkdown };

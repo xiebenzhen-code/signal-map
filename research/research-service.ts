@@ -62,6 +62,7 @@ export async function executeResearch({ identity, input, debug, context, reposit
   onPhase?.({ phase: "agent_started" });
   let tracedAgentFailure = false;
   let progressedPastSourceSelection = false;
+  const attemptsByRound = new Map<number, number>();
   const tracePhase: AgentRunOptions["onPhase"] = (event) => {
     if ([
       "source_selection_finished",
@@ -90,12 +91,24 @@ export async function executeResearch({ identity, input, debug, context, reposit
       deadlineAt,
       maxExecutionTimeMs: deadlineAt ? Math.max(1000, deadlineAt - Date.now()) : undefined,
       userQuery: input.currentQuestions || input.industry,
-      research: (researchInput, plan) => runResearchPipeline(
-        researchInput,
-        undefined,
-        { ...debug, onPhase: tracePhase, deadlineAt },
-        toRetrievalPlan(plan),
-      ),
+      research: (researchInput, plan, round) => {
+        const attemptNumber = (attemptsByRound.get(round) ?? 0) + 1;
+        attemptsByRound.set(round, attemptNumber);
+        const attemptType = attemptNumber === 1 ? "primary" : "fallback";
+        const attemptId = `round-${round}-${attemptType}`;
+        const pipelinePhase: NonNullable<AgentRunOptions["onPhase"]> = (event) => tracePhase({
+          ...event,
+          round,
+          attemptId,
+          attemptType,
+        });
+        return runResearchPipeline(
+          researchInput,
+          undefined,
+          { ...debug, onPhase: pipelinePhase, deadlineAt },
+          toRetrievalPlan(plan),
+        );
+      },
     });
     onPhase?.({ phase: "agent_finished", success: result.status !== "failed", itemCount: result.response?.signals.length });
     if (result.status === "failed") {

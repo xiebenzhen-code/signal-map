@@ -1,0 +1,75 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  attemptDiagnostics,
+  qualityAcceptance,
+  qualityMarkdown,
+} from "../scripts/signal-map-agent-loop-e2e.mjs";
+
+const trace = [
+  {
+    phase: "plan_finished",
+    round: 1,
+    diagnostic: { agentGeneratedQueries: ["discover"], selectedSourceType: "GENERAL_WEB" },
+  },
+  {
+    phase: "search_started",
+    round: 1,
+    attemptId: "round-1-primary",
+    attemptType: "primary",
+    diagnostic: {
+      agentGeneratedQueries: ["discover"],
+      pipelineActualQueries: ["discover"],
+      providerPlan: [{ providerId: "public-web", callAttempted: true }],
+      retrievalPlanSource: "upstream_agent_plan",
+    },
+  },
+  { phase: "search_finished", round: 1, attemptId: "round-1-primary", attemptType: "primary", itemCount: 12, durationMs: 10, diagnostic: { providerResponseCount: 12, providerOutcomes: [] } },
+  { phase: "detail_fetch_finished", round: 1, attemptId: "round-1-primary", attemptType: "primary", itemCount: 5, durationMs: 5 },
+  { phase: "aggregation_finished", round: 1, attemptId: "round-1-primary", attemptType: "primary", itemCount: 2, durationMs: 1 },
+  { phase: "evidence_preservation_finished", round: 1, attemptId: "round-1-primary", attemptType: "primary", diagnostic: { roundEvidenceCount: 2, cumulativeEvidenceCount: 2, producedEvidenceCount: 2, acceptedEvidenceCount: 0, rejectedEvidenceCount: 2 } },
+  { phase: "plan_finished", round: 1, attemptId: "round-1-fallback", attemptType: "fallback", diagnostic: { fallback: true, agentGeneratedQueries: ["verify"], selectedSourceType: "PRIMARY" } },
+  { phase: "search_started", round: 1, attemptId: "round-1-fallback", attemptType: "fallback", diagnostic: { pipelineActualQueries: ["verify"], providerPlan: [{ providerId: "primary-web-search", callAttempted: true }] } },
+  { phase: "search_finished", round: 1, attemptId: "round-1-fallback", attemptType: "fallback", itemCount: 0, durationMs: 10, diagnostic: { providerResponseCount: 0, providerOutcomes: [], providerErrorCodes: [{ providerName: "Primary", failureCode: "upstream_error" }] } },
+  { phase: "evidence_preservation_finished", round: 1, attemptId: "round-1-fallback", attemptType: "fallback", diagnostic: { roundEvidenceCount: 0, cumulativeEvidenceCount: 2, producedEvidenceCount: 0, acceptedEvidenceCount: 0, rejectedEvidenceCount: 2 } },
+];
+
+test("quality report groups primary and fallback attempts without mixing counts", () => {
+  const attempts = attemptDiagnostics(trace);
+  assert.equal(attempts.length, 2);
+  assert.equal(attempts[0].search.returnedCount, 12);
+  assert.equal(attempts[0].detailFetch.successCount, 5);
+  assert.equal(attempts[0].evidence.preservation.cumulativeEvidenceCount, 2);
+  assert.equal(attempts[1].search.returnedCount, 0);
+  assert.equal(attempts[1].evidence.preservation.cumulativeEvidenceCount, 2);
+});
+
+test("quality acceptance requires final evidence and signal output", () => {
+  assert.equal(qualityAcceptance({ status: 200, signalCount: 0, evidenceCount: 0 }, {
+    evidenceDiagnostics: { producedEvidenceCount: 2, acceptedEvidenceCount: 0, rejectedEvidenceCount: 2, rejectedReason: { insufficientVerification: 2 } },
+  }).status, "PARTIAL");
+  assert.equal(qualityAcceptance({ status: 200, signalCount: 0, evidenceCount: 0 }, {
+    evidenceDiagnostics: { producedEvidenceCount: 2, acceptedEvidenceCount: 0, rejectedEvidenceCount: 0, rejectedReason: "unavailable" },
+  }).status, "FAIL");
+  assert.equal(qualityAcceptance({ status: 200, signalCount: 1, evidenceCount: 1 }, {
+    evidenceDiagnostics: { acceptedEvidenceCount: 1 },
+  }).status, "PASS");
+});
+
+test("markdown uses the same request and final counts", () => {
+  const report = {
+    acceptanceStatus: "PARTIAL",
+    query: { original: "discover" },
+    inference: { inferredIntent: "PRODUCT_UPDATE", freshnessMentionedByUser: "30d", freshnessInferred: "3d", freshnessTimeRange: "3d", sourcePreference: [], sourceSelection: {}, entitiesTopic: [] },
+    retrieval: { retrievedCount: 12, evaluatedCount: 2, clusteredCount: 2, displayedCount: 0, search: { attempts: [], selectedSourceTypes: [], discoveryMode: true, verificationSourceTypes: [], sourceSelectionReason: "discover", resolvedEntities: [], agentGeneratedQueries: ["discover"], pipelineActualQueries: ["discover"], searchProvider: [], providerCallAttempted: [], providerReturnedCount: [], emptyResultReason: "all_results_empty", fallbackUsed: true, retrievalPlanSource: "upstream_agent_plan", fallbackReason: "empty" }, detailFetch: {}, aggregation: {} },
+    planning: {}, sources: [], filtered: { summaryText: "none", reasonCounts: {}, evaluation: {}, sampleFilteredResults: [] },
+    evidenceDiagnostics: { candidateCount: 2, discoveredCandidateCount: 12, producedEvidenceCount: 2, evaluatedEvidenceCount: 2, cumulativeEvidenceCount: 2, acceptedEvidenceCount: 0, rejectedEvidenceCount: 2, finalEvidenceCount: 0, rejectedReason: { insufficientVerification: 2 }, preservation: { cumulativeEvidenceCount: 2, carriedForwardEvidenceCount: 2, finalEvidenceCount: 0, rejectionReason: { insufficientVerification: 2 } }, run: { cumulativeEvidenceCount: 2 }, final: { finalEvidenceCount: 0 } },
+    evidence: [], result: { finalNaturalLanguageConclusion: "unavailable", recommendedUserTests: "unavailable" },
+    state: { requestId: "request-1", httpStatus: 200, latencyMs: 10, lastPhase: "response_finished", lastSuccessfulPhase: "response_finished", knowledgeWriteCount: 0, attentionDecision: "unavailable", statefulSecondRun: "unavailable", traceStates: [] },
+  };
+  const markdown = qualityMarkdown(report);
+  assert.match(markdown, /request-1/);
+  assert.match(markdown, /cumulativeEvidenceCount: 2/);
+  assert.match(markdown, /finalEvidenceCount: 0/);
+});

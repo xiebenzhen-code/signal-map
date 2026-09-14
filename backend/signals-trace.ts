@@ -14,6 +14,7 @@ export type SignalTracePhase =
   | "aggregation_finished"
   | "evidence_started"
   | "evidence_finished"
+  | "evidence_preservation_finished"
   | "agent_started"
   | "budget_checked"
   | "plan_finished"
@@ -29,6 +30,9 @@ export type SignalTracePhase =
 
 type TraceInput = {
   phase: SignalTracePhase;
+  round?: number;
+  attemptId?: string;
+  attemptType?: "primary" | "fallback" | "verification";
   success?: boolean;
   itemCount?: number;
   errorCode?: string;
@@ -42,6 +46,9 @@ type TraceInput = {
 export type SignalPhaseTrace = {
   requestId: string;
   phase: SignalTracePhase;
+  round?: number;
+  attemptId?: string;
+  attemptType?: "primary" | "fallback" | "verification";
   startedAt: string;
   finishedAt: string;
   durationMs: number;
@@ -99,7 +106,7 @@ export function createSignalTracer(requestId: string) {
     }
     return value;
   };
-  const mark = ({ phase, success = true, itemCount, errorCode, errorName, errorMessage, topStackFrame, failureKind, diagnostic }: TraceInput) => {
+  const mark = ({ phase, round, attemptId, attemptType, success = true, itemCount, errorCode, errorName, errorMessage, topStackFrame, failureKind, diagnostic }: TraceInput) => {
     const finished = nowMs();
     const group = phaseGroup(phase);
     const isStart = phase.endsWith("_started") || phase === "request_received";
@@ -110,6 +117,9 @@ export function createSignalTracer(requestId: string) {
     const record: SignalPhaseTrace = {
       requestId,
       phase,
+      ...(typeof round === "number" ? { round } : {}),
+      ...(attemptId ? { attemptId } : {}),
+      ...(attemptType ? { attemptType } : {}),
       startedAt: iso(started),
       finishedAt: iso(finished),
       durationMs: Math.max(0, finished - started),

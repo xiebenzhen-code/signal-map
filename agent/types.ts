@@ -200,6 +200,9 @@ export type AgentRunOptions = {
   };
   onPhase?: (event: {
     phase: string;
+    round?: number;
+    attemptId?: string;
+    attemptType?: "primary" | "fallback" | "verification";
     success?: boolean;
     itemCount?: number;
     errorCode?: string;

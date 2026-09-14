@@ -162,6 +162,7 @@ export const handleSignals = withSession(async (request: Request) => {
       "aggregation_finished",
       "evidence_started",
       "evidence_finished",
+      "evidence_preservation_finished",
       "agent_started",
       "budget_checked",
       "plan_finished",
@@ -176,6 +177,9 @@ export const handleSignals = withSession(async (request: Request) => {
     if (allowed.includes(event.phase)) {
       tracer.mark({
         phase: event.phase as SignalTracePhase,
+        round: event.round,
+        attemptId: event.attemptId,
+        attemptType: event.attemptType,
         success: event.success,
         itemCount: event.itemCount,
         errorCode: event.errorCode,

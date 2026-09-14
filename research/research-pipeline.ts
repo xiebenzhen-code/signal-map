@@ -56,7 +56,7 @@ type ProgressHandler = (progress: PipelineProgress) => void | Promise<void>;
 export type ResearchPipelineDebug = {
   onCandidateSelectionAudit?: (audit: CandidateSelectionAudit[]) => void;
   onEligibilityAudit?: (audit: EligibilityAuditFunnel) => void;
-  onPhase?: (event: { phase: string; success?: boolean; itemCount?: number; errorCode?: string; diagnostic?: Record<string, unknown> }) => void;
+  onPhase?: (event: { phase: string; round?: number; attemptId?: string; attemptType?: "primary" | "fallback" | "verification"; success?: boolean; itemCount?: number; errorCode?: string; diagnostic?: Record<string, unknown> }) => void;
   deadlineAt?: number;
 };
 

@@ -89,8 +89,9 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
   const runId = options.runId ?? `agent-run-${randomUUID()}`;
   const steps: AgentStep[] = [];
   const trace: AgentTraceEntry[] = [];
+  let phaseContext: { round?: number; attemptId?: string; attemptType?: "primary" | "fallback" | "verification" } = {};
   const markPhase = (phase: string, success = true, itemCount?: number, errorCode?: string, diagnostic?: Record<string, unknown>) =>
-    options.onPhase?.({ phase, success, itemCount, errorCode, diagnostic });
+    options.onPhase?.({ phase, ...phaseContext, success, itemCount, errorCode, diagnostic });
   const deadlineAt = options.deadlineAt ?? startedAt + (options.maxExecutionTimeMs ?? 30000);
   const budget = new BudgetManager({ deadlineAt });
   const add = (state: AgentState, status: AgentStep["status"], input: unknown, output: unknown, reason?: string) => {
@@ -230,6 +231,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     let roundResponse: ResearchResponse | undefined;
     let preservation: EvidencePreservationSnapshot | undefined;
     const mergeAttemptResponse = (attemptResponse: ResearchResponse, attemptType: "primary" | "fallback") => {
+      phaseContext = { round, attemptId: `round-${round}-${attemptType}`, attemptType };
       const snapshot = runState.mergeRoundResponse(attemptResponse);
       markPhase("evidence_preservation_finished", true, snapshot.cumulativeEvidenceCount, undefined, {
         round,
@@ -245,6 +247,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       if (!retrievalBudget.canStartRetrieval) {
         throw Object.assign(new Error("Worker deadline budget exhausted before research"), { code: "WORKER_DEADLINE" });
       }
+      phaseContext = { round, attemptId: `round-${round}-primary`, attemptType: "primary" };
       roundResponse = prepareRoundResponse(await executeResearch(plan));
       preservation = mergeAttemptResponse(roundResponse, "primary");
       if (!roundResponse.signals.length && plan.fallbackSourceTypes?.length) {
@@ -275,6 +278,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
           resolvedEntities: plan.resolvedEntities,
         });
         if (fallbackSelection.primarySourceType && fallbackSelection.primarySourceType !== plan.selectedSourceType) {
+          phaseContext = { round, attemptId: `round-${round}-fallback`, attemptType: "fallback" };
           plan = createResearchPlan(researchInput, round, maxQueries, relatedKnowledge, plan.strategy, fallbackSelection, intent, sourceProfile);
           const fallbackPlanningBudget = budget.snapshot();
           markPhase("budget_checked", true, undefined, undefined, budgetDiagnostics(fallbackPlanningBudget, { round, stage: "fallback_planning" }));
@@ -303,6 +307,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
           if (!fallbackRetrievalBudget.canStartRetrieval) {
             throw Object.assign(new Error("Worker deadline budget exhausted before fallback research"), { code: "WORKER_DEADLINE" });
           }
+          phaseContext = { round, attemptId: `round-${round}-fallback`, attemptType: "fallback" };
           const fallbackResponse = prepareRoundResponse(await executeResearch(plan));
           preservation = mergeAttemptResponse(fallbackResponse, "fallback");
           roundResponse = prepareRoundResponse(mergeRoundAttempts(firstAttemptResponse, fallbackResponse));
@@ -384,6 +389,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       reliabilityState,
       freshnessState,
     }, policy, policy.reason);
+    phaseContext = { round, attemptId: `round-${round}-primary`, attemptType: "primary" };
     markPhase("source_selection_started");
     const sourceSelection = selectSource({
       strategy: policy.strategy,
@@ -482,6 +488,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
         return { status: "failed", rounds, response, plan, evaluation, knowledgeChanges: allKnowledgeChanges, attention: [], steps, trace };
       }
     }
+    phaseContext = { round: round + 1, attemptId: `round-${round + 1}-primary`, attemptType: "primary" };
     const nextRoundBudget = budget.snapshot();
     markPhase("budget_checked", true, runState.cumulativeEvidenceCount, undefined, budgetDiagnostics(nextRoundBudget, {
       round: round + 1,
