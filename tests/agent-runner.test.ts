@@ -3,6 +3,7 @@ import test from "node:test";
 import { runAgent } from "../agent/runner.ts";
 import { updateKnowledgeFromChanges } from "../agent/knowledge-updater.ts";
 import { InMemorySignalRepository } from "../information/repositories/in-memory.ts";
+import { recordsFromSignal } from "../information/rag-records.ts";
 import type { ResearchResponse, ResearchSignal } from "../research/types.ts";
 
 const input = {
@@ -41,10 +42,22 @@ function accountedEvidenceResponse(options: {
   producedEvidenceCount: number;
   acceptedEvidenceCount?: number;
   providerId?: string;
+  sourceUrl?: string;
 }): ResearchResponse {
   const acceptedEvidenceCount = options.acceptedEvidenceCount ?? 0;
+  const producedSignals = Array.from({ length: options.producedEvidenceCount }, (_, index) =>
+    evidenceSignal({
+      id: `accounted-${index}`,
+      sourceUrl: index === 0 && options.sourceUrl ? options.sourceUrl : `https://example.com/accounted-${index}`,
+      title: `Accounted evidence ${index}`,
+      summary: `Evidence ${index} supports the research result.`,
+      verificationStatus: acceptedEvidenceCount > index ? "verified" : "unverified",
+    }),
+  );
+  const acceptedSignals = producedSignals.slice(0, acceptedEvidenceCount);
   return {
-    ...response([]),
+    ...response(acceptedSignals),
+    evidenceRecords: producedSignals.flatMap((signal) => recordsFromSignal(signal).evidence),
     evidenceAccounting: {
       discoveredCandidateCount: options.discoveredCandidateCount,
       producedEvidenceCount: options.producedEvidenceCount,
@@ -289,10 +302,12 @@ test("fallback attempt can add verified evidence without duplicating primary sou
     research: async () => {
       calls += 1;
       return calls === 1
-        ? accountedEvidenceResponse({ discoveredCandidateCount: 12, producedEvidenceCount: 1 })
+        ? accountedEvidenceResponse({ discoveredCandidateCount: 12, producedEvidenceCount: 1, sourceUrl: "https://example.com/update" })
         : response([evidenceSignal({
             id: "verified-fallback",
             sourceUrl: "https://example.com/update",
+            title: "Accounted evidence 0",
+            summary: "Evidence 0 supports the research result.",
             sourceType: "primary",
             sourceTier: "S",
             verificationStatus: "verified",

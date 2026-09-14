@@ -36,6 +36,7 @@ import type { FusionEvidence } from "../signal-fusion/types.ts";
 import { enrichDetail, maxDetailFetchesPerRound, shouldEnrichDetail, sourceCapability } from "../source-enrichment/index.ts";
 import type { DetailEnrichmentSummary } from "../source-enrichment/types.ts";
 import { discardResponseBody, throwAfterDiscardingBody } from "../lib/http-response.ts";
+import { recordsFromSignal, type EvidenceRecord } from "../information/rag-records.ts";
 import type {
   PipelineCounts,
   PipelineProgress,
@@ -66,6 +67,31 @@ type LegacySourceSelection = {
   allowedProviderIds?: string[];
   reason?: string;
 };
+
+function uniqueEvidenceRecords(records: EvidenceRecord[]) {
+  const byIdentity = new Map<string, EvidenceRecord>();
+  for (const record of records) {
+    const identity = record.id || `${record.claimId}:${record.canonicalUrl}`;
+    const current = byIdentity.get(identity);
+    if (!current) {
+      byIdentity.set(identity, record);
+      continue;
+    }
+    byIdentity.set(identity, {
+      ...current,
+      ...record,
+      verificationStatus:
+        current.verificationStatus === "verified" || record.verificationStatus === "verified"
+          ? "verified"
+          : current.verificationStatus === "partially_verified" || record.verificationStatus === "partially_verified"
+            ? "partially_verified"
+            : current.verificationStatus === "conflicting" || record.verificationStatus === "conflicting"
+              ? "conflicting"
+              : "unverified",
+    });
+  }
+  return [...byIdentity.values()];
+}
 
 export type PipelinePlanResolution = {
   plan: QueryPlan;
@@ -2052,12 +2078,19 @@ export async function runResearchPipeline(
     displayedSignals: signals,
     detailEnrichment,
   });
-  const producedEvidenceCount = allSignals.length;
-  const acceptedEvidenceCount = signals.reduce((total, signal) => total + signal.claims.length, 0);
+  const evidenceRecords = uniqueEvidenceRecords(
+    allSignals.flatMap((signal) => recordsFromSignal(signal).evidence),
+  );
+  const acceptedEvidenceRecords = uniqueEvidenceRecords(
+    signals.flatMap((signal) => recordsFromSignal(signal).evidence),
+  );
+  const producedEvidenceCount = evidenceRecords.length;
+  const acceptedEvidenceCount = acceptedEvidenceRecords.length;
   const evidenceAccounting = {
     discoveredCandidateCount: candidates.length,
     producedEvidenceCount,
-    evaluatedEvidenceCount: allSignals.length,
+    cumulativeEvidenceCount: producedEvidenceCount,
+    evaluatedEvidenceCount: producedEvidenceCount,
     acceptedEvidenceCount,
     rejectedEvidenceCount: Math.max(0, producedEvidenceCount - acceptedEvidenceCount),
     finalEvidenceCount: acceptedEvidenceCount,
@@ -2159,6 +2192,7 @@ export async function runResearchPipeline(
     coverage,
     filteringSummary,
     evidenceAccounting,
+    evidenceRecords,
     fetchedAt: new Date().toISOString(),
     dataMode: "live",
     lastCheckedAt: new Date().toISOString(),

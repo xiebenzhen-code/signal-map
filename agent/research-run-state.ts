@@ -1,3 +1,4 @@
+import { recordsFromSignal, type EvidenceRecord } from "../information/rag-records.ts";
 import type { FilteringSummary, ResearchResponse, ResearchSignal, VerificationStatus } from "../research/types.ts";
 
 export type VerificationOutcome =
@@ -43,31 +44,57 @@ export function strongerVerification(a: VerificationStatus, b: VerificationStatu
   return verificationRank(b) > verificationRank(a) ? b : a;
 }
 
+function evidenceIdentity(record: EvidenceRecord) {
+  return `${record.canonicalUrl}:${normalizeEvidenceKey(record.evidenceSnippet)}`;
+}
+
+function mergeEvidenceRecords(previous: EvidenceRecord[], next: EvidenceRecord[]) {
+  const merged = new Map<string, EvidenceRecord>();
+  for (const record of [...previous, ...next]) {
+    const key = evidenceIdentity(record);
+    const current = merged.get(key);
+    merged.set(key, current
+      ? {
+          ...current,
+          ...record,
+          verificationStatus: strongerVerification(current.verificationStatus, record.verificationStatus),
+        }
+      : record);
+  }
+  return [...merged.values()];
+}
+
+export function evidenceRecordsFromResponse(response: ResearchResponse | undefined) {
+  if (!response) return [];
+  return mergeEvidenceRecords(
+    response.evidenceRecords ?? [],
+    response.signals.flatMap((signal) => recordsFromSignal(signal).evidence),
+  );
+}
+
 export function countEvidence(response: ResearchResponse | undefined) {
-  if (!response) return 0;
-  return response.evidenceAccounting?.producedEvidenceCount
-    ?? response.signals.reduce((count, signal) => count + signal.claims.length, 0);
+  return evidenceRecordsFromResponse(response).length;
+}
+
+function acceptedEvidenceRecords(response: ResearchResponse | undefined) {
+  if (!response) return [];
+  return mergeEvidenceRecords(
+    [],
+    response.signals.flatMap((signal) => recordsFromSignal(signal).evidence),
+  );
 }
 
 function finalEvidenceCount(response: ResearchResponse | undefined) {
-  if (!response) return 0;
-  return response.evidenceAccounting?.finalEvidenceCount
-    ?? response.signals.reduce((count, signal) => count + signal.claims.length, 0);
+  return acceptedEvidenceRecords(response).length;
 }
 
 function acceptedEvidenceCount(response: ResearchResponse | undefined) {
-  if (!response) return 0;
-  return response.evidenceAccounting?.acceptedEvidenceCount ?? finalEvidenceCount(response);
+  return finalEvidenceCount(response);
 }
 
 function rejectedEvidenceCount(response: ResearchResponse | undefined) {
   if (!response) return 0;
-  return response.evidenceAccounting?.rejectedEvidenceCount
-    ?? Math.max(0, countEvidence(response) - acceptedEvidenceCount(response));
-}
-
-function claimCount(signals: ResearchSignal[]) {
-  return signals.reduce((count, signal) => count + signal.claims.length, 0);
+  return Math.max(0, countEvidence(response) - acceptedEvidenceCount(response));
 }
 
 function mergeRejectionReasons(
@@ -153,7 +180,23 @@ function mergeSignals(previous: ResearchSignal, next: ResearchSignal): ResearchS
 }
 
 function mergeResearchResponses(previous: ResearchResponse | undefined, next: ResearchResponse): ResearchResponse {
-  if (!previous) return next;
+  if (!previous) {
+    return {
+      ...next,
+      evidenceRecords: evidenceRecordsFromResponse(next),
+      evidenceAccounting: next.evidenceAccounting
+        ? {
+            ...next.evidenceAccounting,
+            producedEvidenceCount: countEvidence(next),
+            cumulativeEvidenceCount: countEvidence(next),
+            evaluatedEvidenceCount: countEvidence(next),
+            acceptedEvidenceCount: acceptedEvidenceCount(next),
+            rejectedEvidenceCount: rejectedEvidenceCount(next),
+            finalEvidenceCount: finalEvidenceCount(next),
+          }
+        : undefined,
+    };
+  }
   const signals = new Map(previous.signals.map((signal) => [signalIdentity(signal), signal]));
   for (const signal of next.signals) {
     const key = signalIdentity(signal);
@@ -161,9 +204,15 @@ function mergeResearchResponses(previous: ResearchResponse | undefined, next: Re
     signals.set(key, current ? mergeSignals(current, signal) : signal);
   }
   const mergedSignals = [...signals.values()];
+  const mergedEvidenceRecords = mergeEvidenceRecords(
+    evidenceRecordsFromResponse(previous),
+    evidenceRecordsFromResponse(next),
+  );
+  const acceptedCount = acceptedEvidenceRecords({ ...next, signals: mergedSignals }).length;
   return mergeResponseSourceOutcomes(previous, {
     ...next,
     signals: mergedSignals,
+    evidenceRecords: mergedEvidenceRecords,
     status: [...previous.status, ...next.status],
     progress: [...previous.progress, ...next.progress],
     failures: [...previous.failures, ...next.failures],
@@ -175,36 +224,21 @@ function mergeResearchResponses(previous: ResearchResponse | undefined, next: Re
         next.evidenceAccounting?.discoveredCandidateCount ?? next.overview?.deduplicated ?? 0,
       ),
       producedEvidenceCount: Math.max(
-        mergedSignals.length,
-        countEvidence(previous),
-        countEvidence(next),
+        mergedEvidenceRecords.length,
       ),
+      cumulativeEvidenceCount: mergedEvidenceRecords.length,
       evaluatedEvidenceCount: Math.max(
-        mergedSignals.length,
-        previous.evidenceAccounting?.evaluatedEvidenceCount ?? countEvidence(previous),
-        next.evidenceAccounting?.evaluatedEvidenceCount ?? countEvidence(next),
+        mergedEvidenceRecords.length,
       ),
       acceptedEvidenceCount: Math.max(
-        claimCount(mergedSignals),
-        acceptedEvidenceCount(previous),
-        acceptedEvidenceCount(next),
+        acceptedCount,
       ),
       rejectedEvidenceCount: Math.max(
         0,
-        Math.max(
-          countEvidence(previous),
-          countEvidence(next),
-          mergedSignals.length,
-        ) - Math.max(
-          claimCount(mergedSignals),
-          acceptedEvidenceCount(previous),
-          acceptedEvidenceCount(next),
-        ),
+        mergedEvidenceRecords.length - acceptedCount,
       ),
       finalEvidenceCount: Math.max(
-        claimCount(mergedSignals),
-        finalEvidenceCount(previous),
-        finalEvidenceCount(next),
+        acceptedCount,
       ),
       rejectionReasons: mergeRejectionReasons(
         previous.evidenceAccounting?.rejectionReasons,

@@ -202,3 +202,16 @@ Rules:
 - Minimal Fix: Add explicit `EvidenceAccounting` fields for discovered candidates, produced evidence, evaluated evidence, accepted evidence, rejected evidence, final evidence, and rejection reasons; make `ResearchRunState` count only produced Evidence, not source outcome candidate counts; make final trace values read final accounting rather than cumulative produced counts.
 - Re-test Result: Targeted tests verify provider candidates do not inflate cumulative evidence, produced evidence survives empty fallback, produced-but-rejected evidence reports explicit rejection counts, and accepted evidence defines final evidence count.
 - Status: PASS
+
+## 2026-09-15 — Evidence accounting semantics correction
+
+- Date: 2026-09-15
+- Test / Run ID: Local evidence-record accounting regression
+- Commit SHA: 82cbcc1
+- Layer: ResearchPipeline / ResearchRunState / quality harness
+- Symptom / Failure: Provider discovery returned 12 candidates while `evidence_finished` produced 2 evidence-bearing results; cumulative accounting could report candidate or signal counts instead of actual Evidence records, and final API output could show zero without a countable reason.
+- Evidence: `sourceOutcomes.newEvidenceCount` is assigned from provider `resultCount`; actual Evidence objects are created by `recordsFromSignal(signal).evidence` from signal claims and evidence sources.
+- Root Cause: Candidate, produced Evidence, evaluated Evidence, accepted Evidence, and final Evidence were not consistently derived from the same underlying objects.
+- Minimal Fix: Add explicit `evidenceRecords` to research responses; derive produced, evaluated, accepted, cumulative, rejected, and final counts from stable EvidenceRecord identities; keep provider candidate counts diagnostic-only; expose the same fields in quality artifacts.
+- Re-test Result: Targeted ResearchRunState, AgentRunner, RAG contract, RetrievalPlan, and SourceSelection tests passed; full test suite passed with only the two pre-existing DB-configuration skips; typecheck, API build, and related lint passed.
+- Status: PASS

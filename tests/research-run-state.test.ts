@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ResearchRunState, mergeRoundAttempts } from "../agent/research-run-state.ts";
+import { recordsFromSignal } from "../information/rag-records.ts";
 import type { ResearchResponse, ResearchSignal } from "../research/types.ts";
 
 function signal(overrides: Partial<ResearchSignal> = {}): ResearchSignal {
@@ -145,7 +146,12 @@ test("source outcome candidate counts do not count as cumulative evidence", () =
 
 test("produced evidence accounting counts as cumulative evidence before displayed signals exist", () => {
   const state = new ResearchRunState();
+  const hiddenEvidence = [
+    signal({ id: "hidden-1", sourceUrl: "https://example.com/hidden-1" }),
+    signal({ id: "hidden-2", sourceUrl: "https://example.com/hidden-2" }),
+  ].flatMap((item) => recordsFromSignal(item).evidence);
   const snapshot = state.mergeRoundResponse(response([], {
+    evidenceRecords: hiddenEvidence,
     evidenceAccounting: {
       discoveredCandidateCount: 12,
       producedEvidenceCount: 2,

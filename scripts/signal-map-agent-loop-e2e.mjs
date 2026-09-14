@@ -820,8 +820,10 @@ function evidenceDiagnostics(data, summary, signals, latestRun, phaseTrace) {
   const accounting = data.evidenceAccounting || {};
   return {
     candidateCount: unavailable(summary.clusteredCount ?? summary.filteringDetails?.length ?? data.overview?.events),
+    discoveredCandidateCount: unavailable(accounting.discoveredCandidateCount ?? summary.retrievedCount ?? data.overview?.scanned),
     producedEvidenceCount: unavailable(accounting.producedEvidenceCount ?? preservation.producedEvidenceCount),
-    cumulativeEvidenceCount: unavailable(accounting.producedEvidenceCount ?? preservation.cumulativeEvidenceCount),
+    cumulativeEvidenceCount: unavailable(accounting.cumulativeEvidenceCount ?? preservation.cumulativeEvidenceCount),
+    evaluatedEvidenceCount: unavailable(accounting.evaluatedEvidenceCount),
     acceptedEvidenceCount: unavailable(accounting.acceptedEvidenceCount ?? (preservation.acceptedEvidenceCount === "unavailable"
       ? latestRun?.evidenceCount ?? accepted.length
       : preservation.acceptedEvidenceCount)),
@@ -911,8 +913,10 @@ function emptyQualityReport(status, reason, state = {}) {
     },
     evidenceDiagnostics: {
       candidateCount: "unavailable",
+      discoveredCandidateCount: "unavailable",
       producedEvidenceCount: "unavailable",
       cumulativeEvidenceCount: "unavailable",
+      evaluatedEvidenceCount: "unavailable",
       acceptedEvidenceCount: "unavailable",
       rejectedEvidenceCount: "unavailable",
       finalEvidenceCount: "unavailable",
@@ -1220,8 +1224,10 @@ function qualityMarkdown(report) {
     "## EVIDENCE DIAGNOSTICS",
     "",
     `- candidate / accepted: ${compact(report.evidenceDiagnostics.candidateCount)} / ${compact(report.evidenceDiagnostics.acceptedEvidenceCount)}`,
+    `- discoveredCandidateCount: ${compact(report.evidenceDiagnostics.discoveredCandidateCount)}`,
     `- roundEvidenceCount: ${compact(report.evidenceDiagnostics.preservation?.roundEvidenceCount)}`,
     `- producedEvidenceCount: ${compact(report.evidenceDiagnostics.producedEvidenceCount)}`,
+    `- evaluatedEvidenceCount: ${compact(report.evidenceDiagnostics.evaluatedEvidenceCount)}`,
     `- cumulativeEvidenceCount: ${compact(report.evidenceDiagnostics.preservation?.cumulativeEvidenceCount)}`,
     `- carriedForwardEvidenceCount: ${compact(report.evidenceDiagnostics.preservation?.carriedForwardEvidenceCount)}`,
     `- acceptedEvidenceCount: ${compact(report.evidenceDiagnostics.acceptedEvidenceCount)}`,

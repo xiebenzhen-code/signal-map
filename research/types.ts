@@ -1,4 +1,5 @@
 import type { LiveItem } from "../social/providers/index.ts";
+import type { EvidenceRecord } from "../information/rag-records.ts";
 import type { SourceCoverage } from "./source-coverage.ts";
 import type { IntentClassification, IntentMappedOutput, SourceProfile } from "../intent/types.ts";
 import type { SignalClassification, SignalCluster, SourceRole as FusionSourceRole } from "../signal-fusion/types.ts";
@@ -273,6 +274,7 @@ export type FilteringSummary = {
 export type EvidenceAccounting = {
   discoveredCandidateCount: number;
   producedEvidenceCount: number;
+  cumulativeEvidenceCount?: number;
   evaluatedEvidenceCount: number;
   acceptedEvidenceCount: number;
   rejectedEvidenceCount: number;
@@ -291,6 +293,8 @@ export type ResearchResponse = {
   coverage: SourceCoverage;
   filteringSummary?: FilteringSummary;
   evidenceAccounting?: EvidenceAccounting;
+  /** Evidence objects produced during this run, including evaluated-but-filtered records. */
+  evidenceRecords?: EvidenceRecord[];
   fetchedAt: string;
   dataMode: "live" | "demo" | "mixed";
   lastCheckedAt?: string;
