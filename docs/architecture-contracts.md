@@ -55,6 +55,15 @@ When a valid upstream plan exists, the trace must record:
 
 `pipelineActualQueries` must match `agentGeneratedQueries`, except for explicit deterministic adapter mapping that is visible in trace.
 
+## Multi-round Research Run State
+
+- A round-local `ResearchResponse` may be replaced by retry or verification attempts inside the same round.
+- Run-level cumulative state is owned by `ResearchRunState`.
+- Run-level cumulative evidence, claims, sources, and source outcomes must be merged forward; a later round must not overwrite or clear earlier successful evidence.
+- Verification rounds may upgrade metadata for an existing evidence item, such as verification status or reliability, but must not duplicate the same evidence identity.
+- Provider failure or zero-result verification can lower confidence / keep `needs_more_evidence`, but must preserve previously collected evidence in the final run response.
+- Final evaluation and final response must read from run-level cumulative state, not only the latest round-local response.
+
 ## Required Contract Regression Tests
 
 Any migration or Agent/Retrieval refactor must pass tests that prove:
@@ -65,3 +74,5 @@ Any migration or Agent/Retrieval refactor must pass tests that prove:
 - source and provider routing survive plan resolution;
 - `ResearchPlan -> RetrievalPlan` serialization preserves cross-layer semantics;
 - runtime environment changes do not change query or routing semantics.
+- round-local empty or failed verification does not clear run-level cumulative evidence;
+- duplicate evidence can be verification-upgraded without double counting.

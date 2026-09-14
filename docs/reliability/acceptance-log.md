@@ -150,3 +150,16 @@ Rules:
 - Minimal Fix: Keep a run-level cumulative response, merge each round's signals/claims/sources by stable source identity, update verification metadata for duplicate evidence, and evaluate / return / formally persist from cumulative evidence while intermediate provenance persistence uses only the current round.
 - Re-test Result: Targeted tests now verify round 1 evidence survives round 2 zero results, later provider errors do not clear existing evidence, duplicate verification updates metadata without double counting, and final evaluation uses cumulative evidence.
 - Status: PASS
+
+## 2026-09-14 — ResearchRunState extraction
+
+- Date: 2026-09-14
+- Test / Run ID: Local ResearchRunState Phase 1 refactor regression
+- Commit SHA: same commit as this record
+- Layer: AgentRunner / run-level cumulative state
+- Symptom / Failure: `runAgent` still owned low-level cumulative evidence identity, merge, count, and verification-upgrade details directly, making multi-round orchestration hard to audit.
+- Evidence: `runAgent` contained evidence identity helpers, claim/source identity helpers, verification ranking, signal merge, response merge, and evidence count logic inline.
+- Root Cause: Run-level cumulative state lacked a dedicated boundary separate from round-local response orchestration.
+- Minimal Fix: Extract `ResearchRunState` with `mergeRoundResponse()`, `cumulativeResponse`, cumulative evidence counts, carried-forward counts, provider-failure snapshot, and duplicate evidence verification upgrade semantics.
+- Re-test Result: Dedicated ResearchRunState tests and existing AgentRunner cumulative evidence regressions passed locally without changing SourceSelection, RetrievalPlan, QueryPlanner, provider, deadline, STOP, Knowledge, Attention, or persistence contracts.
+- Status: PASS

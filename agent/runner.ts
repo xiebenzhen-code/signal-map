@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 
 import { runResearchPipeline } from "../research/research-pipeline.ts";
-import type { ResearchResponse, ResearchSignal, VerificationStatus } from "../research/types.ts";
+import type { ResearchResponse } from "../research/types.ts";
 import { compareKnowledge, evaluateEvidence } from "./evaluation.ts";
 import { persistResearchRecords, updateKnowledgeFromChanges } from "./knowledge-updater.ts";
 import { createResearchPlan } from "./query-planner.ts";
+import { ResearchRunState, mergeRoundAttempts } from "./research-run-state.ts";
 import { toRetrievalPlan } from "./retrieval-plan.ts";
 import { chooseResearchStrategy } from "./research-policy.ts";
 import { selectSource } from "./source-selector.ts";
@@ -49,112 +50,6 @@ function sourceOutcomesFromResponse(response: ResearchResponse): SourceOutcome[]
     reliabilityGain: items.length ? Math.max(...items.map((item) => item.reliabilityScore)) : 0,
     conflictReduction: items.filter((item) => item.verificationStatus === "verified").length,
   }));
-}
-
-function mergeResponseSourceOutcomes(previous: ResearchResponse | undefined, next: ResearchResponse) {
-  if (!previous?.sourceOutcomes?.length) return next;
-  const merged = new Map<string, NonNullable<ResearchResponse["sourceOutcomes"]>[number]>();
-  for (const outcome of [...previous.sourceOutcomes, ...(next.sourceOutcomes ?? [])]) {
-    const key = `${outcome.sourceType}:${outcome.providerId}`;
-    const current = merged.get(key);
-    merged.set(key, current
-      ? {
-          ...outcome,
-          executed: current.executed || outcome.executed,
-          resultCount: current.resultCount + outcome.resultCount,
-          requestCount: (current.requestCount || 0) + (outcome.requestCount || 0),
-          newEvidenceCount: current.newEvidenceCount + outcome.newEvidenceCount,
-          newClaimCount: current.newClaimCount + outcome.newClaimCount,
-          reliabilityGain: Math.max(current.reliabilityGain, outcome.reliabilityGain),
-          conflictReduction: Math.max(current.conflictReduction, outcome.conflictReduction),
-        }
-      : outcome);
-  }
-  next.sourceOutcomes = [...merged.values()];
-  return next;
-}
-
-function normalizeEvidenceKey(value: string) {
-  return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-}
-
-function signalIdentity(signal: ResearchSignal) {
-  return signal.sourceUrl || signal.id || normalizeEvidenceKey(`${signal.title} ${signal.publisher}`);
-}
-
-function claimIdentity(claim: ResearchSignal["claims"][number]) {
-  return `${claim.sourceUrl || ""}:${normalizeEvidenceKey(claim.claimText)}`;
-}
-
-function sourceIdentity(source: ResearchSignal["sources"][number]) {
-  return source.sourceUrl || `${source.publisher}:${source.publishedAt ?? ""}`;
-}
-
-function verificationRank(status: VerificationStatus) {
-  return ({ unverified: 0, partially_verified: 1, conflicting: 2, verified: 3 })[status] ?? 0;
-}
-
-function strongerVerification(a: VerificationStatus, b: VerificationStatus) {
-  return verificationRank(b) > verificationRank(a) ? b : a;
-}
-
-function mergeSignals(previous: ResearchSignal, next: ResearchSignal): ResearchSignal {
-  const claims = new Map(previous.claims.map((claim) => [claimIdentity(claim), claim]));
-  for (const claim of next.claims) {
-    const key = claimIdentity(claim);
-    const current = claims.get(key);
-    claims.set(key, current
-      ? {
-          ...current,
-          ...claim,
-          verificationStatus: strongerVerification(current.verificationStatus, claim.verificationStatus),
-          independentEvidenceCount: Math.max(current.independentEvidenceCount, claim.independentEvidenceCount),
-          evidenceSources: [
-            ...current.evidenceSources,
-            ...claim.evidenceSources.filter((source) =>
-              !current.evidenceSources.some((existing) => existing.sourceUrl === source.sourceUrl && existing.publisher === source.publisher),
-            ),
-          ],
-        }
-      : claim);
-  }
-  const sources = new Map(previous.sources.map((source) => [sourceIdentity(source), source]));
-  for (const source of next.sources) sources.set(sourceIdentity(source), source);
-  return {
-    ...previous,
-    ...next,
-    verificationStatus: strongerVerification(previous.verificationStatus, next.verificationStatus),
-    truth: Math.max(previous.truth, next.truth),
-    confidence: Math.max(previous.confidence, next.confidence),
-    reliabilityScore: Math.max(previous.reliabilityScore, next.reliabilityScore),
-    sourceCount: Math.max(previous.sourceCount, next.sourceCount, sources.size),
-    independentEvidenceCount: Math.max(previous.independentEvidenceCount, next.independentEvidenceCount),
-    claims: [...claims.values()],
-    sources: [...sources.values()],
-  };
-}
-
-function mergeResearchResponses(previous: ResearchResponse | undefined, next: ResearchResponse): ResearchResponse {
-  if (!previous) return next;
-  const signals = new Map(previous.signals.map((signal) => [signalIdentity(signal), signal]));
-  for (const signal of next.signals) {
-    const key = signalIdentity(signal);
-    const current = signals.get(key);
-    signals.set(key, current ? mergeSignals(current, signal) : signal);
-  }
-  return mergeResponseSourceOutcomes(previous, {
-    ...next,
-    signals: [...signals.values()],
-    status: [...previous.status, ...next.status],
-    progress: [...previous.progress, ...next.progress],
-    failures: [...previous.failures, ...next.failures],
-    dataMode: previous.dataMode === next.dataMode ? next.dataMode : "mixed",
-    sourceDiagnostics: [...(previous.sourceDiagnostics ?? []), ...(next.sourceDiagnostics ?? [])],
-  });
-}
-
-function countEvidence(response: ResearchResponse | undefined) {
-  return response?.signals.reduce((count, signal) => count + signal.claims.length, 0) ?? 0;
 }
 
 async function applyModelPlanning(options: {
@@ -279,7 +174,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
   });
   add("PLAN", "completed", { round: 1 }, plan);
   let response: ResearchResponse | undefined;
-  let cumulativeResponse: ResearchResponse | undefined;
+  const runState = new ResearchRunState();
   let evaluation = evaluateEvidence({ signals: [], status: [], queryPlan: {} as never, progress: [], failures: [], counts: {} as never, overview: {} as never, coverage: {} as never, fetchedAt: now(), dataMode: "demo" }, 1, maxRounds);
   let allKnowledgeChanges: AgentRunResult["knowledgeChanges"] = [];
   let allEvidenceIds: string[] = [];
@@ -354,7 +249,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
             throw Object.assign(new Error("Worker deadline budget exhausted before fallback research"), { code: "WORKER_DEADLINE" });
           }
           roundResponse = await executeResearch(plan);
-          roundResponse = mergeResponseSourceOutcomes(firstAttemptResponse, roundResponse);
+          roundResponse = mergeRoundAttempts(firstAttemptResponse, roundResponse);
           roundResponse.intent = intent;
           roundResponse.sourceProfile = sourceProfile;
           roundResponse.outputMode = sourceProfile.outputMode;
@@ -364,17 +259,14 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     } catch (error) {
       markPhase("agent_finished", false, undefined, error && typeof error === "object" && "code" in error ? String(error.code) : "UNKNOWN_RESEARCH_FAILURE");
       add("RESEARCH", "failed", { round }, { error: "research failed" }, error instanceof Error ? error.message : "unknown error");
-      const preservedResponse = cumulativeResponse;
-      if (countEvidence(preservedResponse) > 0 && preservedResponse) {
+      const preservedResponse = runState.cumulativeResponse;
+      if (runState.cumulativeEvidenceCount > 0 && preservedResponse) {
         response = preservedResponse;
         evaluation = evaluateEvidence(response, round, maxRounds);
-        markPhase("evidence_preservation_finished", false, countEvidence(response), undefined, {
+        const preservation = runState.providerFailureSnapshot();
+        markPhase("evidence_preservation_finished", false, preservation.cumulativeEvidenceCount, undefined, {
           round,
-          roundEvidenceCount: 0,
-          cumulativeEvidenceCount: countEvidence(response),
-          carriedForwardEvidenceCount: countEvidence(response),
-          verificationOutcome: "provider_failure_carried_forward",
-          finalEvidenceCount: countEvidence(response),
+          ...preservation,
         });
         const status = evaluation.sufficientEvidence ? "completed" : "needs_more_evidence";
         add("COMPLETE", status === "completed" ? "completed" : "needs_more_evidence", { round }, { reason: evaluation.reason, carriedForwardEvidence: true });
@@ -382,33 +274,25 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       }
       return { status: "failed", rounds, plan, evaluation, knowledgeChanges: [], attention: [], steps, trace };
     }
-    const carriedForwardEvidenceCount = countEvidence(cumulativeResponse);
-    cumulativeResponse = mergeResearchResponses(cumulativeResponse, roundResponse);
+    const preservation = runState.mergeRoundResponse(roundResponse);
+    const cumulativeResponse = runState.cumulativeResponse;
+    if (!cumulativeResponse) throw Object.assign(new Error("Missing cumulative response after round merge"), { code: "UNKNOWN_RESEARCH_FAILURE" });
     cumulativeResponse.intent = intent;
     cumulativeResponse.sourceProfile = sourceProfile;
     cumulativeResponse.outputMode = sourceProfile.outputMode;
     cumulativeResponse.intentOutput = mapIntentOutput(cumulativeResponse, sourceProfile);
     response = cumulativeResponse;
-    const roundEvidenceCount = countEvidence(roundResponse);
-    const cumulativeEvidenceCount = countEvidence(cumulativeResponse);
-    const verificationOutcome = roundResponse.signals.length
-      ? roundResponse.signals.some((signal) => signal.verificationStatus === "verified") ? "verification_success" : "verification_insufficient"
-      : carriedForwardEvidenceCount > 0 ? "carried_forward_without_new_verification" : "no_evidence";
-    markPhase("evidence_preservation_finished", true, cumulativeEvidenceCount, undefined, {
+    markPhase("evidence_preservation_finished", true, preservation.cumulativeEvidenceCount, undefined, {
       round,
-      roundEvidenceCount,
-      cumulativeEvidenceCount,
-      carriedForwardEvidenceCount,
-      verificationOutcome,
-      finalEvidenceCount: cumulativeEvidenceCount,
+      ...preservation,
     });
     add("RESEARCH", "completed", { round }, {
       signals: response.signals.length,
       dataMode: response.dataMode,
-      roundEvidenceCount,
-      cumulativeEvidenceCount,
-      carriedForwardEvidenceCount,
-      verificationOutcome,
+      roundEvidenceCount: preservation.roundEvidenceCount,
+      cumulativeEvidenceCount: preservation.cumulativeEvidenceCount,
+      carriedForwardEvidenceCount: preservation.carriedForwardEvidenceCount,
+      verificationOutcome: preservation.verificationOutcome,
     });
     const currentSourceOutcomes = sourceOutcomesFromResponse(roundResponse);
     evaluation = evaluateEvidence(response, round, maxRounds);
