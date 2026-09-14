@@ -189,3 +189,16 @@ Rules:
 - Minimal Fix: Merge every `runResearchPipeline` attempt into `ResearchRunState` immediately after it returns; fallback attempts are merged as supplements and trace records `attemptType`, `roundEvidenceCount`, `carriedForwardEvidenceCount`, and `cumulativeEvidenceCount`.
 - Re-test Result: Targeted tests verify primary attempt evidence survives empty fallback, provider-error fallback preserves cumulative evidence, fallback verified evidence does not duplicate count, and STOP/final evidence count reads cumulative state.
 - Status: PASS
+
+## 2026-09-14 — Evidence candidate and final count separation
+
+- Date: 2026-09-14
+- Test / Run ID: Local ResearchRunState / quality artifact evidence accounting regression
+- Commit SHA: same commit as this record
+- Layer: ResearchPipeline / ResearchRunState evidence accounting
+- Symptom / Failure: Real quality E2E showed round 1 `evidence_finished=2`, then preservation diagnostics reported `cumulativeEvidenceCount=12` and `finalEvidenceCount=12`, while the final API response had `signalCount=0` and `evidenceCount=0`.
+- Evidence: `sourceOutcomes.newEvidenceCount` was populated from provider/source `resultCount`; `evidence_finished` counts the pipeline's evaluated `allSignals` (each carries Claims and `evidenceSources`), which are persisted as `EvidenceRecord`s by `recordsFromSignal()`; `ResearchRunState.countEvidence()` treated the source outcome count as run evidence when no displayed signals existed.
+- Root Cause: Source/provider discovery candidates were conflated with produced / accepted Evidence. The 12 count represented discovered candidate results, not accepted final Evidence.
+- Minimal Fix: Add explicit `EvidenceAccounting` fields for discovered candidates, produced evidence, evaluated evidence, accepted evidence, rejected evidence, final evidence, and rejection reasons; make `ResearchRunState` count only produced Evidence, not source outcome candidate counts; make final trace values read final accounting rather than cumulative produced counts.
+- Re-test Result: Targeted tests verify provider candidates do not inflate cumulative evidence, produced evidence survives empty fallback, produced-but-rejected evidence reports explicit rejection counts, and accepted evidence defines final evidence count.
+- Status: PASS

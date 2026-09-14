@@ -74,6 +74,7 @@ export type SourceOutcome = {
   providerId: string;
   resultCount: number;
   requestCount?: number;
+  /** Discovery/provider candidate count; never used as run-level Evidence. */
   newEvidenceCount: number;
   newClaimCount: number;
   reliabilityGain: number;

@@ -36,18 +36,35 @@ function response(signals: ResearchSignal[]): ResearchResponse {
   };
 }
 
-function sourceEvidenceResponse(evidenceCount: number, providerId = "public-web"): ResearchResponse {
+function accountedEvidenceResponse(options: {
+  discoveredCandidateCount: number;
+  producedEvidenceCount: number;
+  acceptedEvidenceCount?: number;
+  providerId?: string;
+}): ResearchResponse {
+  const acceptedEvidenceCount = options.acceptedEvidenceCount ?? 0;
   return {
     ...response([]),
+    evidenceAccounting: {
+      discoveredCandidateCount: options.discoveredCandidateCount,
+      producedEvidenceCount: options.producedEvidenceCount,
+      evaluatedEvidenceCount: options.producedEvidenceCount,
+      acceptedEvidenceCount,
+      rejectedEvidenceCount: Math.max(0, options.producedEvidenceCount - acceptedEvidenceCount),
+      finalEvidenceCount: acceptedEvidenceCount,
+      rejectionReasons: acceptedEvidenceCount < options.producedEvidenceCount
+        ? { stale: 0, duplicate: 0, lowReliability: 0, insufficientVerification: options.producedEvidenceCount - acceptedEvidenceCount, background: 0, lowNovelty: 0, unresolvedConflict: 0 }
+        : undefined,
+    },
     sourceOutcomes: [{
       sourceType: "GENERAL_WEB",
-      providerId,
+      providerId: options.providerId ?? "public-web",
       executed: true,
-      resultCount: evidenceCount,
+      resultCount: options.discoveredCandidateCount,
       requestCount: 1,
-      newEvidenceCount: evidenceCount,
-      newClaimCount: evidenceCount,
-      reliabilityGain: evidenceCount > 0 ? 40 : 0,
+      newEvidenceCount: options.discoveredCandidateCount,
+      newClaimCount: 0,
+      reliabilityGain: options.discoveredCandidateCount > 0 ? 40 : 0,
       conflictReduction: 0,
     }],
   };
@@ -224,13 +241,19 @@ test("primary attempt source evidence is merged before empty fallback", async ()
     onPhase: (event) => phases.push(event),
     research: async () => {
       calls += 1;
-      return calls === 1 ? sourceEvidenceResponse(2) : sourceEvidenceResponse(0, "primary-web-search");
+      return calls === 1
+        ? accountedEvidenceResponse({ discoveredCandidateCount: 12, producedEvidenceCount: 2 })
+        : accountedEvidenceResponse({ discoveredCandidateCount: 0, producedEvidenceCount: 0, providerId: "primary-web-search" });
     },
   });
 
   assert.equal(calls, 2);
   assert.equal(result.status, "needs_more_evidence");
-  assert.equal(result.response?.sourceOutcomes?.reduce((count, outcome) => count + outcome.newEvidenceCount, 0), 2);
+  assert.equal(result.response?.sourceOutcomes?.reduce((count, outcome) => count + outcome.newEvidenceCount, 0), 12);
+  assert.equal(result.response?.evidenceAccounting?.producedEvidenceCount, 2);
+  assert.equal(result.response?.evidenceAccounting?.finalEvidenceCount, 0);
+  assert.equal(result.response?.evidenceAccounting?.rejectedEvidenceCount, 2);
+  assert.ok(result.response?.evidenceAccounting?.rejectionReasons);
   assert.ok(phases.some((event) =>
     event.phase === "evidence_preservation_finished" &&
     event.diagnostic?.attemptType === "primary" &&
@@ -248,14 +271,14 @@ test("primary attempt source evidence survives fallback provider error", async (
     maxRounds: 1,
     research: async () => {
       calls += 1;
-      if (calls === 1) return sourceEvidenceResponse(1);
+      if (calls === 1) return accountedEvidenceResponse({ discoveredCandidateCount: 12, producedEvidenceCount: 1 });
       throw Object.assign(new Error("fallback provider unavailable"), { code: "PROVIDER_UNAVAILABLE" });
     },
   });
 
   assert.equal(calls, 2);
   assert.notEqual(result.status, "failed");
-  assert.equal(result.response?.sourceOutcomes?.reduce((count, outcome) => count + outcome.newEvidenceCount, 0), 1);
+  assert.equal(result.response?.evidenceAccounting?.producedEvidenceCount, 1);
 });
 
 test("fallback attempt can add verified evidence without duplicating primary source evidence count", async () => {
@@ -266,7 +289,7 @@ test("fallback attempt can add verified evidence without duplicating primary sou
     research: async () => {
       calls += 1;
       return calls === 1
-        ? sourceEvidenceResponse(1)
+        ? accountedEvidenceResponse({ discoveredCandidateCount: 12, producedEvidenceCount: 1 })
         : response([evidenceSignal({
             id: "verified-fallback",
             sourceUrl: "https://example.com/update",
@@ -283,9 +306,12 @@ test("fallback attempt can add verified evidence without duplicating primary sou
   assert.equal(result.response?.signals.length, 1);
   assert.equal(result.response?.signals[0]?.verificationStatus, "verified");
   assert.equal(result.response?.signals.flatMap((item) => item.claims).length, 1);
+  assert.equal(result.response?.evidenceAccounting?.producedEvidenceCount, 1);
+  assert.equal(result.response?.evidenceAccounting?.acceptedEvidenceCount, 1);
+  assert.equal(result.response?.evidenceAccounting?.finalEvidenceCount, 1);
 });
 
-test("STOP after fallback uses cumulative source evidence count", async () => {
+test("STOP after fallback reports produced and final evidence separately", async () => {
   let calls = 0;
   const phases: Array<Parameters<NonNullable<Parameters<typeof runAgent>[0]["onPhase"]>>[0]> = [];
   await runAgent({
@@ -294,12 +320,19 @@ test("STOP after fallback uses cumulative source evidence count", async () => {
     onPhase: (event) => phases.push(event),
     research: async () => {
       calls += 1;
-      return calls === 1 ? sourceEvidenceResponse(2) : sourceEvidenceResponse(0, "primary-web-search");
+      return calls === 1
+        ? accountedEvidenceResponse({ discoveredCandidateCount: 12, producedEvidenceCount: 2 })
+        : accountedEvidenceResponse({ discoveredCandidateCount: 0, producedEvidenceCount: 0, providerId: "primary-web-search" });
     },
   });
 
   const finalPreservation = phases.filter((event) => event.phase === "evidence_preservation_finished").at(-1);
-  assert.equal(finalPreservation?.diagnostic?.finalEvidenceCount, 2);
+  assert.equal(finalPreservation?.diagnostic?.producedEvidenceCount, 0);
+  assert.equal(finalPreservation?.diagnostic?.cumulativeEvidenceCount, 2);
+  assert.equal(finalPreservation?.diagnostic?.acceptedEvidenceCount, 0);
+  assert.equal(finalPreservation?.diagnostic?.rejectedEvidenceCount, 2);
+  assert.equal(finalPreservation?.diagnostic?.finalEvidenceCount, 0);
+  assert.ok(finalPreservation?.diagnostic?.rejectionReason);
 });
 
 test("deadline without cumulative evidence does not fabricate a response", async () => {

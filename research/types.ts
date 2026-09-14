@@ -270,6 +270,16 @@ export type FilteringSummary = {
   summaryText: string;
 };
 
+export type EvidenceAccounting = {
+  discoveredCandidateCount: number;
+  producedEvidenceCount: number;
+  evaluatedEvidenceCount: number;
+  acceptedEvidenceCount: number;
+  rejectedEvidenceCount: number;
+  finalEvidenceCount: number;
+  rejectionReasons?: FilteringSummary["filteredReasons"];
+};
+
 export type ResearchResponse = {
   signals: ResearchSignal[];
   status: Array<{ name: string; ok: boolean; state?: string }>;
@@ -280,6 +290,7 @@ export type ResearchResponse = {
   overview: ResearchOverview;
   coverage: SourceCoverage;
   filteringSummary?: FilteringSummary;
+  evidenceAccounting?: EvidenceAccounting;
   fetchedAt: string;
   dataMode: "live" | "demo" | "mixed";
   lastCheckedAt?: string;
@@ -311,6 +322,7 @@ type ResearchSourceOutcome = {
   executed: boolean;
   resultCount: number;
   requestCount?: number;
+  /** Number of newly discovered provider candidates; not produced/accepted Evidence. */
   newEvidenceCount: number;
   newClaimCount: number;
   reliabilityGain: number;

@@ -169,7 +169,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     canStartModelPlanning: snapshot.canStartModelPlanning,
     canStartRetrieval: snapshot.canStartRetrieval,
     cumulativeEvidenceCount: runState.cumulativeEvidenceCount,
-    finalEvidenceCount: runState.cumulativeEvidenceCount,
+    finalEvidenceCount: runState.finalEvidenceCount,
     ...extra,
   });
   const completeWithCumulativeResponse = (round: number, reason: string, extra: Record<string, unknown> = {}): AgentRunResult => {
@@ -183,7 +183,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     markPhase("agent_finished", true, response.signals.length, undefined, {
       deadlineDegradedGracefully: true,
       cumulativeEvidenceCount: runState.cumulativeEvidenceCount,
-      finalEvidenceCount: runState.cumulativeEvidenceCount,
+      finalEvidenceCount: runState.finalEvidenceCount,
       reason,
       ...extra,
     });

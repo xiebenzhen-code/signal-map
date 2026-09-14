@@ -2052,6 +2052,17 @@ export async function runResearchPipeline(
     displayedSignals: signals,
     detailEnrichment,
   });
+  const producedEvidenceCount = allSignals.length;
+  const acceptedEvidenceCount = signals.reduce((total, signal) => total + signal.claims.length, 0);
+  const evidenceAccounting = {
+    discoveredCandidateCount: candidates.length,
+    producedEvidenceCount,
+    evaluatedEvidenceCount: allSignals.length,
+    acceptedEvidenceCount,
+    rejectedEvidenceCount: Math.max(0, producedEvidenceCount - acceptedEvidenceCount),
+    finalEvidenceCount: acceptedEvidenceCount,
+    rejectionReasons: filteringSummary.filteredReasons,
+  };
   const sourceDiagnostics = buildSourceDiagnostics(sourceOutcomes, candidates, signals, eligibleByProvider);
 
   if (debug?.onEligibilityAudit) {
@@ -2147,6 +2158,7 @@ export async function runResearchPipeline(
     overview,
     coverage,
     filteringSummary,
+    evidenceAccounting,
     fetchedAt: new Date().toISOString(),
     dataMode: "live",
     lastCheckedAt: new Date().toISOString(),

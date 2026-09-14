@@ -122,25 +122,88 @@ test("providerFailureSnapshot preserves existing cumulative evidence", () => {
   assert.equal(snapshot.verificationOutcome, "provider_failure_carried_forward");
 });
 
-test("source outcome evidence counts as cumulative evidence before displayed signals exist", () => {
+test("source outcome candidate counts do not count as cumulative evidence", () => {
   const state = new ResearchRunState();
   const snapshot = state.mergeRoundResponse(response([], {
     sourceOutcomes: [{
       sourceType: "GENERAL_WEB",
       providerId: "public-web",
       executed: true,
-      resultCount: 2,
+      resultCount: 12,
       requestCount: 1,
-      newEvidenceCount: 2,
-      newClaimCount: 2,
+      newEvidenceCount: 12,
+      newClaimCount: 12,
+      reliabilityGain: 40,
+      conflictReduction: 0,
+    }],
+  }));
+
+  assert.equal(snapshot.roundEvidenceCount, 0);
+  assert.equal(snapshot.cumulativeEvidenceCount, 0);
+  assert.equal(state.cumulativeEvidenceCount, 0);
+});
+
+test("produced evidence accounting counts as cumulative evidence before displayed signals exist", () => {
+  const state = new ResearchRunState();
+  const snapshot = state.mergeRoundResponse(response([], {
+    evidenceAccounting: {
+      discoveredCandidateCount: 12,
+      producedEvidenceCount: 2,
+      evaluatedEvidenceCount: 2,
+      acceptedEvidenceCount: 0,
+      rejectedEvidenceCount: 2,
+      finalEvidenceCount: 0,
+      rejectionReasons: {
+        stale: 0,
+        duplicate: 0,
+        lowReliability: 0,
+        insufficientVerification: 2,
+        background: 0,
+        lowNovelty: 0,
+        unresolvedConflict: 0,
+      },
+    },
+    sourceOutcomes: [{
+      sourceType: "GENERAL_WEB",
+      providerId: "public-web",
+      executed: true,
+      resultCount: 12,
+      requestCount: 1,
+      newEvidenceCount: 12,
+      newClaimCount: 12,
       reliabilityGain: 40,
       conflictReduction: 0,
     }],
   }));
 
   assert.equal(snapshot.roundEvidenceCount, 2);
+  assert.equal(snapshot.producedEvidenceCount, 2);
   assert.equal(snapshot.cumulativeEvidenceCount, 2);
+  assert.equal(snapshot.acceptedEvidenceCount, 0);
+  assert.equal(snapshot.rejectedEvidenceCount, 2);
+  assert.equal(snapshot.finalEvidenceCount, 0);
+  assert.deepEqual(snapshot.rejectionReason, {
+    stale: 0,
+    duplicate: 0,
+    lowReliability: 0,
+    insufficientVerification: 2,
+    background: 0,
+    lowNovelty: 0,
+    unresolvedConflict: 0,
+  });
   assert.equal(state.cumulativeEvidenceCount, 2);
+});
+
+test("cumulative produced evidence counts distinct signals across rounds", () => {
+  const state = new ResearchRunState();
+  state.mergeRoundResponse(response([signal()]));
+  const snapshot = state.mergeRoundResponse(response([signal({
+    id: "signal-2",
+    sourceUrl: "https://example.com/evidence-2",
+  })]));
+
+  assert.equal(snapshot.cumulativeEvidenceCount, 2);
+  assert.equal(state.cumulativeResponse?.evidenceAccounting?.producedEvidenceCount, 2);
 });
 
 test("same evidence is not duplicated and stronger verification metadata wins", () => {

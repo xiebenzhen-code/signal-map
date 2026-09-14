@@ -802,21 +802,33 @@ function preservationDiagnostics(phaseTrace) {
   const latest = preservation.at(-1) || {};
   return {
     roundEvidenceCount: unavailable(latest.roundEvidenceCount),
+    producedEvidenceCount: unavailable(latest.producedEvidenceCount),
     cumulativeEvidenceCount: unavailable(latest.cumulativeEvidenceCount),
     carriedForwardEvidenceCount: unavailable(latest.carriedForwardEvidenceCount),
+    acceptedEvidenceCount: unavailable(latest.acceptedEvidenceCount),
+    rejectedEvidenceCount: unavailable(latest.rejectedEvidenceCount),
     verificationOutcome: unavailable(latest.verificationOutcome),
     finalEvidenceCount: unavailable(latest.finalEvidenceCount),
+    rejectionReason: unavailable(latest.rejectionReason),
     perRound: unavailable(preservation),
   };
 }
 
 function evidenceDiagnostics(data, summary, signals, latestRun, phaseTrace) {
   const accepted = evidenceItems(signals);
+  const preservation = preservationDiagnostics(phaseTrace);
+  const accounting = data.evidenceAccounting || {};
   return {
     candidateCount: unavailable(summary.clusteredCount ?? summary.filteringDetails?.length ?? data.overview?.events),
-    acceptedEvidenceCount: unavailable(latestRun?.evidenceCount ?? accepted.length),
-    rejectedReason: unavailable(summary.filteredReasons || summary.summaryText),
-    preservation: preservationDiagnostics(phaseTrace),
+    producedEvidenceCount: unavailable(accounting.producedEvidenceCount ?? preservation.producedEvidenceCount),
+    cumulativeEvidenceCount: unavailable(accounting.producedEvidenceCount ?? preservation.cumulativeEvidenceCount),
+    acceptedEvidenceCount: unavailable(accounting.acceptedEvidenceCount ?? (preservation.acceptedEvidenceCount === "unavailable"
+      ? latestRun?.evidenceCount ?? accepted.length
+      : preservation.acceptedEvidenceCount)),
+    rejectedEvidenceCount: unavailable(accounting.rejectedEvidenceCount ?? preservation.rejectedEvidenceCount),
+    finalEvidenceCount: unavailable(accounting.finalEvidenceCount ?? preservation.finalEvidenceCount),
+    rejectedReason: unavailable(accounting.rejectionReasons || summary.filteredReasons || summary.summaryText),
+    preservation,
     byDisplayedSignal: signals.map((signal) => ({
       title: unavailable(signal.title),
       claimCount: unavailable(Array.isArray(signal.claims) ? signal.claims.length : undefined),
@@ -899,8 +911,13 @@ function emptyQualityReport(status, reason, state = {}) {
     },
     evidenceDiagnostics: {
       candidateCount: "unavailable",
+      producedEvidenceCount: "unavailable",
+      cumulativeEvidenceCount: "unavailable",
       acceptedEvidenceCount: "unavailable",
+      rejectedEvidenceCount: "unavailable",
+      finalEvidenceCount: "unavailable",
       rejectedReason: "unavailable",
+      preservation: "unavailable",
       byDisplayedSignal: "unavailable",
     },
     evidence: "unavailable",
@@ -1204,10 +1221,14 @@ function qualityMarkdown(report) {
     "",
     `- candidate / accepted: ${compact(report.evidenceDiagnostics.candidateCount)} / ${compact(report.evidenceDiagnostics.acceptedEvidenceCount)}`,
     `- roundEvidenceCount: ${compact(report.evidenceDiagnostics.preservation?.roundEvidenceCount)}`,
+    `- producedEvidenceCount: ${compact(report.evidenceDiagnostics.producedEvidenceCount)}`,
     `- cumulativeEvidenceCount: ${compact(report.evidenceDiagnostics.preservation?.cumulativeEvidenceCount)}`,
     `- carriedForwardEvidenceCount: ${compact(report.evidenceDiagnostics.preservation?.carriedForwardEvidenceCount)}`,
+    `- acceptedEvidenceCount: ${compact(report.evidenceDiagnostics.acceptedEvidenceCount)}`,
+    `- rejectedEvidenceCount: ${compact(report.evidenceDiagnostics.rejectedEvidenceCount)}`,
     `- verificationOutcome: ${compact(report.evidenceDiagnostics.preservation?.verificationOutcome)}`,
-    `- finalEvidenceCount: ${compact(report.evidenceDiagnostics.preservation?.finalEvidenceCount)}`,
+    `- finalEvidenceCount: ${compact(report.evidenceDiagnostics.finalEvidenceCount)}`,
+    `- rejectionReason: ${compact(report.evidenceDiagnostics.preservation?.rejectionReason, 1000)}`,
     `- rejected reason: ${compact(report.evidenceDiagnostics.rejectedReason, 1000)}`,
     `- by displayed signal: ${compact(report.evidenceDiagnostics.byDisplayedSignal, 1200)}`,
     "",

@@ -1,4 +1,4 @@
-import type { ResearchResponse, ResearchSignal, VerificationStatus } from "../research/types.ts";
+import type { FilteringSummary, ResearchResponse, ResearchSignal, VerificationStatus } from "../research/types.ts";
 
 export type VerificationOutcome =
   | "verification_success"
@@ -9,10 +9,14 @@ export type VerificationOutcome =
 
 export type EvidencePreservationSnapshot = {
   roundEvidenceCount: number;
+  producedEvidenceCount: number;
   cumulativeEvidenceCount: number;
   carriedForwardEvidenceCount: number;
+  acceptedEvidenceCount: number;
+  rejectedEvidenceCount: number;
   verificationOutcome: VerificationOutcome;
   finalEvidenceCount: number;
+  rejectionReason?: Record<string, number>;
 };
 
 export function normalizeEvidenceKey(value: string) {
@@ -41,9 +45,48 @@ export function strongerVerification(a: VerificationStatus, b: VerificationStatu
 
 export function countEvidence(response: ResearchResponse | undefined) {
   if (!response) return 0;
-  const claimCount = response.signals.reduce((count, signal) => count + signal.claims.length, 0);
-  const sourceOutcomeEvidenceCount = response.sourceOutcomes?.reduce((count, outcome) => count + outcome.newEvidenceCount, 0) ?? 0;
-  return Math.max(claimCount, sourceOutcomeEvidenceCount);
+  return response.evidenceAccounting?.producedEvidenceCount
+    ?? response.signals.reduce((count, signal) => count + signal.claims.length, 0);
+}
+
+function finalEvidenceCount(response: ResearchResponse | undefined) {
+  if (!response) return 0;
+  return response.evidenceAccounting?.finalEvidenceCount
+    ?? response.signals.reduce((count, signal) => count + signal.claims.length, 0);
+}
+
+function acceptedEvidenceCount(response: ResearchResponse | undefined) {
+  if (!response) return 0;
+  return response.evidenceAccounting?.acceptedEvidenceCount ?? finalEvidenceCount(response);
+}
+
+function rejectedEvidenceCount(response: ResearchResponse | undefined) {
+  if (!response) return 0;
+  return response.evidenceAccounting?.rejectedEvidenceCount
+    ?? Math.max(0, countEvidence(response) - acceptedEvidenceCount(response));
+}
+
+function claimCount(signals: ResearchSignal[]) {
+  return signals.reduce((count, signal) => count + signal.claims.length, 0);
+}
+
+function mergeRejectionReasons(
+  previous: FilteringSummary["filteredReasons"] | undefined,
+  next: FilteringSummary["filteredReasons"] | undefined,
+) {
+  if (!previous && !next) return undefined;
+  return {
+    stale: Math.max(previous?.stale ?? 0, next?.stale ?? 0),
+    duplicate: Math.max(previous?.duplicate ?? 0, next?.duplicate ?? 0),
+    lowReliability: Math.max(previous?.lowReliability ?? 0, next?.lowReliability ?? 0),
+    insufficientVerification: Math.max(previous?.insufficientVerification ?? 0, next?.insufficientVerification ?? 0),
+    background: Math.max(previous?.background ?? 0, next?.background ?? 0),
+    lowNovelty: Math.max(previous?.lowNovelty ?? 0, next?.lowNovelty ?? 0),
+    unresolvedConflict: Math.max(previous?.unresolvedConflict ?? 0, next?.unresolvedConflict ?? 0),
+    lowActionability: Math.max(previous?.lowActionability ?? 0, next?.lowActionability ?? 0),
+    noInformationGain: Math.max(previous?.noInformationGain ?? 0, next?.noInformationGain ?? 0),
+    insufficientContent: Math.max(previous?.insufficientContent ?? 0, next?.insufficientContent ?? 0),
+  };
 }
 
 function mergeResponseSourceOutcomes(previous: ResearchResponse | undefined, next: ResearchResponse) {
@@ -117,14 +160,57 @@ function mergeResearchResponses(previous: ResearchResponse | undefined, next: Re
     const current = signals.get(key);
     signals.set(key, current ? mergeSignals(current, signal) : signal);
   }
+  const mergedSignals = [...signals.values()];
   return mergeResponseSourceOutcomes(previous, {
     ...next,
-    signals: [...signals.values()],
+    signals: mergedSignals,
     status: [...previous.status, ...next.status],
     progress: [...previous.progress, ...next.progress],
     failures: [...previous.failures, ...next.failures],
     dataMode: previous.dataMode === next.dataMode ? next.dataMode : "mixed",
     sourceDiagnostics: [...(previous.sourceDiagnostics ?? []), ...(next.sourceDiagnostics ?? [])],
+    evidenceAccounting: {
+      discoveredCandidateCount: Math.max(
+        previous.evidenceAccounting?.discoveredCandidateCount ?? previous.overview?.deduplicated ?? 0,
+        next.evidenceAccounting?.discoveredCandidateCount ?? next.overview?.deduplicated ?? 0,
+      ),
+      producedEvidenceCount: Math.max(
+        mergedSignals.length,
+        countEvidence(previous),
+        countEvidence(next),
+      ),
+      evaluatedEvidenceCount: Math.max(
+        mergedSignals.length,
+        previous.evidenceAccounting?.evaluatedEvidenceCount ?? countEvidence(previous),
+        next.evidenceAccounting?.evaluatedEvidenceCount ?? countEvidence(next),
+      ),
+      acceptedEvidenceCount: Math.max(
+        claimCount(mergedSignals),
+        acceptedEvidenceCount(previous),
+        acceptedEvidenceCount(next),
+      ),
+      rejectedEvidenceCount: Math.max(
+        0,
+        Math.max(
+          countEvidence(previous),
+          countEvidence(next),
+          mergedSignals.length,
+        ) - Math.max(
+          claimCount(mergedSignals),
+          acceptedEvidenceCount(previous),
+          acceptedEvidenceCount(next),
+        ),
+      ),
+      finalEvidenceCount: Math.max(
+        claimCount(mergedSignals),
+        finalEvidenceCount(previous),
+        finalEvidenceCount(next),
+      ),
+      rejectionReasons: mergeRejectionReasons(
+        previous.evidenceAccounting?.rejectionReasons,
+        next.evidenceAccounting?.rejectionReasons,
+      ),
+    },
   });
 }
 
@@ -148,6 +234,10 @@ export class ResearchRunState {
     return countEvidence(this.response);
   }
 
+  get finalEvidenceCount() {
+    return finalEvidenceCount(this.response);
+  }
+
   mergeRoundResponse(roundResponse: ResearchResponse): EvidencePreservationSnapshot {
     const carriedForwardEvidenceCount = this.cumulativeEvidenceCount;
     this.response = mergeResearchResponses(this.response, roundResponse);
@@ -155,10 +245,14 @@ export class ResearchRunState {
     const cumulativeEvidenceCount = countEvidence(this.response);
     return {
       roundEvidenceCount,
+      producedEvidenceCount: roundEvidenceCount,
       cumulativeEvidenceCount,
       carriedForwardEvidenceCount,
+      acceptedEvidenceCount: acceptedEvidenceCount(this.response),
+      rejectedEvidenceCount: rejectedEvidenceCount(this.response),
       verificationOutcome: verificationOutcome(roundResponse, carriedForwardEvidenceCount),
-      finalEvidenceCount: cumulativeEvidenceCount,
+      finalEvidenceCount: finalEvidenceCount(this.response),
+      rejectionReason: this.response.evidenceAccounting?.rejectionReasons,
     };
   }
 
@@ -166,10 +260,14 @@ export class ResearchRunState {
     const cumulativeEvidenceCount = this.cumulativeEvidenceCount;
     return {
       roundEvidenceCount: 0,
+      producedEvidenceCount: 0,
       cumulativeEvidenceCount,
       carriedForwardEvidenceCount: cumulativeEvidenceCount,
+      acceptedEvidenceCount: acceptedEvidenceCount(this.response),
+      rejectedEvidenceCount: rejectedEvidenceCount(this.response),
       verificationOutcome: "provider_failure_carried_forward",
-      finalEvidenceCount: cumulativeEvidenceCount,
+      finalEvidenceCount: finalEvidenceCount(this.response),
+      rejectionReason: this.response?.evidenceAccounting?.rejectionReasons,
     };
   }
 }
