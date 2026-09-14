@@ -45,3 +45,49 @@ test("query budget is hard bounded after dedupe", () => {
   assert.ok(plan.searchCombinations.length <= 24);
   assert.equal(plan.deduplicatedQueryCount, plan.searchCombinations.length);
 });
+
+test("quality harness scaffolding does not pollute query entities or agent queries", () => {
+  const qualityQuery = "过去 30 天内，AI 辅助视频剪辑与自动化领域有哪些真正值得我测试的新发布、模型、工具或工作流更新？重点关注多素材理解、自动粗剪、镜头选择、批量处理和可商用工作流。优先官方或一手来源，排除纯营销、重复转载和只有概念没有可验证功能的内容。告诉我发生了什么、为什么值得关注，以及我现在能具体测试什么。";
+  const pollutedInput = {
+    identity: "Signal Map quality acceptance reviewer",
+    industry: qualityQuery,
+    focusAreas: qualityQuery,
+    currentQuestions: qualityQuery,
+    knownInformation: "Use only the authenticated test account state and live public evidence. Do not use fixtures or mocks.",
+    informationGaps: "What evidence-backed changes or opportunities should a user pay attention to?",
+    trackedEntities: "",
+    trackedEvents: "",
+    userJudgements: "",
+    evidenceHistory: "",
+    freshnessWindow: "30d",
+  };
+  const plan = planQuery(pollutedInput);
+  const agentPlan = createResearchPlan(pollutedInput, 1, 5, [], "INITIAL");
+  const polluted = new Set(["Signal", "Map", "What", "Use", "Do"]);
+  const entities = plan.resolvedEntities?.map((entity) => entity.canonicalEntity) ?? [];
+  const queryText = agentPlan.queries.join(" ");
+
+  assert.equal(entities.some((entity) => polluted.has(entity)), false);
+  assert.equal(/Signal Map|What evidence|Use only|Do not/.test(queryText), false);
+});
+
+test("valid company and product names remain entity candidates", () => {
+  const plan = planQuery({
+    identity: "researcher",
+    industry: "AI video tools",
+    focusAreas: "OpenAI Anthropic Runway",
+    currentQuestions: "OpenAI, Anthropic, and Runway video updates",
+    knownInformation: "",
+    informationGaps: "",
+    trackedEntities: "",
+    trackedEvents: "",
+    userJudgements: "",
+    evidenceHistory: "",
+    freshnessWindow: "30d",
+  });
+  const entities = plan.resolvedEntities?.map((entity) => entity.canonicalEntity) ?? [];
+
+  assert.ok(entities.includes("OpenAI"));
+  assert.ok(entities.includes("Anthropic"));
+  assert.ok(entities.includes("Runway"));
+});

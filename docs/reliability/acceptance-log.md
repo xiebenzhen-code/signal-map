@@ -111,3 +111,16 @@ Rules:
 - Minimal Fix: Add `RetrievalPlan`, convert `ResearchPlan` with `toRetrievalPlan`, make Retrieval consume valid upstream queries first, and allow fallback planning only when upstream queries are missing or invalid.
 - Re-test Result: `node --check scripts/signal-map-agent-loop-e2e.mjs`, `npm run typecheck`, `npm run api:build`, targeted contract / agent tests, and lint for changed source/test files passed locally.
 - Status: PASS
+
+## 2026-09-14 — Query / Entity parsing scaffolding pollution
+
+- Date: 2026-09-14
+- Test / Run ID: Local QueryPlanner entity pollution regression
+- Commit SHA: same commit as this record
+- Layer: Query planning / Entity parsing
+- Symptom / Failure: Quality acceptance input could produce non-user entities such as `Signal`, `Map`, `What`, `Use`, and `Do`, and could leak harness scaffolding into generated search queries.
+- Evidence: `planQuery` built `originalNeed` from `identity`, `knownInformation`, and generic `informationGaps`, then extracted capitalized English words from that combined text as entity candidates.
+- Root Cause: QueryPlanner mixed product / harness labels and run instructions with user research semantics before entity extraction.
+- Minimal Fix: Limit semantic query planning and entity extraction to user research fields, exclude identity and known-information scaffolding from `originalNeed`, and add generic entity-word validation for English function/question words.
+- Re-test Result: Targeted tests passed for the quality query pollution case, normal company/product entities, and Agent Plan → Retrieval contract.
+- Status: PASS

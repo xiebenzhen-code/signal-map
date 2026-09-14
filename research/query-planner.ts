@@ -62,6 +62,69 @@ function tokens(value: string) {
     .filter((item) => item.length > 1);
 }
 
+const genericEntityWords = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "be",
+  "can",
+  "do",
+  "does",
+  "for",
+  "from",
+  "how",
+  "is",
+  "it",
+  "map",
+  "please",
+  "research",
+  "signal",
+  "the",
+  "this",
+  "use",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "why",
+  "with",
+]);
+
+function semanticNeed(input: ResearchInput) {
+  return [
+    input.industry,
+    input.focusAreas,
+    input.currentQuestions,
+    input.informationGaps,
+    input.trackedEntities,
+    input.trackedEvents,
+    input.freshnessWindow,
+  ]
+    .filter(Boolean)
+    .join("；");
+}
+
+function entityText(input: ResearchInput) {
+  return [
+    input.focusAreas,
+    input.currentQuestions,
+    input.trackedEntities,
+    input.trackedEvents,
+  ]
+    .filter(Boolean)
+    .join("；");
+}
+
+function validEntityCandidate(value: string) {
+  const normalized = value.trim();
+  if (normalized.length < 2) return false;
+  if (/^(AI|API|Agent|Model|Research|Open|New|Latest)$/i.test(normalized)) return false;
+  if (genericEntityWords.has(normalized.toLocaleLowerCase())) return false;
+  return /[A-Za-z0-9\u4e00-\u9fff]/.test(normalized);
+}
+
 const changeKeywords = [
   "latest",
   "today",
@@ -96,19 +159,8 @@ function knownEntitySubjects(value: string, entities: string[]) {
 }
 
 export function planQuery(input: ResearchInput): QueryPlan {
-  const originalNeed = [
-    input.industry,
-    input.identity,
-    input.focusAreas,
-    input.currentQuestions,
-    input.informationGaps,
-    input.trackedEntities,
-    input.trackedEvents,
-    input.knownInformation,
-    input.freshnessWindow,
-  ]
-    .filter(Boolean)
-    .join("；");
+  const originalNeed = semanticNeed(input);
+  const entityScope = entityText(input);
   const matched = expansions.filter((item) => item.test.test(originalNeed));
   const coreKeywords = unique([
     input.industry,
@@ -126,11 +178,11 @@ export function planQuery(input: ResearchInput): QueryPlan {
   const synonyms = unique(matched.flatMap((item) => item.synonyms));
   const entities = unique([
     ...tokens(input.trackedEntities),
-    ...(originalNeed.match(/\b[A-Z][A-Za-z0-9.-]{1,}\b/g) || []),
-    ...(originalNeed.match(/[“「『\"]([^”」』\"]{2,})[”」』\"]/g) || []).map(
+    ...(entityScope.match(/\b[A-Z][A-Za-z0-9.-]{1,}\b/g) || []),
+    ...(entityScope.match(/[“「『\"]([^”」』\"]{2,})[”」』\"]/g) || []).map(
       (item) => item.replace(/[“”「」『』\"]/g, ""),
     ),
-  ]).filter((entity) => !/^(AI|API|Agent|Model|Research|Open|New|Latest)$/i.test(entity));
+  ]).filter(validEntityCandidate);
   const resolvedEntities = resolveResearchEntities({ entities, query: originalNeed });
   const aliasesConsidered = unique(resolvedEntities.flatMap((entity) => entity.aliasesConsidered));
   const knownSubjects = knownEntitySubjects(input.knownInformation, entities);
