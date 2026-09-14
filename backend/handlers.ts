@@ -163,6 +163,7 @@ export const handleSignals = withSession(async (request: Request) => {
       "evidence_started",
       "evidence_finished",
       "agent_started",
+      "plan_finished",
       "agent_failed_before_source_selection",
       "agent_finished",
       "knowledge_started",

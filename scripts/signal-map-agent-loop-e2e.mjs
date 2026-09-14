@@ -654,6 +654,40 @@ function searchDiagnostics(data, phaseTrace) {
   const searchFinished = phaseTrace.filter((entry) => entry.phase === "search_finished");
   const latestSearchStarted = searchStarted.at(-1);
   const latestSearchFinished = searchFinished.at(-1);
+  const planFinished = phaseTrace.filter((entry) => entry.phase === "plan_finished");
+  const latestPlanFinished = planFinished.at(-1);
+  const providerPlan = Array.isArray(latestSearchStarted?.diagnostic?.providerPlan)
+    ? latestSearchStarted.diagnostic.providerPlan
+    : [];
+  const providerOutcomes = Array.isArray(latestSearchFinished?.diagnostic?.providerOutcomes)
+    ? latestSearchFinished.diagnostic.providerOutcomes
+    : [];
+  const providerCallAttempted = providerPlan.length
+    ? providerPlan.map((provider) => ({
+        providerId: unavailable(provider.providerId),
+        providerName: unavailable(provider.providerName),
+        configured: unavailable(provider.configured),
+        callAttempted: unavailable(provider.callAttempted),
+        emptyResultReason: unavailable(provider.emptyResultReason),
+      }))
+    : providerOutcomes.length
+      ? providerOutcomes.map((provider) => ({
+          providerName: unavailable(provider.providerName),
+          callAttempted: unavailable(provider.searched),
+          execution: unavailable(provider.execution),
+        }))
+      : "unavailable";
+  const providerReturnedCount = providerOutcomes.length
+    ? providerOutcomes.map((provider) => ({
+        providerName: unavailable(provider.providerName),
+        execution: unavailable(provider.execution),
+        searched: unavailable(provider.searched),
+        resultCount: unavailable(provider.resultCount),
+        rawResultCount: unavailable(provider.rawResultCount),
+        normalizedCandidateCount: unavailable(provider.normalizedCandidateCount),
+        requestCount: unavailable(provider.requestCount),
+      }))
+    : "unavailable";
   return {
     perRoundSearch: [{
       round: "unavailable",
@@ -666,15 +700,33 @@ function searchDiagnostics(data, phaseTrace) {
         ? searchFinished.map((entry) => entry.itemCount)
         : "unavailable",
     }],
+    agentGeneratedQueries: unavailable(latestPlanFinished?.diagnostic?.agentGeneratedQueries),
+    agentPlanSelectedSourceType: unavailable(latestPlanFinished?.diagnostic?.selectedSourceType),
+    pipelineActualQueries: unavailable(latestSearchStarted?.diagnostic?.generatedSearchQueries),
+    resolvedEntities: unavailable(latestSearchStarted?.diagnostic?.resolvedEntities || queryPlan.resolvedEntities || queryPlan.entities),
     selectedSourceTypes: unavailable(phaseTrace
       .filter((entry) => entry.phase === "source_selection_finished")
       .map((entry) => entry.diagnostic?.selectedSourceType)
       .filter(Boolean)),
+    searchProvider: unavailable(providerOutcomes.length
+      ? providerOutcomes.map((provider) => ({
+          providerName: provider.providerName,
+          execution: provider.execution,
+          searched: provider.searched,
+        }))
+      : providerPlan.map((provider) => ({
+          providerId: provider.providerId,
+          providerName: provider.providerName,
+          configured: provider.configured,
+          callAttempted: provider.callAttempted,
+        }))),
+    providerCallAttempted,
+    providerReturnedCount,
     allowedProviderIds: unavailable(latestSearchStarted?.diagnostic?.allowedProviderIds),
     generatedSearchQueryCount: unavailable(latestSearchStarted?.diagnostic?.generatedSearchQueryCount),
     generatedSearchQueries: unavailable(latestSearchStarted?.diagnostic?.generatedSearchQueries),
-    providerPlan: unavailable(latestSearchStarted?.diagnostic?.providerPlan),
-    providerOutcomes: unavailable(latestSearchFinished?.diagnostic?.providerOutcomes),
+    providerPlan: unavailable(providerPlan),
+    providerOutcomes: unavailable(providerOutcomes),
     providerResponseCount: unavailable(latestSearchFinished?.diagnostic?.providerResponseCount),
     providerErrorCodes: unavailable(latestSearchFinished?.diagnostic?.providerErrorCodes),
     emptyResultReason: unavailable(latestSearchFinished?.diagnostic?.emptyResultReason),
@@ -1070,6 +1122,14 @@ function qualityMarkdown(report) {
     `- evaluated: ${compact(report.retrieval.evaluatedCount)}`,
     `- clustered: ${compact(report.retrieval.clusteredCount)}`,
     `- displayed: ${compact(report.retrieval.displayedCount)}`,
+    `- selectedSourceTypes: ${compact(report.retrieval.search?.selectedSourceTypes)}`,
+    `- resolvedEntities: ${compact(report.retrieval.search?.resolvedEntities)}`,
+    `- agentGeneratedQueries: ${compact(report.retrieval.search?.agentGeneratedQueries, 1400)}`,
+    `- pipelineActualQueries: ${compact(report.retrieval.search?.pipelineActualQueries, 1400)}`,
+    `- searchProvider: ${compact(report.retrieval.search?.searchProvider, 1400)}`,
+    `- providerCallAttempted: ${compact(report.retrieval.search?.providerCallAttempted, 1400)}`,
+    `- providerReturnedCount: ${compact(report.retrieval.search?.providerReturnedCount, 1400)}`,
+    `- emptyResultReason: ${compact(report.retrieval.search?.emptyResultReason)}`,
     `- search returned count: ${compact(report.retrieval.search, 1800)}`,
     `- detail fetch: ${compact(report.retrieval.detailFetch, 1200)}`,
     `- aggregation: ${compact(report.retrieval.aggregation, 1000)}`,

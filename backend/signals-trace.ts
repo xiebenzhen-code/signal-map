@@ -15,6 +15,7 @@ export type SignalTracePhase =
   | "evidence_started"
   | "evidence_finished"
   | "agent_started"
+  | "plan_finished"
   | "agent_failed_before_source_selection"
   | "agent_finished"
   | "knowledge_started"

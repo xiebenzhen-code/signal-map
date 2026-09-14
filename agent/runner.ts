@@ -172,6 +172,14 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     });
   }
   options.onPlan?.(plan, researchInput, 1);
+  markPhase("plan_finished", true, plan.queries.length, undefined, {
+    round: 1,
+    agentGeneratedQueries: plan.queries,
+    selectedSourceType: plan.selectedSourceType,
+    fallbackSourceTypes: plan.fallbackSourceTypes,
+    allowedProviderIds: plan.allowedProviderIds,
+    strategy: plan.strategy,
+  });
   add("PLAN", "completed", { round: 1 }, plan);
   let response: ResearchResponse | undefined;
   let evaluation = evaluateEvidence({ signals: [], status: [], queryPlan: {} as never, progress: [], failures: [], counts: {} as never, overview: {} as never, coverage: {} as never, fetchedAt: now(), dataMode: "demo" }, 1, maxRounds);
@@ -236,6 +244,15 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
             relatedKnowledge,
             previousQueries: plan.queries,
             round,
+          });
+          markPhase("plan_finished", true, plan.queries.length, undefined, {
+            round,
+            fallback: true,
+            agentGeneratedQueries: plan.queries,
+            selectedSourceType: plan.selectedSourceType,
+            fallbackSourceTypes: plan.fallbackSourceTypes,
+            allowedProviderIds: plan.allowedProviderIds,
+            strategy: plan.strategy,
           });
           add("SOURCE_SELECTOR", "completed", { round, fallback: true }, fallbackSelection, "首选来源无有效结果，执行 fallback 来源");
           if (!hasDeadlineBudget(4000)) {
@@ -389,6 +406,14 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       });
     }
     options.onPlan?.(plan, researchInput, round + 1);
+    markPhase("plan_finished", true, plan.queries.length, undefined, {
+      round: round + 1,
+      agentGeneratedQueries: plan.queries,
+      selectedSourceType: plan.selectedSourceType,
+      fallbackSourceTypes: plan.fallbackSourceTypes,
+      allowedProviderIds: plan.allowedProviderIds,
+      strategy: plan.strategy,
+    });
     add("PLAN", "completed", { round: round + 1 }, plan);
   }
   add("COMPLETE", "needs_more_evidence", { rounds }, { reason: "execution limit" });
