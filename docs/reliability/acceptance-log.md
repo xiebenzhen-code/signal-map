@@ -98,3 +98,16 @@ Rules:
 - Minimal Fix: Stop attempting to make Sites Worker directly use PostgreSQL; use a standard Node API runtime for PostgreSQL-backed endpoints.
 - Re-test Result: No production runtime migration has been completed in this log.
 - Status: FAIL
+
+## 2026-09-14 — Agent Plan to Retrieval contract boundary
+
+- Date: 2026-09-14
+- Test / Run ID: Local contract regression for Agent Plan → Retrieval
+- Commit SHA: same commit as this record
+- Layer: Agent planning / Retrieval contract
+- Symptom / Failure: `AgentRunner` produced `plan.queries`, but `runResearchPipeline` rebuilt its own query plan from `planQuery(input)`, allowing `agentGeneratedQueries` and `pipelineActualQueries` to diverge.
+- Evidence: Code path showed `research-service` passing only source routing fields to `runResearchPipeline`, while `runResearchPipeline` called `planQuery(input)` internally.
+- Root Cause: No explicit cross-layer `RetrievalPlan` contract separated Agent-owned semantic planning from Retrieval-owned deterministic provider mapping.
+- Minimal Fix: Add `RetrievalPlan`, convert `ResearchPlan` with `toRetrievalPlan`, make Retrieval consume valid upstream queries first, and allow fallback planning only when upstream queries are missing or invalid.
+- Re-test Result: `node --check scripts/signal-map-agent-loop-e2e.mjs`, `npm run typecheck`, `npm run api:build`, targeted contract / agent tests, and lint for changed source/test files passed locally.
+- Status: PASS

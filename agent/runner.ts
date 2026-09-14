@@ -5,6 +5,7 @@ import type { ResearchResponse } from "../research/types.ts";
 import { compareKnowledge, evaluateEvidence } from "./evaluation.ts";
 import { persistResearchRecords, updateKnowledgeFromChanges } from "./knowledge-updater.ts";
 import { createResearchPlan } from "./query-planner.ts";
+import { toRetrievalPlan } from "./retrieval-plan.ts";
 import { chooseResearchStrategy } from "./research-policy.ts";
 import { selectSource } from "./source-selector.ts";
 import { classifyIntent } from "../intent/classifier.ts";
@@ -195,12 +196,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     rounds = round;
     add("RESEARCH", "completed", { round, plan }, { started: true });
     try {
-      const executeResearch = (currentPlan: typeof plan) => (options.research ?? ((input, selectedPlan) => runResearchPipeline(input, undefined, undefined, {
-        primarySourceType: selectedPlan.selectedSourceType,
-        fallbackSourceTypes: selectedPlan.fallbackSourceTypes,
-        allowedProviderIds: selectedPlan.allowedProviderIds,
-        reason: selectedPlan.sourceSelectionReason,
-      })))(researchInput, currentPlan, round);
+      const executeResearch = (currentPlan: typeof plan) => (options.research ?? ((input, selectedPlan) => runResearchPipeline(input, undefined, undefined, toRetrievalPlan(selectedPlan))))(researchInput, currentPlan, round);
       if (!hasDeadlineBudget(4000)) {
         throw Object.assign(new Error("Worker deadline budget exhausted before research"), { code: "WORKER_DEADLINE" });
       }

@@ -78,6 +78,11 @@ export function createResearchPlan(
     selectedSourceType: sourceSelection?.primarySourceType,
     fallbackSourceTypes: sourceSelection?.fallbackSourceTypes,
     allowedProviderIds: sourceSelection?.allowedProviderIds,
+    reason: sourceSelection?.reason,
     sourceSelectionReason: sourceSelection?.reason,
+    resolvedEntities: planned.resolvedEntities,
+    intent,
+    freshnessWindow: planned.requestedFreshnessWindow,
+    retrievalWindows: planned.retrievalWindows,
   };
 }

@@ -1,4 +1,4 @@
-import type { ResearchInput, ResearchResponse, ResearchSignal } from "../research/types.ts";
+import type { QueryPlan, ResearchInput, ResearchResponse, ResearchSignal } from "../research/types.ts";
 import type { IntentClassification, SourceProfile } from "../intent/types.ts";
 import type {
   AuthenticatedFilterContext,
@@ -34,7 +34,12 @@ export type ResearchPlan = {
   selectedSourceType?: SourceSelectionType;
   fallbackSourceTypes?: SourceSelectionType[];
   allowedProviderIds?: string[];
+  reason?: string;
   sourceSelectionReason?: string;
+  resolvedEntities?: QueryPlan["resolvedEntities"];
+  intent?: IntentClassification;
+  freshnessWindow?: ResearchInput["freshnessWindow"];
+  retrievalWindows?: QueryPlan["retrievalWindows"];
 };
 
 export type SourceSelectionType =

@@ -76,6 +76,18 @@ export type QueryPlan = {
   deduplicatedQueryCount?: number;
 };
 
+export type RetrievalPlan = {
+  queries: string[];
+  selectedSourceType?: string;
+  fallbackSourceTypes?: string[];
+  allowedProviderIds?: string[];
+  reason?: string;
+  resolvedEntities?: QueryPlan["resolvedEntities"];
+  intent?: IntentClassification;
+  freshnessWindow?: ResearchInput["freshnessWindow"];
+  retrievalWindows?: QueryPlan["retrievalWindows"];
+};
+
 export type PipelineCounts = {
   candidates: number;
   primary: number;

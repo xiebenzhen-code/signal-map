@@ -700,9 +700,12 @@ function searchDiagnostics(data, phaseTrace) {
         ? searchFinished.map((entry) => entry.itemCount)
         : "unavailable",
     }],
-    agentGeneratedQueries: unavailable(latestPlanFinished?.diagnostic?.agentGeneratedQueries),
+    agentGeneratedQueries: unavailable(latestSearchStarted?.diagnostic?.agentGeneratedQueries || latestPlanFinished?.diagnostic?.agentGeneratedQueries),
     agentPlanSelectedSourceType: unavailable(latestPlanFinished?.diagnostic?.selectedSourceType),
-    pipelineActualQueries: unavailable(latestSearchStarted?.diagnostic?.generatedSearchQueries),
+    pipelineActualQueries: unavailable(latestSearchStarted?.diagnostic?.pipelineActualQueries || latestSearchStarted?.diagnostic?.generatedSearchQueries),
+    fallbackUsed: unavailable(latestSearchStarted?.diagnostic?.fallbackUsed ?? latestSearchFinished?.diagnostic?.fallbackUsed),
+    retrievalPlanSource: unavailable(latestSearchStarted?.diagnostic?.retrievalPlanSource ?? latestSearchFinished?.diagnostic?.retrievalPlanSource),
+    fallbackReason: unavailable(latestSearchStarted?.diagnostic?.fallbackReason ?? latestSearchFinished?.diagnostic?.fallbackReason),
     resolvedEntities: unavailable(latestSearchStarted?.diagnostic?.resolvedEntities || queryPlan.resolvedEntities || queryPlan.entities),
     selectedSourceTypes: unavailable(phaseTrace
       .filter((entry) => entry.phase === "source_selection_finished")
@@ -1130,6 +1133,9 @@ function qualityMarkdown(report) {
     `- providerCallAttempted: ${compact(report.retrieval.search?.providerCallAttempted, 1400)}`,
     `- providerReturnedCount: ${compact(report.retrieval.search?.providerReturnedCount, 1400)}`,
     `- emptyResultReason: ${compact(report.retrieval.search?.emptyResultReason)}`,
+    `- fallbackUsed: ${compact(report.retrieval.search?.fallbackUsed)}`,
+    `- retrievalPlanSource: ${compact(report.retrieval.search?.retrievalPlanSource)}`,
+    `- fallbackReason: ${compact(report.retrieval.search?.fallbackReason)}`,
     `- search returned count: ${compact(report.retrieval.search, 1800)}`,
     `- detail fetch: ${compact(report.retrieval.detailFetch, 1200)}`,
     `- aggregation: ${compact(report.retrieval.aggregation, 1000)}`,

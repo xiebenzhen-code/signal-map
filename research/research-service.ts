@@ -1,6 +1,7 @@
 import { runResearchPipeline, type ResearchPipelineDebug } from "./research-pipeline.ts";
 import type { ResearchInput } from "./types.ts";
 import { runAgent } from "../agent/runner.ts";
+import { toRetrievalPlan } from "../agent/retrieval-plan.ts";
 import type { AgentRunOptions } from "../agent/types.ts";
 
 type ResearchExecution = {
@@ -70,12 +71,7 @@ export async function executeResearch({ identity, input, debug, context, reposit
         researchInput,
         undefined,
         { ...debug, onPhase, deadlineAt },
-        {
-          primarySourceType: plan.selectedSourceType,
-          fallbackSourceTypes: plan.fallbackSourceTypes,
-          allowedProviderIds: plan.allowedProviderIds,
-          reason: plan.sourceSelectionReason,
-        },
+        toRetrievalPlan(plan),
       ),
     });
     onPhase?.({ phase: "agent_finished", success: result.status !== "failed", itemCount: result.response?.signals.length });

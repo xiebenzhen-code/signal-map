@@ -43,6 +43,7 @@ import type {
   ResearchInput,
   ResearchResponse,
   ResearchSignal,
+  RetrievalPlan,
   SourceStageDiagnostics,
   QueryPlan,
   SourceType,
@@ -57,6 +58,95 @@ export type ResearchPipelineDebug = {
   onPhase?: (event: { phase: string; success?: boolean; itemCount?: number; errorCode?: string; diagnostic?: Record<string, unknown> }) => void;
   deadlineAt?: number;
 };
+
+type LegacySourceSelection = {
+  primarySourceType?: string;
+  selectedSourceType?: string;
+  fallbackSourceTypes?: string[];
+  allowedProviderIds?: string[];
+  reason?: string;
+};
+
+export type PipelinePlanResolution = {
+  plan: QueryPlan;
+  fallbackUsed: boolean;
+  fallbackReason?: string;
+  retrievalPlanSource: "upstream_agent_plan" | "pipeline_fallback_plan";
+  agentGeneratedQueries?: string[];
+};
+
+function deterministicTerms(values: Array<string | undefined>, max = 12) {
+  const ignored = new Set(["the", "and", "or", "for", "with", "from", "latest", "recent", "update", "updates"]);
+  const terms = values.flatMap((value) => String(value ?? "")
+    .split(/[^\p{L}\p{N}._+-]+/u)
+    .map((term) => term.trim())
+    .filter((term) => term.length > 1 && !ignored.has(term.toLocaleLowerCase())));
+  return [...new Set(terms)].slice(0, max);
+}
+
+function validRetrievalQueries(plan?: RetrievalPlan | LegacySourceSelection) {
+  if (!plan || !("queries" in plan) || !Array.isArray(plan.queries)) return [];
+  return [...new Set(plan.queries.map((query) => query.trim()).filter(Boolean))];
+}
+
+function normalizeRetrievalFreshness(value?: string): QueryPlan["requestedFreshnessWindow"] {
+  const raw = value?.trim().toLowerCase() || "7d";
+  if (raw.includes("24") || raw.includes("day") || raw.includes("today") || raw.includes("小时")) return "24h";
+  if (raw.includes("3")) return "3d";
+  if (raw.includes("30") || raw.includes("month") || raw.includes("月")) return "30d";
+  return "7d";
+}
+
+export function resolvePipelinePlan(input: ResearchInput, upstream?: RetrievalPlan | LegacySourceSelection): PipelinePlanResolution {
+  const upstreamQueries = validRetrievalQueries(upstream);
+  if (upstreamQueries.length && upstream && "queries" in upstream) {
+    const resolvedEntities = upstream.resolvedEntities ?? [];
+    const entities = resolvedEntities.map((entity) => entity.canonicalEntity).filter(Boolean);
+    const aliasesConsidered = [...new Set(resolvedEntities.flatMap((entity) => entity.aliasesConsidered ?? []))];
+    const requestedFreshnessWindow = normalizeRetrievalFreshness(upstream.freshnessWindow ?? input.freshnessWindow);
+    return {
+      fallbackUsed: false,
+      retrievalPlanSource: "upstream_agent_plan",
+      agentGeneratedQueries: upstreamQueries,
+      plan: {
+        originalNeed: input.currentQuestions?.trim() || input.industry,
+        coreKeywords: deterministicTerms([input.focusAreas, input.trackedEntities, input.currentQuestions, ...upstreamQueries]),
+        englishKeywords: [],
+        synonyms: [],
+        entities,
+        industryKeywords: deterministicTerms([input.industry, input.focusAreas]),
+        changeKeywords: [],
+        knowledgeAwareQueries: [],
+        searchCombinations: upstreamQueries,
+        retrievalWindows: upstream.retrievalWindows ?? [requestedFreshnessWindow],
+        requestedFreshnessWindow,
+        selectedSourceType: upstream.selectedSourceType,
+        fallbackSourceTypes: upstream.fallbackSourceTypes,
+        allowedProviderIds: upstream.allowedProviderIds,
+        sourceSelectionReason: upstream.reason,
+        resolvedEntities,
+        aliasesConsidered,
+        queryBudget: upstreamQueries.length,
+        deduplicatedQueryCount: upstreamQueries.length,
+      },
+    };
+  }
+
+  const legacy = upstream as LegacySourceSelection | undefined;
+  const fallbackPlan = planQuery(input);
+  return {
+    fallbackUsed: true,
+    fallbackReason: upstream ? "upstream_plan_missing_valid_queries" : "upstream_plan_missing",
+    retrievalPlanSource: "pipeline_fallback_plan",
+    plan: {
+      ...fallbackPlan,
+      selectedSourceType: legacy?.primarySourceType ?? legacy?.selectedSourceType,
+      fallbackSourceTypes: legacy?.fallbackSourceTypes,
+      allowedProviderIds: legacy?.allowedProviderIds,
+      sourceSelectionReason: legacy?.reason,
+    },
+  };
+}
 
 export type EligibilityAuditFunnel = {
   eventClusters: number;
@@ -874,16 +964,10 @@ export async function runResearchPipeline(
   input: ResearchInput,
   onProgress?: ProgressHandler,
   debug?: ResearchPipelineDebug,
-  sourceSelection?: {
-    primarySourceType?: string;
-    fallbackSourceTypes?: string[];
-    allowedProviderIds?: string[];
-    reason?: string;
-  },
+  retrievalPlanOrSourceSelection?: RetrievalPlan | LegacySourceSelection,
 ): Promise<ResearchResponse> {
   const progress: PipelineProgress[] = [];
   const failures: string[] = [];
-  const windowDays = freshnessDays(input.freshnessWindow);
   let scanned = 0;
   let counts = emptyCounts();
   const sourceOutcomes: SourceExecutionOutcome[] = [];
@@ -895,18 +979,14 @@ export async function runResearchPipeline(
     await onProgress?.(event);
   };
 
-  const plan = {
-    ...planQuery(input),
-    selectedSourceType: sourceSelection?.primarySourceType,
-    fallbackSourceTypes: sourceSelection?.fallbackSourceTypes,
-    allowedProviderIds: sourceSelection?.allowedProviderIds,
-    sourceSelectionReason: sourceSelection?.reason,
-  };
-  const allowedProviderIds = sourceSelection?.allowedProviderIds?.length
-    ? sourceSelection.allowedProviderIds
+  const planResolution = resolvePipelinePlan(input, retrievalPlanOrSourceSelection);
+  const plan = planResolution.plan;
+  const windowDays = freshnessDays(plan.requestedFreshnessWindow);
+  const allowedProviderIds = plan.allowedProviderIds?.length
+    ? plan.allowedProviderIds
     : undefined;
   const canExecute = (providerId: string) => !allowedProviderIds || allowedProviderIds.includes(providerId);
-  const sourceConstrained = Boolean(sourceSelection?.primarySourceType || sourceSelection?.allowedProviderIds?.length);
+  const sourceConstrained = Boolean(plan.selectedSourceType || plan.allowedProviderIds?.length);
   const providerPlan = (providerId: string, providerName: string, configured: boolean | "runtime_status") => ({
     providerId,
     providerName,
@@ -975,6 +1055,11 @@ export async function runResearchPipeline(
     selectedSourceType: plan.selectedSourceType,
     fallbackSourceTypes: plan.fallbackSourceTypes,
     allowedProviderIds: allowedProviderIds ?? "all",
+    fallbackUsed: planResolution.fallbackUsed,
+    fallbackReason: planResolution.fallbackReason,
+    retrievalPlanSource: planResolution.retrievalPlanSource,
+    agentGeneratedQueries: planResolution.agentGeneratedQueries,
+    pipelineActualQueries: plan.searchCombinations.slice(0, 10),
     generatedSearchQueryCount: plan.searchCombinations.length,
     generatedSearchQueries: plan.searchCombinations.slice(0, 10),
     entityCount: plan.entities.length,
@@ -1211,6 +1296,11 @@ export async function runResearchPipeline(
   markPhase("search_finished", true, scanned, undefined, {
     selectedSourceType: plan.selectedSourceType,
     allowedProviderIds: allowedProviderIds ?? "all",
+    fallbackUsed: planResolution.fallbackUsed,
+    fallbackReason: planResolution.fallbackReason,
+    retrievalPlanSource: planResolution.retrievalPlanSource,
+    agentGeneratedQueries: planResolution.agentGeneratedQueries,
+    pipelineActualQueries: plan.searchCombinations.slice(0, 10),
     providerOutcomes: sourceOutcomes.map((outcome) => ({
       providerName: outcome.source,
       execution: outcome.execution,
