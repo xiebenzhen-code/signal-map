@@ -145,23 +145,36 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     ? await Promise.resolve(options.repository.getResearchContextRevision(options.context))
     : options.initialRevision ?? 1;
   const bootstrapStrategy: ResearchStrategy = relatedKnowledge.length > 0 ? "REFRESH" : "INITIAL";
+  let plan = createResearchPlan(researchInput, 1, maxQueries, relatedKnowledge, bootstrapStrategy, undefined, intent, sourceProfile);
   markPhase("source_selection_started");
   const bootstrapSelection = selectSource({
     strategy: bootstrapStrategy,
     availableSourceCapabilities: options.availableSourceCapabilities,
     sourceProfile,
+    resolvedEntities: plan.resolvedEntities,
   });
   markPhase("source_selection_finished", true, bootstrapSelection.allowedProviderIds.length, undefined, {
     strategy: bootstrapStrategy,
     intent: intent.primaryIntent,
+    discoveryMode: bootstrapSelection.discoveryMode,
+    resolvedEntities: plan.resolvedEntities,
     selectedSourceType: bootstrapSelection.primarySourceType,
     fallbackSourceTypes: bootstrapSelection.fallbackSourceTypes,
     allowedProviderIds: bootstrapSelection.allowedProviderIds,
+    verificationSourceTypes: bootstrapSelection.verificationSourceTypes,
     sourceGap: bootstrapSelection.sourceGap,
     reason: bootstrapSelection.reason,
+    sourceSelectionReason: bootstrapSelection.reason,
   });
   add("SOURCE_SELECTOR", "completed", { round: 1, strategy: bootstrapStrategy }, bootstrapSelection, bootstrapSelection.reason);
-  let plan = createResearchPlan(researchInput, 1, maxQueries, relatedKnowledge, bootstrapStrategy, bootstrapSelection, intent, sourceProfile);
+  plan = {
+    ...plan,
+    selectedSourceType: bootstrapSelection.primarySourceType,
+    fallbackSourceTypes: bootstrapSelection.fallbackSourceTypes,
+    allowedProviderIds: bootstrapSelection.allowedProviderIds,
+    reason: bootstrapSelection.reason,
+    sourceSelectionReason: bootstrapSelection.reason,
+  };
   if (hasDeadlineBudget(9000)) {
     plan = await applyModelPlanning({
       plan,
@@ -230,6 +243,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
               conflictReduction: 0,
             },
           ],
+          resolvedEntities: plan.resolvedEntities,
         });
         if (fallbackSelection.primarySourceType && fallbackSelection.primarySourceType !== plan.selectedSourceType) {
           plan = createResearchPlan(researchInput, round, maxQueries, relatedKnowledge, plan.strategy, fallbackSelection, intent, sourceProfile);
@@ -303,15 +317,20 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       availableSourceCapabilities: options.availableSourceCapabilities,
       previousSourceOutcomes,
       sourceProfile,
+      resolvedEntities: plan.resolvedEntities,
     });
     markPhase("source_selection_finished", true, sourceSelection.allowedProviderIds.length, undefined, {
       strategy: policy.strategy,
       intent: intent.primaryIntent,
+      discoveryMode: sourceSelection.discoveryMode,
+      resolvedEntities: plan.resolvedEntities,
       selectedSourceType: sourceSelection.primarySourceType,
       fallbackSourceTypes: sourceSelection.fallbackSourceTypes,
       allowedProviderIds: sourceSelection.allowedProviderIds,
+      verificationSourceTypes: sourceSelection.verificationSourceTypes,
       sourceGap: sourceSelection.sourceGap,
       reason: sourceSelection.reason,
+      sourceSelectionReason: sourceSelection.reason,
     });
     add("SOURCE_SELECTOR", policy.strategy === "STOP" ? "skipped" : "completed", { round, strategy: policy.strategy }, sourceSelection, sourceSelection.reason);
     trace[trace.length - 1].selectedSourceType = sourceSelection.primarySourceType;

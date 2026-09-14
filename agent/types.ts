@@ -56,6 +56,8 @@ export type SourceExecutionPlan = {
   allowedProviderIds: string[];
   reason: string;
   sourceGap: boolean;
+  discoveryMode?: boolean;
+  verificationSourceTypes?: SourceSelectionType[];
 };
 
 export type SourceCapability = {

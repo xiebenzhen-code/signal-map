@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { selectSource } from "../agent/source-selector.ts";
 import type { SourceCapability, SourceOutcome } from "../agent/types.ts";
+import { sourceProfileForIntent } from "../intent/source-profiles.ts";
 import { runResearchPipeline } from "../research/research-pipeline.ts";
 
 const capability = (type: SourceCapability["type"], available = true): SourceCapability => ({
@@ -24,6 +25,46 @@ test("strategy maps to the expected primary source", () => {
 test("selection exposes provider bindings instead of query intent only", () => {
   const selection = selectSource({ strategy: "ESCALATE_SOURCE" });
   assert.deepEqual(selection.allowedProviderIds, ["company-registry", "official-update-pages", "github-releases"]);
+});
+
+test("broad product update without entity starts with discovery sources instead of official-only", () => {
+  const selection = selectSource({
+    strategy: "INITIAL",
+    sourceProfile: sourceProfileForIntent("PRODUCT_UPDATE"),
+    resolvedEntities: [],
+  });
+
+  assert.equal(selection.discoveryMode, true);
+  assert.notEqual(selection.primarySourceType, "OFFICIAL");
+  assert.equal(selection.primarySourceType, "GENERAL_WEB");
+  assert.ok(selection.allowedProviderIds.some((providerId) =>
+    ["public-web", "product-hunt", "hacker-news", "huggingface"].includes(providerId),
+  ));
+  assert.ok(selection.verificationSourceTypes?.includes("OFFICIAL"));
+});
+
+test("explicit product update entity can still prefer official verification sources", () => {
+  const selection = selectSource({
+    strategy: "INITIAL",
+    sourceProfile: sourceProfileForIntent("PRODUCT_UPDATE"),
+    resolvedEntities: [{ canonicalEntity: "Runway", aliasesConsidered: ["Runway"] }],
+  });
+
+  assert.equal(selection.discoveryMode, false);
+  assert.equal(selection.primarySourceType, "OFFICIAL");
+  assert.deepEqual(selection.allowedProviderIds, ["company-registry", "official-update-pages", "github-releases"]);
+});
+
+test("discovered entity can route into official or primary verification", () => {
+  const selection = selectSource({
+    strategy: "ESCALATE_SOURCE",
+    sourceProfile: sourceProfileForIntent("PRODUCT_UPDATE"),
+    resolvedEntities: [{ canonicalEntity: "Runway", aliasesConsidered: ["Runway"] }],
+  });
+
+  assert.equal(selection.discoveryMode, false);
+  assert.ok(["OFFICIAL", "PRIMARY"].includes(selection.primarySourceType ?? ""));
+  assert.equal(selection.allowedProviderIds.length > 0, true);
 });
 
 test("unavailable preferred source falls back without selecting it", () => {

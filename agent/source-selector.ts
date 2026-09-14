@@ -27,6 +27,9 @@ const providerIds: Record<SourceSelectionType, string[]> = {
   SOCIAL_SIGNAL: ["social-access", "reddit"],
 };
 
+const discoveryFirstSources: SourceSelectionType[] = ["GENERAL_WEB", "INDEPENDENT_MEDIA", "SOCIAL_SIGNAL", "PRIMARY"];
+const verificationSources: SourceSelectionType[] = ["OFFICIAL", "PRIMARY"];
+
 const profileSourceMap: Record<ProfileSourceType, SourceSelectionType[]> = {
   MEMORY: ["MEMORY"],
   OFFICIAL: ["OFFICIAL"],
@@ -83,11 +86,39 @@ function hasLowValueOutcome(type: SourceSelectionType, outcomes: SourceOutcome[]
   );
 }
 
+function uniqueSourceTypes(types: SourceSelectionType[]) {
+  return Array.from(new Set(types));
+}
+
+function hasResolvedEntities(input: { resolvedEntities?: Array<{ canonicalEntity?: string }> }) {
+  return Boolean(input.resolvedEntities?.some((entity) => entity.canonicalEntity?.trim()));
+}
+
+function shouldStartWithDiscovery(input: {
+  strategy: ResearchStrategy;
+  sourceProfile?: SourceProfile;
+  resolvedEntities?: Array<{ canonicalEntity?: string }>;
+}) {
+  if (input.strategy !== "INITIAL") return false;
+  if (hasResolvedEntities(input)) return false;
+  const preferred = input.sourceProfile?.preferredSourceTypes.flatMap((type) => profileSourceMap[type]) ?? [];
+  return preferred[0] === "OFFICIAL";
+}
+
+function routeDiscoveryBeforeVerification(preferred: SourceSelectionType[]) {
+  return uniqueSourceTypes([
+    ...discoveryFirstSources.filter((type) => preferred.includes(type)),
+    ...preferred.filter((type) => !discoveryFirstSources.includes(type) && !verificationSources.includes(type)),
+    ...verificationSources.filter((type) => preferred.includes(type)),
+  ]);
+}
+
 export function selectSource(input: {
   strategy: ResearchStrategy;
   availableSourceCapabilities?: SourceCapability[];
   previousSourceOutcomes?: SourceOutcome[];
   sourceProfile?: SourceProfile;
+  resolvedEntities?: Array<{ canonicalEntity?: string; aliasesConsidered?: string[] }>;
 }): SourceSelection {
   if (input.strategy === "STOP") {
     return { fallbackSourceTypes: [], allowedProviderIds: [], reason: "策略要求停止研究", sourceGap: false };
@@ -97,13 +128,16 @@ export function selectSource(input: {
     : defaultCapabilities();
   const available = new Set(capabilities.filter((capability) => capability.available).map((capability) => capability.type));
   const profilePreferred = input.sourceProfile?.preferredSourceTypes.flatMap((type) => profileSourceMap[type]) ?? [];
-  const preferred = Array.from(new Set([
+  const basePreferred = uniqueSourceTypes([
     ...profilePreferred,
     ...strategySources[input.strategy],
     "GENERAL_WEB" as const,
-  ])).filter((type) => input.strategy !== "VERIFY_CONFLICT" || (type !== "SOCIAL_SIGNAL" && type !== "MEMORY"));
+  ]).filter((type) => input.strategy !== "VERIFY_CONFLICT" || (type !== "SOCIAL_SIGNAL" && type !== "MEMORY"));
+  const discoveryMode = shouldStartWithDiscovery(input);
+  const preferred = discoveryMode ? routeDiscoveryBeforeVerification(basePreferred) : basePreferred;
   const usable = preferred.filter((type) => available.has(type) && !hasLowValueOutcome(type, input.previousSourceOutcomes ?? []));
   const primarySourceType = usable[0];
+  const availableVerificationSourceTypes = verificationSources.filter((type) => usable.includes(type));
   return {
     primarySourceType,
     fallbackSourceTypes: primarySourceType ? usable.slice(1) : [],
@@ -111,9 +145,13 @@ export function selectSource(input: {
       ? providerIds[primarySourceType]
       : [],
     reason: primarySourceType
-      ? `${input.sourceProfile?.intent ?? "GENERAL_RESEARCH"} + ${input.strategy} 优先使用 ${primarySourceType}`
+      ? discoveryMode
+        ? `${input.sourceProfile?.intent ?? "GENERAL_RESEARCH"} + ${input.strategy} 无明确实体，先使用 ${primarySourceType} 发现候选，再用 ${availableVerificationSourceTypes.join(" / ") || "OFFICIAL / PRIMARY"} 验证`
+        : `${input.sourceProfile?.intent ?? "GENERAL_RESEARCH"} + ${input.strategy} 优先使用 ${primarySourceType}`
       : `${input.sourceProfile?.intent ?? input.strategy} 没有可用来源能力`,
     sourceGap: !primarySourceType,
+    discoveryMode,
+    verificationSourceTypes: availableVerificationSourceTypes,
   };
 }
 

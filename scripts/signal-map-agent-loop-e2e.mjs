@@ -656,6 +656,10 @@ function searchDiagnostics(data, phaseTrace) {
   const latestSearchFinished = searchFinished.at(-1);
   const planFinished = phaseTrace.filter((entry) => entry.phase === "plan_finished");
   const latestPlanFinished = planFinished.at(-1);
+  const sourceSelections = phaseTrace
+    .filter((entry) => entry.phase === "source_selection_finished")
+    .map((entry) => entry.diagnostic || {});
+  const latestSourceSelection = sourceSelections.at(-1) || {};
   const providerPlan = Array.isArray(latestSearchStarted?.diagnostic?.providerPlan)
     ? latestSearchStarted.diagnostic.providerPlan
     : [];
@@ -707,10 +711,10 @@ function searchDiagnostics(data, phaseTrace) {
     retrievalPlanSource: unavailable(latestSearchStarted?.diagnostic?.retrievalPlanSource ?? latestSearchFinished?.diagnostic?.retrievalPlanSource),
     fallbackReason: unavailable(latestSearchStarted?.diagnostic?.fallbackReason ?? latestSearchFinished?.diagnostic?.fallbackReason),
     resolvedEntities: unavailable(latestSearchStarted?.diagnostic?.resolvedEntities || queryPlan.resolvedEntities || queryPlan.entities),
-    selectedSourceTypes: unavailable(phaseTrace
-      .filter((entry) => entry.phase === "source_selection_finished")
-      .map((entry) => entry.diagnostic?.selectedSourceType)
-      .filter(Boolean)),
+    selectedSourceTypes: unavailable(sourceSelections.map((entry) => entry.selectedSourceType).filter(Boolean)),
+    discoveryMode: unavailable(latestSourceSelection.discoveryMode),
+    verificationSourceTypes: unavailable(latestSourceSelection.verificationSourceTypes),
+    sourceSelectionReason: unavailable(latestSourceSelection.sourceSelectionReason || latestSourceSelection.reason),
     searchProvider: unavailable(providerOutcomes.length
       ? providerOutcomes.map((provider) => ({
           providerName: provider.providerName,
@@ -1126,6 +1130,9 @@ function qualityMarkdown(report) {
     `- clustered: ${compact(report.retrieval.clusteredCount)}`,
     `- displayed: ${compact(report.retrieval.displayedCount)}`,
     `- selectedSourceTypes: ${compact(report.retrieval.search?.selectedSourceTypes)}`,
+    `- discoveryMode: ${compact(report.retrieval.search?.discoveryMode)}`,
+    `- verificationSourceTypes: ${compact(report.retrieval.search?.verificationSourceTypes)}`,
+    `- sourceSelectionReason: ${compact(report.retrieval.search?.sourceSelectionReason)}`,
     `- resolvedEntities: ${compact(report.retrieval.search?.resolvedEntities)}`,
     `- agentGeneratedQueries: ${compact(report.retrieval.search?.agentGeneratedQueries, 1400)}`,
     `- pipelineActualQueries: ${compact(report.retrieval.search?.pipelineActualQueries, 1400)}`,

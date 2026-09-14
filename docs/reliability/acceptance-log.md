@@ -124,3 +124,16 @@ Rules:
 - Minimal Fix: Limit semantic query planning and entity extraction to user research fields, exclude identity and known-information scaffolding from `originalNeed`, and add generic entity-word validation for English function/question words.
 - Re-test Result: Targeted tests passed for the quality query pollution case, normal company/product entities, and Agent Plan → Retrieval contract.
 - Status: PASS
+
+## 2026-09-14 — Broad discovery without entity selected official-only source
+
+- Date: 2026-09-14
+- Test / Run ID: Local SourceSelection broad discovery regression
+- Commit SHA: same commit as this record
+- Layer: SourceSelection / Discovery routing
+- Symptom / Failure: Broad discovery quality query had `resolvedEntities=[]`, `intent=PRODUCT_UPDATE`, and `selectedSourceType=OFFICIAL`; search returned zero results with `emptyResultReason=official_source_selected_but_no_resolved_entities`.
+- Evidence: Quality diagnostics showed Agent Plan → Retrieval contract passed and Query / Entity pollution was fixed, but `source_selection_finished` still selected the OFFICIAL provider group before any candidate entity existed.
+- Root Cause: `PRODUCT_UPDATE` source profile prioritizes `OFFICIAL`, and SourceSelection did not distinguish no-entity candidate discovery from entity-specific official verification.
+- Minimal Fix: For `INITIAL` research with no resolved entity and an OFFICIAL-first profile, select a discovery-capable first source while retaining OFFICIAL / PRIMARY as verification sources after candidates exist.
+- Re-test Result: Local SourceSelector regression now verifies broad no-entity PRODUCT_UPDATE is not OFFICIAL-only, explicit Runway update can still prefer OFFICIAL, discovered entities can route to OFFICIAL / PRIMARY verification, and Agent Plan → Retrieval contract tests remain passing.
+- Status: PASS
