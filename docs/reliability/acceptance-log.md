@@ -176,3 +176,16 @@ Rules:
 - Minimal Fix: Add `BudgetManager` with existing `9000ms` model-planning and `4000ms` retrieval guards, check budget before next-round planning, and return `ResearchRunState.cumulativeResponse` when evidence exists but budget is unsafe.
 - Re-test Result: Targeted tests verify next-round budget exhaustion does not start model planning, planning `WORKER_DEADLINE` after evidence returns cumulative evidence, no-evidence deadline does not fabricate a response, and budget-sufficient multi-round behavior continues.
 - Status: PASS
+
+## 2026-09-14 — Round attempt evidence merge timing
+
+- Date: 2026-09-14
+- Test / Run ID: Local AgentRunner same-round attempt merge regression
+- Commit SHA: same commit as this record
+- Layer: AgentRunner / ResearchRunState merge timing
+- Symptom / Failure: Quality E2E showed round 1 search/detail/aggregation/evidence succeeded, but the following `fallback_planning` budget trace still reported `cumulativeEvidenceCount=0` and final evidence stayed zero.
+- Evidence: `runAgent` merged into `ResearchRunState` only after fallback handling finished, so a primary attempt with evidence could be followed by an empty fallback before the run-level state observed the primary attempt.
+- Root Cause: Same-round fallback was treated as a replacement response until the end of the round instead of as an additional attempt that should be merged immediately.
+- Minimal Fix: Merge every `runResearchPipeline` attempt into `ResearchRunState` immediately after it returns; fallback attempts are merged as supplements and trace records `attemptType`, `roundEvidenceCount`, `carriedForwardEvidenceCount`, and `cumulativeEvidenceCount`.
+- Re-test Result: Targeted tests verify primary attempt evidence survives empty fallback, provider-error fallback preserves cumulative evidence, fallback verified evidence does not duplicate count, and STOP/final evidence count reads cumulative state.
+- Status: PASS

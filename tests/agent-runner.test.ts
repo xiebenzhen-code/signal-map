@@ -36,6 +36,23 @@ function response(signals: ResearchSignal[]): ResearchResponse {
   };
 }
 
+function sourceEvidenceResponse(evidenceCount: number, providerId = "public-web"): ResearchResponse {
+  return {
+    ...response([]),
+    sourceOutcomes: [{
+      sourceType: "GENERAL_WEB",
+      providerId,
+      executed: true,
+      resultCount: evidenceCount,
+      requestCount: 1,
+      newEvidenceCount: evidenceCount,
+      newClaimCount: evidenceCount,
+      reliabilityGain: evidenceCount > 0 ? 40 : 0,
+      conflictReduction: 0,
+    }],
+  };
+}
+
 function evidenceSignal(overrides: Partial<ResearchSignal> = {}): ResearchSignal {
   const base = signal(overrides);
   return {
@@ -196,6 +213,93 @@ test("planning WORKER_DEADLINE after evidence returns cumulative result", async 
   assert.equal(result.status, "needs_more_evidence");
   assert.equal(result.response?.signals.length, 1);
   assert.equal(result.response?.signals.flatMap((item) => item.claims).length, 1);
+});
+
+test("primary attempt source evidence is merged before empty fallback", async () => {
+  let calls = 0;
+  const phases: Array<Parameters<NonNullable<Parameters<typeof runAgent>[0]["onPhase"]>>[0]> = [];
+  const result = await runAgent({
+    input,
+    maxRounds: 1,
+    onPhase: (event) => phases.push(event),
+    research: async () => {
+      calls += 1;
+      return calls === 1 ? sourceEvidenceResponse(2) : sourceEvidenceResponse(0, "primary-web-search");
+    },
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(result.status, "needs_more_evidence");
+  assert.equal(result.response?.sourceOutcomes?.reduce((count, outcome) => count + outcome.newEvidenceCount, 0), 2);
+  assert.ok(phases.some((event) =>
+    event.phase === "evidence_preservation_finished" &&
+    event.diagnostic?.attemptType === "primary" &&
+    event.diagnostic?.cumulativeEvidenceCount === 2));
+  assert.ok(phases.some((event) =>
+    event.phase === "evidence_preservation_finished" &&
+    event.diagnostic?.attemptType === "fallback" &&
+    event.diagnostic?.cumulativeEvidenceCount === 2));
+});
+
+test("primary attempt source evidence survives fallback provider error", async () => {
+  let calls = 0;
+  const result = await runAgent({
+    input,
+    maxRounds: 1,
+    research: async () => {
+      calls += 1;
+      if (calls === 1) return sourceEvidenceResponse(1);
+      throw Object.assign(new Error("fallback provider unavailable"), { code: "PROVIDER_UNAVAILABLE" });
+    },
+  });
+
+  assert.equal(calls, 2);
+  assert.notEqual(result.status, "failed");
+  assert.equal(result.response?.sourceOutcomes?.reduce((count, outcome) => count + outcome.newEvidenceCount, 0), 1);
+});
+
+test("fallback attempt can add verified evidence without duplicating primary source evidence count", async () => {
+  let calls = 0;
+  const result = await runAgent({
+    input,
+    maxRounds: 1,
+    research: async () => {
+      calls += 1;
+      return calls === 1
+        ? sourceEvidenceResponse(1)
+        : response([evidenceSignal({
+            id: "verified-fallback",
+            sourceUrl: "https://example.com/update",
+            sourceType: "primary",
+            sourceTier: "S",
+            verificationStatus: "verified",
+            reliabilityScore: 92,
+            confidence: 92,
+          })]);
+    },
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(result.response?.signals.length, 1);
+  assert.equal(result.response?.signals[0]?.verificationStatus, "verified");
+  assert.equal(result.response?.signals.flatMap((item) => item.claims).length, 1);
+});
+
+test("STOP after fallback uses cumulative source evidence count", async () => {
+  let calls = 0;
+  const phases: Array<Parameters<NonNullable<Parameters<typeof runAgent>[0]["onPhase"]>>[0]> = [];
+  await runAgent({
+    input,
+    maxRounds: 1,
+    onPhase: (event) => phases.push(event),
+    research: async () => {
+      calls += 1;
+      return calls === 1 ? sourceEvidenceResponse(2) : sourceEvidenceResponse(0, "primary-web-search");
+    },
+  });
+
+  const finalPreservation = phases.filter((event) => event.phase === "evidence_preservation_finished").at(-1);
+  assert.equal(finalPreservation?.diagnostic?.finalEvidenceCount, 2);
 });
 
 test("deadline without cumulative evidence does not fabricate a response", async () => {

@@ -6,7 +6,7 @@ import { BudgetManager, type BudgetSnapshot } from "./budget-manager.ts";
 import { compareKnowledge, evaluateEvidence } from "./evaluation.ts";
 import { persistResearchRecords, updateKnowledgeFromChanges } from "./knowledge-updater.ts";
 import { createResearchPlan } from "./query-planner.ts";
-import { ResearchRunState, mergeRoundAttempts } from "./research-run-state.ts";
+import { ResearchRunState, mergeRoundAttempts, type EvidencePreservationSnapshot } from "./research-run-state.ts";
 import { toRetrievalPlan } from "./retrieval-plan.ts";
 import { chooseResearchStrategy } from "./research-policy.ts";
 import { selectSource } from "./source-selector.ts";
@@ -194,6 +194,13 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     });
     return { status, rounds, response, plan, evaluation, knowledgeChanges: allKnowledgeChanges, attention: [], steps, trace };
   };
+  const prepareRoundResponse = (roundResponse: ResearchResponse) => {
+    roundResponse.intent = intent;
+    roundResponse.sourceProfile = sourceProfile;
+    roundResponse.outputMode = sourceProfile.outputMode;
+    roundResponse.intentOutput = mapIntentOutput(roundResponse, sourceProfile);
+    return roundResponse;
+  };
   const initialPlanningBudget = budget.snapshot();
   markPhase("budget_checked", true, undefined, undefined, budgetDiagnostics(initialPlanningBudget, { round: 1, stage: "initial_planning" }));
   if (initialPlanningBudget.canStartModelPlanning) {
@@ -221,6 +228,16 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     rounds = round;
     add("RESEARCH", "completed", { round, plan }, { started: true });
     let roundResponse: ResearchResponse | undefined;
+    let preservation: EvidencePreservationSnapshot | undefined;
+    const mergeAttemptResponse = (attemptResponse: ResearchResponse, attemptType: "primary" | "fallback") => {
+      const snapshot = runState.mergeRoundResponse(attemptResponse);
+      markPhase("evidence_preservation_finished", true, snapshot.cumulativeEvidenceCount, undefined, {
+        round,
+        attemptType,
+        ...snapshot,
+      });
+      return snapshot;
+    };
     try {
       const executeResearch = (currentPlan: typeof plan) => (options.research ?? ((input, selectedPlan) => runResearchPipeline(input, undefined, undefined, toRetrievalPlan(selectedPlan))))(researchInput, currentPlan, round);
       const retrievalBudget = budget.snapshot();
@@ -228,11 +245,8 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       if (!retrievalBudget.canStartRetrieval) {
         throw Object.assign(new Error("Worker deadline budget exhausted before research"), { code: "WORKER_DEADLINE" });
       }
-      roundResponse = await executeResearch(plan);
-      roundResponse.intent = intent;
-      roundResponse.sourceProfile = sourceProfile;
-      roundResponse.outputMode = sourceProfile.outputMode;
-      roundResponse.intentOutput = mapIntentOutput(roundResponse, sourceProfile);
+      roundResponse = prepareRoundResponse(await executeResearch(plan));
+      preservation = mergeAttemptResponse(roundResponse, "primary");
       if (!roundResponse.signals.length && plan.fallbackSourceTypes?.length) {
         const firstAttemptResponse = roundResponse;
         const fallbackSelection = selectSource({
@@ -289,12 +303,9 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
           if (!fallbackRetrievalBudget.canStartRetrieval) {
             throw Object.assign(new Error("Worker deadline budget exhausted before fallback research"), { code: "WORKER_DEADLINE" });
           }
-          roundResponse = await executeResearch(plan);
-          roundResponse = mergeRoundAttempts(firstAttemptResponse, roundResponse);
-          roundResponse.intent = intent;
-          roundResponse.sourceProfile = sourceProfile;
-          roundResponse.outputMode = sourceProfile.outputMode;
-          roundResponse.intentOutput = mapIntentOutput(roundResponse, sourceProfile);
+          const fallbackResponse = prepareRoundResponse(await executeResearch(plan));
+          preservation = mergeAttemptResponse(fallbackResponse, "fallback");
+          roundResponse = prepareRoundResponse(mergeRoundAttempts(firstAttemptResponse, fallbackResponse));
         }
       }
     } catch (error) {
@@ -329,7 +340,6 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       }
       return { status: "failed", rounds, plan, evaluation, knowledgeChanges: [], attention: [], steps, trace };
     }
-    const preservation = runState.mergeRoundResponse(roundResponse);
     const cumulativeResponse = runState.cumulativeResponse;
     if (!cumulativeResponse) throw Object.assign(new Error("Missing cumulative response after round merge"), { code: "UNKNOWN_RESEARCH_FAILURE" });
     cumulativeResponse.intent = intent;
@@ -337,17 +347,13 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     cumulativeResponse.outputMode = sourceProfile.outputMode;
     cumulativeResponse.intentOutput = mapIntentOutput(cumulativeResponse, sourceProfile);
     response = cumulativeResponse;
-    markPhase("evidence_preservation_finished", true, preservation.cumulativeEvidenceCount, undefined, {
-      round,
-      ...preservation,
-    });
     add("RESEARCH", "completed", { round }, {
       signals: response.signals.length,
       dataMode: response.dataMode,
-      roundEvidenceCount: preservation.roundEvidenceCount,
-      cumulativeEvidenceCount: preservation.cumulativeEvidenceCount,
-      carriedForwardEvidenceCount: preservation.carriedForwardEvidenceCount,
-      verificationOutcome: preservation.verificationOutcome,
+      roundEvidenceCount: preservation?.roundEvidenceCount ?? 0,
+      cumulativeEvidenceCount: preservation?.cumulativeEvidenceCount ?? runState.cumulativeEvidenceCount,
+      carriedForwardEvidenceCount: preservation?.carriedForwardEvidenceCount ?? 0,
+      verificationOutcome: preservation?.verificationOutcome ?? "no_evidence",
     });
     const currentSourceOutcomes = sourceOutcomesFromResponse(roundResponse);
     evaluation = evaluateEvidence(response, round, maxRounds);

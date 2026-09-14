@@ -122,6 +122,27 @@ test("providerFailureSnapshot preserves existing cumulative evidence", () => {
   assert.equal(snapshot.verificationOutcome, "provider_failure_carried_forward");
 });
 
+test("source outcome evidence counts as cumulative evidence before displayed signals exist", () => {
+  const state = new ResearchRunState();
+  const snapshot = state.mergeRoundResponse(response([], {
+    sourceOutcomes: [{
+      sourceType: "GENERAL_WEB",
+      providerId: "public-web",
+      executed: true,
+      resultCount: 2,
+      requestCount: 1,
+      newEvidenceCount: 2,
+      newClaimCount: 2,
+      reliabilityGain: 40,
+      conflictReduction: 0,
+    }],
+  }));
+
+  assert.equal(snapshot.roundEvidenceCount, 2);
+  assert.equal(snapshot.cumulativeEvidenceCount, 2);
+  assert.equal(state.cumulativeEvidenceCount, 2);
+});
+
 test("same evidence is not duplicated and stronger verification metadata wins", () => {
   const state = new ResearchRunState();
   const sourceUrl = "https://example.com/same";

@@ -40,7 +40,10 @@ export function strongerVerification(a: VerificationStatus, b: VerificationStatu
 }
 
 export function countEvidence(response: ResearchResponse | undefined) {
-  return response?.signals.reduce((count, signal) => count + signal.claims.length, 0) ?? 0;
+  if (!response) return 0;
+  const claimCount = response.signals.reduce((count, signal) => count + signal.claims.length, 0);
+  const sourceOutcomeEvidenceCount = response.sourceOutcomes?.reduce((count, outcome) => count + outcome.newEvidenceCount, 0) ?? 0;
+  return Math.max(claimCount, sourceOutcomeEvidenceCount);
 }
 
 function mergeResponseSourceOutcomes(previous: ResearchResponse | undefined, next: ResearchResponse) {
@@ -67,7 +70,7 @@ function mergeResponseSourceOutcomes(previous: ResearchResponse | undefined, nex
 }
 
 export function mergeRoundAttempts(previous: ResearchResponse | undefined, next: ResearchResponse) {
-  return mergeResponseSourceOutcomes(previous, next);
+  return mergeResearchResponses(previous, next);
 }
 
 function mergeSignals(previous: ResearchSignal, next: ResearchSignal): ResearchSignal {
