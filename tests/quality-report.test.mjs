@@ -5,6 +5,7 @@ import {
   attemptDiagnostics,
   qualityAcceptance,
   qualityMarkdown,
+  producedEvidenceCountFromResponseData,
 } from "../scripts/signal-map-agent-loop-e2e.mjs";
 
 const trace = [
@@ -88,4 +89,9 @@ test("markdown uses the same request and final counts", () => {
   assert.match(markdown, /request-1/);
   assert.match(markdown, /cumulativeEvidenceCount: 2/);
   assert.match(markdown, /finalEvidenceCount: 0/);
+});
+
+test("produced evidence count is sourced only from evidenceRecords", () => {
+  assert.equal(producedEvidenceCountFromResponseData({ evidenceRecords: [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }], evidenceAccounting: { producedEvidenceCount: 12 } }), 4);
+  assert.equal(producedEvidenceCountFromResponseData({ evidenceAccounting: { producedEvidenceCount: 12 } }), "unavailable");
 });

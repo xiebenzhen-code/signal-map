@@ -882,6 +882,29 @@ function aggregationDiagnostics(data, summary, attempts = []) {
   };
 }
 
+function summedAttemptCount(attempts, selector) {
+  const values = attempts.map(selector).map(Number).filter(Number.isFinite);
+  return values.length ? values.reduce((total, value) => total + value, 0) : undefined;
+}
+
+function producedEvidenceCountFromResponseData(data) {
+  return Array.isArray(data?.evidenceRecords) ? data.evidenceRecords.length : "unavailable";
+}
+
+function runCumulativeDiagnostics(attempts, evidence) {
+  return {
+    retrievedCount: unavailable(summedAttemptCount(attempts, (attempt) => attempt.search.returnedCount)),
+    evaluatedCount: unavailable(summedAttemptCount(attempts, (attempt) => attempt.evidence.phaseItemCount)),
+    clusteredCount: unavailable(summedAttemptCount(attempts, (attempt) => attempt.aggregation.clusteredCount)),
+    detailAttemptedCount: unavailable(summedAttemptCount(attempts, (attempt) => attempt.detailFetch.attemptedCount)),
+    detailSucceededCount: unavailable(summedAttemptCount(attempts, (attempt) => attempt.detailFetch.successCount)),
+    detailFailedCount: unavailable(summedAttemptCount(attempts, (attempt) => attempt.detailFetch.failedCount)),
+    aggregationInputCount: unavailable(summedAttemptCount(attempts, (attempt) => attempt.aggregation.inputCount)),
+    aggregationOutputCount: unavailable(summedAttemptCount(attempts, (attempt) => attempt.aggregation.clusteredCount)),
+    producedEvidenceCount: evidence.producedEvidenceCount,
+  };
+}
+
 function filteringDiagnostics(data, summary, signals) {
   const evaluatedCount = Array.isArray(summary.filteringDetails)
     ? summary.filteringDetails.length
@@ -934,18 +957,14 @@ function evidenceDiagnostics(data, summary, signals, latestRun, phaseTrace) {
   const hasPreservation = Array.isArray(preservation.perRound);
   const latestPreservation = hasPreservation ? preservation.perRound.at(-1) : {};
   const attempts = attemptDiagnostics(phaseTrace);
-  const producedByAttempt = attempts
-    .map((attempt) => Number(attempt.evidence.preservation?.producedEvidenceCount))
-    .filter(Number.isFinite);
   const rejectedByAttempt = attempts
     .map((attempt) => Number(attempt.evidence.preservation?.rejectedEvidenceCount))
     .filter(Number.isFinite);
   const acceptedByAttempt = attempts
     .map((attempt) => Number(attempt.evidence.preservation?.acceptedEvidenceCount))
     .filter(Number.isFinite);
-  const producedEvidenceCount = Number.isFinite(Number(accounting.producedEvidenceCount))
-    ? Number(accounting.producedEvidenceCount)
-    : (producedByAttempt.length ? Math.max(...producedByAttempt) : undefined);
+  const evidenceRecordCount = producedEvidenceCountFromResponseData(data);
+  const producedEvidenceCount = evidenceRecordCount === "unavailable" ? undefined : evidenceRecordCount;
   const rejectedEvidenceCount = Number.isFinite(Number(accounting.rejectedEvidenceCount))
     ? Number(accounting.rejectedEvidenceCount)
     : (rejectedByAttempt.length ? Math.max(...rejectedByAttempt) : undefined);
@@ -953,16 +972,24 @@ function evidenceDiagnostics(data, summary, signals, latestRun, phaseTrace) {
     ? Number(accounting.acceptedEvidenceCount)
     : (acceptedByAttempt.length ? Math.max(...acceptedByAttempt) : undefined);
   const observedReasons = hasPreservation ? latestPreservation.rejectionReason : accounting.rejectionReasons;
-  const reasonTotal = observedReasons && typeof observedReasons === "object"
+  const rejectionReasonOccurrences = observedReasons && typeof observedReasons === "object"
     ? Object.values(observedReasons).reduce((sum, value) => sum + (Number.isFinite(Number(value)) ? Number(value) : 0), 0)
     : undefined;
+  const classifiedRejectedEvidenceCount = Number.isFinite(rejectedEvidenceCount) && Number.isFinite(rejectionReasonOccurrences)
+    ? Math.min(rejectedEvidenceCount, rejectionReasonOccurrences)
+    : undefined;
+  const unclassifiedRejectedEvidenceCount = Number.isFinite(rejectedEvidenceCount) && Number.isFinite(classifiedRejectedEvidenceCount)
+    ? Math.max(0, rejectedEvidenceCount - classifiedRejectedEvidenceCount)
+    : undefined;
   const rejectionAccountingComplete = Number.isFinite(rejectedEvidenceCount)
-    && Number.isFinite(reasonTotal)
-    && rejectedEvidenceCount === reasonTotal;
+    && Number.isFinite(rejectionReasonOccurrences)
+    && rejectionReasonOccurrences === rejectedEvidenceCount
+    && unclassifiedRejectedEvidenceCount === 0;
   return {
     candidateCount: unavailable(summary.clusteredCount ?? summary.filteringDetails?.length ?? data.overview?.events),
     discoveredCandidateCount: unavailable(accounting.discoveredCandidateCount ?? summary.retrievedCount ?? data.overview?.scanned),
     producedEvidenceCount: unavailable(producedEvidenceCount),
+    producedEvidenceDataSource: Array.isArray(data.evidenceRecords) ? "ResearchResponse.evidenceRecords" : "unavailable",
     cumulativeEvidenceCount: unavailable(hasPreservation ? preservation.cumulativeEvidenceCount : accounting.cumulativeEvidenceCount),
     evaluatedEvidenceCount: unavailable(hasPreservation ? latestPreservation.evaluatedEvidenceCount : accounting.evaluatedEvidenceCount),
     acceptedEvidenceCount: unavailable(acceptedEvidenceCount ?? (preservation.acceptedEvidenceCount === "unavailable" ? latestRun?.evidenceCount ?? accepted.length : preservation.acceptedEvidenceCount)),
@@ -970,6 +997,10 @@ function evidenceDiagnostics(data, summary, signals, latestRun, phaseTrace) {
     finalEvidenceCount: unavailable(hasPreservation ? preservation.finalEvidenceCount : (accounting.finalEvidenceCount ?? preservation.finalEvidenceCount)),
     rejectedReason: rejectionAccountingComplete ? observedReasons : "unavailable",
     rejectionReasonObserved: unavailable(observedReasons),
+    primaryRejectionReasonCounts: unavailable(observedReasons),
+    rejectionReasonOccurrences: unavailable(rejectionReasonOccurrences),
+    classifiedRejectedEvidenceCount: unavailable(classifiedRejectedEvidenceCount),
+    unclassifiedRejectedEvidenceCount: unavailable(unclassifiedRejectedEvidenceCount),
     rejectionAccountingComplete,
     run: {
       cumulativeEvidenceCount: unavailable(hasPreservation ? preservation.cumulativeEvidenceCount : accounting.cumulativeEvidenceCount),
@@ -1158,6 +1189,7 @@ async function runQualityAcceptance(session) {
     });
     const acceptance = qualityAcceptance(qualityRun.summary, qualityReport);
     qualityReport.acceptanceStatus = acceptance.status;
+    qualityReport.qualityStatus = acceptance.status;
     qualityReport.failureReason = acceptance.reason;
     if (agentRunsError) qualityReport.rawAvailability.agentRunsError = agentRunsError;
     if (acceptance.status !== statuses.pass) process.exitCode = 1;
@@ -1217,14 +1249,21 @@ function buildQualityReport({ query, signalRun, agentRuns, secondRun }) {
     || unique([data.queryPlan?.selectedSourceType, ...(data.queryPlan?.fallbackSourceTypes || [])]);
   const planningTiming = planningTimingDiagnostics(phaseTrace);
   const evidence = evidenceDiagnostics(data, summary, signals, latestRun, phaseTrace);
+  const runCumulative = runCumulativeDiagnostics(search.attempts, evidence);
   return {
     generatedAt: new Date().toISOString(),
     reportSchemaVersion: 2,
     buildCommitSha: process.env.GITHUB_SHA || "unavailable",
     sourceTraceRequestId: signalRun.summary.requestId || "unavailable",
     attempts: search.attempts,
-    run: evidence.run,
-    final: evidence.final,
+    run: { ...runCumulative, ...evidence.run },
+    final: {
+      ...evidence.final,
+      displayedCount: signals.length,
+      signalCount: signals.length,
+    },
+    executionStatus: signalRun.summary.status === 200 ? statuses.pass : statuses.fail,
+    qualityStatus: "unavailable",
     mode: "quality_acceptance",
     query: {
       original: query,
@@ -1250,9 +1289,10 @@ function buildQualityReport({ query, signalRun, agentRuns, secondRun }) {
     },
     planning: planningTiming,
     retrieval: {
-      retrievedCount: unavailable(summary.retrievedCount ?? data.overview?.scanned ?? data.counts?.candidates),
-      evaluatedCount: unavailable(summary.filteringDetails?.length),
-      clusteredCount: unavailable(summary.clusteredCount ?? data.overview?.events),
+      ...runCumulative,
+      retrievedCount: runCumulative.retrievedCount,
+      evaluatedCount: runCumulative.evaluatedCount,
+      clusteredCount: runCumulative.clusteredCount,
       displayedCount: unavailable(summary.displayedCount ?? signals.length),
       evaluatedByCurrentFields: {
         counts: unavailable(data.counts),
@@ -1339,6 +1379,8 @@ function qualityMarkdown(report) {
     "# Signal Map Agent Quality Report",
     "",
     `- status: \`${report.acceptanceStatus || "unavailable"}\``,
+    `- executionStatus: \`${report.executionStatus || "unavailable"}\``,
+    `- qualityStatus: \`${report.qualityStatus || report.acceptanceStatus || "unavailable"}\``,
     `- reportSchemaVersion: \`${report.reportSchemaVersion || "unavailable"}\``,
     `- buildCommitSha: \`${report.buildCommitSha || "unavailable"}\``,
     `- sourceTraceRequestId: \`${report.sourceTraceRequestId || "unavailable"}\``,
@@ -1384,6 +1426,8 @@ function qualityMarkdown(report) {
     `- search returned count: ${compact(report.retrieval.search, 1800)}`,
     `- detail fetch: ${compact(report.retrieval.detailFetch, 1200)}`,
     `- aggregation: ${compact(report.retrieval.aggregation, 1000)}`,
+    `- runCumulative: ${compact(report.run, 1400)}`,
+    `- finalResponse: ${compact(report.final, 800)}`,
     `- attempts: ${compact(report.retrieval.search?.attempts, 2600)}`,
     "",
     "## PLANNING TIMING",
@@ -1429,11 +1473,17 @@ function qualityMarkdown(report) {
     `- discoveredCandidateCount: ${compact(report.evidenceDiagnostics.discoveredCandidateCount)}`,
     `- roundEvidenceCount: ${compact(report.evidenceDiagnostics.preservation?.roundEvidenceCount)}`,
     `- producedEvidenceCount: ${compact(report.evidenceDiagnostics.producedEvidenceCount)}`,
+    `- producedEvidenceDataSource: ${compact(report.evidenceDiagnostics.producedEvidenceDataSource)}`,
     `- evaluatedEvidenceCount: ${compact(report.evidenceDiagnostics.evaluatedEvidenceCount)}`,
     `- cumulativeEvidenceCount: ${compact(report.evidenceDiagnostics.preservation?.cumulativeEvidenceCount)}`,
     `- carriedForwardEvidenceCount: ${compact(report.evidenceDiagnostics.preservation?.carriedForwardEvidenceCount)}`,
     `- acceptedEvidenceCount: ${compact(report.evidenceDiagnostics.acceptedEvidenceCount)}`,
     `- rejectedEvidenceCount: ${compact(report.evidenceDiagnostics.rejectedEvidenceCount)}`,
+    `- primaryRejectionReasonCounts: ${compact(report.evidenceDiagnostics.primaryRejectionReasonCounts)}`,
+    `- rejectionReasonOccurrences: ${compact(report.evidenceDiagnostics.rejectionReasonOccurrences)}`,
+    `- classifiedRejectedEvidenceCount: ${compact(report.evidenceDiagnostics.classifiedRejectedEvidenceCount)}`,
+    `- unclassifiedRejectedEvidenceCount: ${compact(report.evidenceDiagnostics.unclassifiedRejectedEvidenceCount)}`,
+    `- rejectionAccountingComplete: ${compact(report.evidenceDiagnostics.rejectionAccountingComplete)}`,
     `- rejectionAccountingComplete: ${compact(report.evidenceDiagnostics.rejectionAccountingComplete)}`,
     `- verificationOutcome: ${compact(report.evidenceDiagnostics.preservation?.verificationOutcome)}`,
     `- finalEvidenceCount: ${compact(report.evidenceDiagnostics.finalEvidenceCount)}`,
@@ -1848,4 +1898,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   });
 }
 
-export { attemptDiagnostics, attemptTraceGroups, qualityAcceptance, qualityMarkdown };
+export { attemptDiagnostics, attemptTraceGroups, qualityAcceptance, qualityMarkdown, producedEvidenceCountFromResponseData };
