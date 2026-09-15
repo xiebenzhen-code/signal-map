@@ -1,5 +1,5 @@
 import { recordsFromSignal, type EvidenceRecord } from "../information/rag-records.ts";
-import type { FilteringSummary, ResearchResponse, ResearchSignal, VerificationStatus } from "../research/types.ts";
+import type { FilteringSummary, ResearchOverview, ResearchResponse, ResearchSignal, VerificationStatus } from "../research/types.ts";
 
 export type VerificationOutcome =
   | "verification_success"
@@ -139,6 +139,18 @@ function mergeResponseSourceOutcomes(previous: ResearchResponse | undefined, nex
   return next;
 }
 
+function mergeFilteringSummary(previous: FilteringSummary | undefined, next: FilteringSummary | undefined) {
+  if (!previous) return next;
+  if (!next) return previous;
+  const nextIsEmpty = next.retrievedCount === 0 && next.clusteredCount === 0 && next.displayedCount === 0;
+  return nextIsEmpty ? previous : next;
+}
+
+function mergeOverview(previous: ResearchOverview, next: ResearchOverview) {
+  const nextIsEmpty = next.scanned === 0 && next.events === 0 && next.relevant === 0;
+  return nextIsEmpty ? previous : next;
+}
+
 export function mergeRoundAttempts(previous: ResearchResponse | undefined, next: ResearchResponse) {
   return mergeResearchResponses(previous, next);
 }
@@ -218,6 +230,8 @@ function mergeResearchResponses(previous: ResearchResponse | undefined, next: Re
     failures: [...previous.failures, ...next.failures],
     dataMode: previous.dataMode === next.dataMode ? next.dataMode : "mixed",
     sourceDiagnostics: [...(previous.sourceDiagnostics ?? []), ...(next.sourceDiagnostics ?? [])],
+    filteringSummary: mergeFilteringSummary(previous.filteringSummary, next.filteringSummary),
+    overview: mergeOverview(previous.overview, next.overview),
     evidenceAccounting: {
       discoveredCandidateCount: Math.max(
         previous.evidenceAccounting?.discoveredCandidateCount ?? previous.overview?.deduplicated ?? 0,

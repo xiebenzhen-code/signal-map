@@ -112,6 +112,24 @@ test("mergeRoundResponse carries evidence forward across empty later rounds", ()
   assert.equal(state.cumulativeResponse?.signals.length, 1);
 });
 
+test("empty fallback keeps the non-empty filtering summary", () => {
+  const state = new ResearchRunState();
+  const overview = {
+    scanned: 12, deduplicated: 5, events: 5, verified: 0, relevant: 5, mustKnow: 0,
+    worthWatching: 0, libraryOnly: 5, ignored: 0, noiseReductionRate: 0, novelInformationRate: 0,
+  };
+  const summary = {
+    retrievedCount: 12, clusteredCount: 5, displayedCount: 0,
+    filteredReasons: { stale: 0, duplicate: 1, lowReliability: 1, insufficientVerification: 0, background: 0, lowNovelty: 0, unresolvedConflict: 0, lowActionability: 0, noInformationGain: 0, insufficientContent: 3 },
+    summaryText: "discovered", filteringDetails: [],
+  } as never;
+  state.mergeRoundResponse(response([signal()], { overview, filteringSummary: summary }));
+  const emptySummary = { retrievedCount: 0, clusteredCount: 0, displayedCount: 0, filteredReasons: (summary as { filteredReasons: unknown }).filteredReasons, summaryText: "empty", filteringDetails: [] } as never;
+  state.mergeRoundResponse(response([], { overview: { scanned: 0, deduplicated: 0, events: 0, verified: 0, relevant: 0, mustKnow: 0, worthWatching: 0, libraryOnly: 0, ignored: 0, noiseReductionRate: 0, novelInformationRate: 0 }, filteringSummary: emptySummary }));
+  assert.equal(state.cumulativeResponse?.filteringSummary?.retrievedCount, 12);
+  assert.equal(state.cumulativeResponse?.overview.scanned, 12);
+});
+
 test("providerFailureSnapshot preserves existing cumulative evidence", () => {
   const state = new ResearchRunState();
   state.mergeRoundResponse(response([signal()]));
