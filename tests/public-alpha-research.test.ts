@@ -68,6 +68,51 @@ test("anonymous signals use the real pipeline and never substitute demo records"
   assert.ok(response.headers.getSetCookie().some((cookie) => cookie.startsWith("signal_map_guest=") && /HttpOnly/i.test(cookie)));
 });
 
+test("signals degrade invalid sessions to anonymous research", async (t) => {
+  const keys = ["SIGNAL_MAP_GUEST_SECRET", "NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"] as const;
+  const previous = keys.map((key) => process.env[key]);
+  delete process.env.SIGNAL_MAP_GUEST_SECRET;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://auth-fixture.supabase.co";
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "test-publishable-key";
+  t.after(() => keys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; }));
+  t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => {
+    const url = new URL(String(target));
+    if (url.pathname.endsWith("/auth/v1/user")) return Response.json({ code: "bad_jwt", message: "Invalid token" }, { status: 401 });
+    return emptyNetworkResponse(target);
+  });
+  const response = await handleBackendRequest(new Request("https://signal.benzhenlab.com/api/signals", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "https://signal.benzhenlab.com", Authorization: "Bearer expired-token" },
+    body: JSON.stringify(input),
+  }));
+  assert.equal(response.status, 200);
+  const body = await response.json() as { researchMode?: string };
+  assert.equal(body.researchMode, "anonymous");
+});
+
+test("authenticated signals use the same pipeline with user context", async (t) => {
+  const keys = ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "DATABASE_URL"] as const;
+  const previous = keys.map((key) => process.env[key]);
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://auth-fixture.supabase.co";
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "test-publishable-key";
+  delete process.env.DATABASE_URL;
+  t.after(() => keys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; }));
+  t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => {
+    const url = new URL(String(target));
+    if (url.pathname.endsWith("/auth/v1/user")) return Response.json({ id: "authenticated-research-user", aud: "authenticated" });
+    return emptyNetworkResponse(target);
+  });
+  const response = await handleBackendRequest(new Request("https://signal.benzhenlab.com/api/signals", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "https://signal.benzhenlab.com", Authorization: "Bearer valid-token" },
+    body: JSON.stringify(input),
+  }));
+  assert.equal(response.status, 200);
+  const body = await response.json() as { researchMode?: string };
+  assert.equal(body.researchMode, "authenticated");
+  assert.equal(response.headers.get("set-cookie"), null);
+});
+
 test("background evidence outside a 24h window cannot become must read", async (t) => {
   const publishedAt = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
   t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => {

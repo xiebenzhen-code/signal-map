@@ -62,6 +62,7 @@ export type InformationRunPayload = {
   dataMode: DataMode;
   lastCheckedAt?: string;
   fallbackReason?: string;
+  researchMode?: "anonymous" | "authenticated";
 };
 
 export type InformationRun = InformationRunPayload & {

@@ -37,7 +37,9 @@ async function verifiedGuestId(request: Request) {
 export async function resolveResearchIdentity(request: Request): Promise<ResearchIdentity> {
   const auth = await resolveAuthContext(request);
   if (auth) return { mode: "authenticated", id: auth.userId };
-  if (!signingSecret()) throw new Error("Anonymous research identity is not configured");
+  // Research remains available when optional guest-cookie signing is not configured.
+  // The ephemeral identity is intentionally not usable for tenant persistence.
+  if (!signingSecret()) return { mode: "anonymous", id: crypto.randomUUID() };
   const existing = await verifiedGuestId(request);
   if (existing) return { mode: "anonymous", id: existing };
   const id = crypto.randomUUID();

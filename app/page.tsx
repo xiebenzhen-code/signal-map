@@ -1035,7 +1035,7 @@ export default function HomePage() {
           const request = await fetch(url, requestInit);
           if (!request.ok) {
             const body = await request.json().catch(() => null) as { error?: string; reason?: string } | null;
-            const message = body?.error || body?.reason || (request.status === 401 || request.status === 403 ? "登录状态无效，请重新登录。" : "Live Web 暂时不可用");
+            const message = body?.error || body?.reason || "Live Web 暂时不可用";
             throw Object.assign(new Error(message), { status: request.status });
           }
           return (await request.json()) as InformationRunPayload;

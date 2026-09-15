@@ -270,7 +270,7 @@ export const handleSignals = withSession(async (request: Request) => {
         }
       : includeEligibilityAudit
         ? { ...result, requestId, debug: { candidateSelectionAudit, eligibilityFunnel } }
-        : { ...result, requestId }, {
+        : { ...result, requestId, researchMode: identity.mode }, {
       headers: { "Cache-Control": "no-store", "X-Signal-Map-Request-Id": requestId },
     });
     if (identity.mode === "anonymous" && identity.setCookie) response.headers.append("Set-Cookie", identity.setCookie);
