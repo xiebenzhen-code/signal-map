@@ -91,6 +91,27 @@ test("agent query subject does not duplicate the same user question", () => {
   assert.equal(plan.queries.some((query) => query.includes(repeated)), false);
 });
 
+test("agent queries extract a concise topic from a long quality question", () => {
+  const question = "过去 30 天内，AI 辅助视频剪辑与自动化领域有哪些真正值得我测试的新发布、模型、工具或工作流更新？重点关注多素材理解、自动粗剪、镜头选择、批量处理和可商用工作流。";
+  const plan = createResearchPlan({
+    identity: "researcher",
+    industry: "AI video tools",
+    focusAreas: question,
+    currentQuestions: question,
+    knownInformation: "",
+    informationGaps: "",
+    trackedEntities: "",
+    trackedEvents: "",
+    userJudgements: "",
+    evidenceHistory: "",
+    freshnessWindow: "30d",
+  }, 1, 5, [], "INITIAL");
+
+  assert.ok(plan.topicKeywords?.some((keyword) => /自动粗剪|镜头选择|视频剪辑/u.test(keyword)));
+  assert.ok(plan.queries.every((query) => query.length < question.length));
+  assert.equal(plan.queries.some((query) => query.includes("过去 30 天内")), false);
+});
+
 test("valid company and product names remain entity candidates", () => {
   const plan = planQuery({
     identity: "researcher",

@@ -42,11 +42,17 @@ export function createResearchPlan(
     knownInformation: appendLines(input.knownInformation, relatedKnowledge),
   });
   const base = planned.searchCombinations;
-  const canonicalSubject = planned.resolvedEntities?.map((entity) => entity.canonicalEntity).join(" ") || [input.focusAreas, input.trackedEntities].filter(Boolean).join(" ");
+  const canonicalSubject = planned.resolvedEntities?.map((entity) => entity.canonicalEntity).join(" ") || "";
   const question = input.currentQuestions?.trim() || "";
-  const subject = (question && planned.resolvedEntities?.some((entity) => question.toLocaleLowerCase().includes(entity.canonicalEntity.toLocaleLowerCase()))
-    ? question
-    : joinDistinctSegments([canonicalSubject, question])).trim();
+  const conciseTopic = joinDistinctSegments([
+    canonicalSubject,
+    ...(planned.topicKeywords ?? []).slice(0, 4),
+  ]);
+  const subject = (
+    conciseTopic ||
+    joinDistinctSegments([input.focusAreas, input.trackedEntities]) ||
+    question
+  ).trim();
   const strategyQueries: Record<Exclude<ResearchStrategy, "STOP">, string[]> = {
     INITIAL: [`${subject} recent changes`, `${subject} official documentation`, `${subject} release notes`],
     REFRESH: [`${subject} latest update`, `${subject} official announcement`, `${subject} recent release notes`],
@@ -99,6 +105,7 @@ export function createResearchPlan(
     reason: sourceSelection?.reason,
     sourceSelectionReason: sourceSelection?.reason,
     resolvedEntities: planned.resolvedEntities,
+    topicKeywords: planned.topicKeywords,
     intent,
     freshnessWindow: planned.requestedFreshnessWindow,
     retrievalWindows: planned.retrievalWindows,

@@ -175,6 +175,63 @@ Open Video Generator released a text-to-video workflow for short video prototypi
   assert.ok(result.filteringSummary?.strongestHiddenSignal);
 });
 
+test("Hugging Face retrieval uses topic-specific queries instead of generic variants", async (t) => {
+  const searches: string[] = [];
+  t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => {
+    const url = new URL(String(target));
+    if (url.hostname === "huggingface.co" && url.pathname.startsWith("/api/")) {
+      searches.push(url.searchParams.get("search") || "");
+      return Response.json([]);
+    }
+    return new Response("", { status: 404 });
+  });
+
+  await runResearchPipeline(baseInput({
+    industry: "AI video tools",
+    focusAreas: "AI assisted video editing, automatic rough cut, shot selection, batch processing",
+    currentQuestions: "过去 30 天内有哪些值得测试的 AI 视频剪辑工作流更新？",
+    trackedEntities: "",
+  }), undefined, undefined, {
+    primarySourceType: "GENERAL_WEB",
+    fallbackSourceTypes: [],
+    allowedProviderIds: ["huggingface"],
+    reason: "query rewrite test",
+  });
+
+  assert.equal(searches.length, 3);
+  assert.ok(searches.every((query) => /video/i.test(query)));
+  assert.ok(searches.some((query) => /rough cut|editing|shot selection/i.test(query)));
+  assert.equal(searches.some((query) => query === "video" || query === "text-to-video" || query === "space"), false);
+});
+
+test("arXiv fallback query preserves video workflow constraints", async (t) => {
+  let searchQuery = "";
+  t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => {
+    const url = new URL(String(target));
+    if (url.hostname === "export.arxiv.org") {
+      searchQuery = url.searchParams.get("search_query") || "";
+      return new Response("<feed></feed>");
+    }
+    return new Response("", { status: 404 });
+  });
+
+  await runResearchPipeline(baseInput({
+    industry: "AI video tools",
+    focusAreas: "AI assisted video editing, automatic rough cut, shot selection",
+    currentQuestions: "最近有哪些 AI 视频剪辑工作流论文值得测试？",
+    informationGaps: "multi-asset understanding and batch processing",
+  }), undefined, undefined, {
+    primarySourceType: "PRIMARY",
+    fallbackSourceTypes: [],
+    allowedProviderIds: ["arxiv"],
+    reason: "query rewrite test",
+  });
+
+  assert.match(searchQuery, /video/i);
+  assert.match(searchQuery, /editing|rough|shot/i);
+  assert.doesNotMatch(searchQuery, /最近有哪些.*值得测试/);
+});
+
 test("failed external provider responses cancel unread bodies", async (t) => {
   let canceled = 0;
   t.mock.method(globalThis, "fetch", async () =>

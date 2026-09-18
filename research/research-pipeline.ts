@@ -127,6 +127,7 @@ function normalizeRetrievalFreshness(value?: string): QueryPlan["requestedFreshn
 export function resolvePipelinePlan(input: ResearchInput, upstream?: RetrievalPlan | LegacySourceSelection): PipelinePlanResolution {
   const upstreamQueries = validRetrievalQueries(upstream);
   if (upstreamQueries.length && upstream && "queries" in upstream) {
+    const derivedPlan = planQuery(input);
     const resolvedEntities = upstream.resolvedEntities ?? [];
     const entities = resolvedEntities.map((entity) => entity.canonicalEntity).filter(Boolean);
     const aliasesConsidered = [...new Set(resolvedEntities.flatMap((entity) => entity.aliasesConsidered ?? []))];
@@ -138,10 +139,11 @@ export function resolvePipelinePlan(input: ResearchInput, upstream?: RetrievalPl
       plan: {
         originalNeed: input.currentQuestions?.trim() || input.industry,
         coreKeywords: deterministicTerms([input.focusAreas, input.trackedEntities, input.currentQuestions, ...upstreamQueries]),
-        englishKeywords: [],
+        topicKeywords: upstream.topicKeywords ?? derivedPlan.topicKeywords,
+        englishKeywords: upstream.topicKeywords ? derivedPlan.englishKeywords : [],
         synonyms: [],
         entities,
-        industryKeywords: deterministicTerms([input.industry, input.focusAreas]),
+        industryKeywords: derivedPlan.industryKeywords,
         changeKeywords: [],
         knowledgeAwareQueries: [],
         searchCombinations: upstreamQueries,
@@ -358,13 +360,7 @@ async function hackerNewsSearch(query: string): Promise<LiveItem[]> {
 
 async function huggingFaceSearch(query: string): Promise<LiveItem[]> {
   const retrievedAt = new Date().toISOString();
-  const queryVariants = (() => {
-    const variants = [query];
-    if (/视频|video/i.test(query)) variants.push("video", "text-to-video");
-    if (/space|空间/i.test(query)) variants.push("space");
-    if (/agent|coding|代码|编程/i.test(query)) variants.push("agent", "coding");
-    return [...new Set(variants.map((value) => value.trim()).filter(Boolean))].slice(0, 3);
-  })();
+  const queryVariants = [query.trim()].filter(Boolean);
   const fetchCollection = async (type: "models" | "spaces" | "datasets", search: string) => {
     const params = new URLSearchParams({
       search,
@@ -540,7 +536,7 @@ async function searchDirectProvider(
       // Discovery providers have already applied their own source query. Do not
       // discard their candidates a second time with the generic keyword gate;
       // detail enrichment and the existing downstream gates remain authoritative.
-      .filter((item) => discoveryProvider || providerId === "arxiv" || relevant(item, plan))
+      .filter((item) => discoveryProvider || relevant(item, plan))
       .map((item) => ({
         ...item,
         sourceType,
@@ -595,6 +591,59 @@ function primaryDomains(plan: QueryPlan) {
 
 function relevant(item: LiveItem, plan: QueryPlan) {
   return assessTopicRelevance(`${item.title} ${item.snippet}`, plan).decision === "MATCH";
+}
+
+const providerQueryNoise = new Set([
+  "a", "an", "and", "artificial intelligence", "change", "changes",
+  "official", "latest", "new", "news", "recent", "release notes",
+  "research", "the", "today", "update", "updates", "what", "with",
+]);
+
+function retrievalTopicKeywords(plan: QueryPlan) {
+  const values = [
+    ...(plan.topicKeywords ?? []),
+    ...plan.entities,
+    ...plan.coreKeywords,
+    ...plan.industryKeywords,
+    ...plan.englishKeywords,
+    ...plan.synonyms,
+    ...(plan.aliasesConsidered || []),
+  ];
+  const seen = new Set<string>();
+  return values
+    .map((value) => value.trim().replace(/\s+/g, " "))
+    .filter((value) => {
+      const normalized = value.toLocaleLowerCase();
+      if (value.length < 3 || value.length > 90 || providerQueryNoise.has(normalized) || seen.has(normalized)) {
+        return false;
+      }
+      seen.add(normalized);
+      return value.split(/\s+/).some((word) =>
+        word.replace(/[^\p{L}\p{N}+#.-]/gu, "").length > 2,
+      );
+    });
+}
+
+function providerQuery(plan: QueryPlan, providerId: string, fallbackQuery?: string) {
+  const topics = retrievalTopicKeywords(plan).slice(0, 5);
+  const topic = topics.join(" ");
+  const base = fallbackQuery && fallbackQuery.length <= 120 && !/[?？。！!]/.test(fallbackQuery)
+    ? fallbackQuery.trim()
+    : "";
+  const modifier = {
+    "public-web": "latest",
+    "product-hunt": "tool product",
+    "hacker-news": "tool workflow",
+    huggingface: "model space dataset",
+    arxiv: "research paper",
+    "primary-web-search": "official technical",
+  }[providerId] || "";
+  return [...new Set([topic, base, modifier].filter(Boolean))].join(" ").trim();
+}
+
+function providerQueries(plan: QueryPlan, providerId: string, queries: string[], limit: number) {
+  const rewritten = queries.map((query) => providerQuery(plan, providerId, query)).filter(Boolean);
+  return [...new Set([...rewritten, providerQuery(plan, providerId)].filter(Boolean))].slice(0, limit);
 }
 
 function unique(items: ResearchCandidate[]) {
@@ -1064,9 +1113,9 @@ export async function runResearchPipeline(
   });
 
   const domains = primaryDomains(plan);
-  const primaryQueries = plan.searchCombinations
+  const primaryQueries = providerQueries(plan, "primary-web-search", plan.searchCombinations
     .slice(0, 5)
-    .map((query) => `${query}${sourceHint} ${domains}`);
+    .map((query) => `${query}${sourceHint} ${domains}`), 5);
   const primaryWebEnabled = canExecute("primary-web-search");
   markPhase("search_started", true, undefined, undefined, {
     selectedSourceType: plan.selectedSourceType,
@@ -1132,9 +1181,9 @@ export async function runResearchPipeline(
     label: "正在补充可信媒体",
     counts,
   });
-  const mediaQueries = plan.searchCombinations.slice(0, 4).map(
+  const mediaQueries = providerQueries(plan, "trusted-media", plan.searchCombinations.slice(0, 4).map(
     (query) => `${query}${sourceHint} (Reuters OR Bloomberg OR \"Financial Times\" OR WSJ OR CNBC)`,
-  );
+  ), 4);
   const trustedMediaResult = canExecute("trusted-media")
     ? await searchQueries(mediaQueries, "trusted_media", plan, failures, windowDays)
     : emptySearchResult();
@@ -1155,10 +1204,10 @@ export async function runResearchPipeline(
     counts,
   });
 
-  const industryQueries = plan.searchCombinations.slice(0, 3).map(
+  const industryQueries = providerQueries(plan, "industry-media", plan.searchCombinations.slice(0, 3).map(
     (query) =>
       `${query} (TechCrunch OR "The Verge" OR "Ars Technica" OR VentureBeat OR InfoQ OR 机器之心 OR 量子位 OR 36氪)`,
-  );
+  ), 3);
   const industryMediaResult = canExecute("industry-media")
     ? await searchQueries(industryQueries, "industry_media", plan, failures, windowDays)
     : emptySearchResult();
@@ -1171,7 +1220,7 @@ export async function runResearchPipeline(
     industryMedia: industryMedia.length,
   };
 
-  const generalWebQueries = plan.searchCombinations.slice(0, 4);
+  const generalWebQueries = providerQueries(plan, "public-web", plan.searchCombinations.slice(0, 4), 4);
   const generalWebResult = canExecute("public-web")
     ? await searchQueries(generalWebQueries, "other", plan, failures, windowDays)
     : emptySearchResult();
@@ -1180,16 +1229,16 @@ export async function runResearchPipeline(
 
   const [productHuntResult, hackerNewsResult, huggingFaceResult, arxivResult] = await Promise.all([
     canExecute("product-hunt")
-      ? searchDirectProvider("Product Hunt", () => productHuntSearch(plan.searchCombinations[0] || plan.originalNeed), "social", plan, failures, "product-hunt")
+      ? searchDirectProvider("Product Hunt", () => productHuntSearch(providerQuery(plan, "product-hunt", plan.searchCombinations[0])), "social", plan, failures, "product-hunt")
       : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "Product Hunt", execution: "not_searched" as const, searched: false, resultCount: 0 } }),
     canExecute("hacker-news")
-      ? searchDirectProvider("Hacker News", () => hackerNewsSearch(plan.searchCombinations[0] || plan.originalNeed), "social", plan, failures, "hacker-news")
+      ? searchDirectProvider("Hacker News", () => hackerNewsSearch(providerQuery(plan, "hacker-news", plan.searchCombinations[0])), "social", plan, failures, "hacker-news")
       : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "Hacker News", execution: "not_searched" as const, searched: false, resultCount: 0 } }),
     canExecute("huggingface")
-      ? searchDirectProvider("Hugging Face", () => huggingFaceSearch(plan.originalNeed), "industry_media", plan, failures, "huggingface")
+      ? searchDirectProvider("Hugging Face", () => huggingFaceSearch(providerQuery(plan, "huggingface", plan.searchCombinations[0])), "industry_media", plan, failures, "huggingface")
       : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "Hugging Face", execution: "not_searched" as const, searched: false, resultCount: 0 } }),
     canExecute("arxiv")
-      ? searchDirectProvider("arXiv", () => arxivSearch(plan.searchCombinations[0] || plan.originalNeed), "primary", plan, failures, "arxiv")
+      ? searchDirectProvider("arXiv", () => arxivSearch(providerQuery(plan, "arxiv", plan.searchCombinations[0])), "primary", plan, failures, "arxiv")
       : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "arXiv", execution: "not_searched" as const, searched: false, resultCount: 0 } }),
   ]);
   sourceOutcomes.push(productHuntResult.outcome, hackerNewsResult.outcome, huggingFaceResult.outcome, arxivResult.outcome);
@@ -1202,10 +1251,10 @@ export async function runResearchPipeline(
     social: counts.social + productHuntResult.items.length + hackerNewsResult.items.length,
   };
 
-  const communityWebQueries = plan.searchCombinations.slice(0, 3).map(
+  const communityWebQueries = providerQueries(plan, "public-web", plan.searchCombinations.slice(0, 3).map(
     (query) =>
       `${query} (site:reddit.com OR site:github.com OR site:news.ycombinator.com OR site:stackoverflow.com OR site:dev.to)`,
-  );
+  ), 3);
   const communityWebResult = canExecute("public-web") && (!sourceConstrained || plan.selectedSourceType === "SOCIAL_SIGNAL")
     ? await searchQueries(communityWebQueries, "social", plan, failures, windowDays)
     : emptySearchResult();
@@ -1231,7 +1280,7 @@ export async function runResearchPipeline(
     label: "正在检查社交媒体线索",
     counts,
   });
-  const socialQuery = plan.searchCombinations.slice(0, 3).join(" OR ");
+  const socialQuery = providerQuery(plan, "public-web", plan.searchCombinations.slice(0, 3).join(" OR "));
   const shouldSearchReddit = canExecute("reddit");
   const [socialAccess, redditResult] = await Promise.all([
     canExecute("social-access")

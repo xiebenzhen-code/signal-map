@@ -62,6 +62,53 @@ function tokens(value: string) {
     .filter((item) => item.length > 1);
 }
 
+const topicNoise = new Set([
+  "a", "an", "and", "are", "be", "can", "change", "changes", "do", "does",
+  "for", "from", "how", "is", "it", "latest", "new", "news", "official",
+  "please", "recent", "research", "the", "this", "today", "update", "updates",
+  "artificial", "intelligence", "foundation", "model", "release",
+  "what", "when", "where", "which", "who", "why", "with",
+]);
+
+function englishPhrases(value: string) {
+  return [...value.matchAll(/\b[A-Za-z][A-Za-z0-9+.#-]*(?:\s+[A-Za-z][A-Za-z0-9+.#-]*){1,5}\b/g)]
+    .map((match) => match[0].trim())
+    .filter((phrase) =>
+      phrase.split(/\s+/).some((word) => !topicNoise.has(word.toLocaleLowerCase())),
+    );
+}
+
+function isTopicPhrase(value: string) {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (
+    normalized.length < 3 ||
+    normalized.length > 80 ||
+    (/[?？。！!]/.test(normalized) && normalized.length > 12) ||
+    (/[一-龥]/u.test(normalized) && normalized.length > 24 &&
+      /有哪些|什么|值得|关注|过去|告诉我|为什么|现在/u.test(normalized))
+  ) {
+    return false;
+  }
+  return normalized.split(/\s+/).some((word) => {
+    const token = word.toLocaleLowerCase().replace(/[^\p{L}\p{N}+#.-]/gu, "");
+    return token.length > 2 && !topicNoise.has(token);
+  });
+}
+
+function topicKeywordsFor(input: ResearchInput, englishKeywords: string[]) {
+  return unique([
+    input.industry,
+    ...tokens(input.focusAreas),
+    ...tokens(input.informationGaps),
+    ...tokens(input.trackedEntities),
+    ...tokens(input.trackedEvents),
+    ...englishPhrases(input.focusAreas),
+    ...englishPhrases(input.currentQuestions),
+    ...englishPhrases(input.informationGaps),
+    ...englishKeywords,
+  ].filter(isTopicPhrase), 16);
+}
+
 const genericEntityWords = new Set([
   "a",
   "an",
@@ -175,6 +222,7 @@ export function planQuery(input: ResearchInput): QueryPlan {
       originalNeed.match(/\b[A-Za-z][A-Za-z0-9.-]{1,}\b/g) || [],
     ),
   );
+  const topicKeywords = topicKeywordsFor(input, englishKeywords);
   const synonyms = unique(matched.flatMap((item) => item.synonyms));
   const entities = unique([
     ...tokens(input.trackedEntities),
@@ -219,14 +267,14 @@ export function planQuery(input: ResearchInput): QueryPlan {
       `${entity} new feature new limitation pricing API policy hiring`,
     ]),
     ...knowledgeAwareQueries,
-    ...englishKeywords.map((keyword) => `${keyword} latest update`),
     ...entities.flatMap((entity) => [
       `${entity} Investor Relations`,
       `${entity} official announcement`,
       `${entity} latest update`,
     ]),
-    ...tokens(input.currentQuestions).slice(0, 3),
-    `${input.industry} ${tokens(input.focusAreas).slice(0, 2).join(" ")}`,
+    ...topicKeywords.slice(0, 6).map((keyword) => `${keyword} latest update`),
+    topicKeywords.slice(0, 4).join(" "),
+    ...englishKeywords.map((keyword) => `${keyword} latest update`),
     `${input.industry} 官方公告`,
     `${input.industry} 权威媒体`,
     ...coreKeywords.slice(0, 4).flatMap((keyword) =>
@@ -237,6 +285,7 @@ export function planQuery(input: ResearchInput): QueryPlan {
   return {
     originalNeed,
     coreKeywords,
+    topicKeywords,
     englishKeywords,
     synonyms,
     entities,
