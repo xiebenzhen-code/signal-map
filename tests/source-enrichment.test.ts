@@ -217,7 +217,7 @@ test("arXiv fallback query preserves video workflow constraints", async (t) => {
 
   await runResearchPipeline(baseInput({
     industry: "AI video tools",
-    focusAreas: "AI assisted video editing, automatic rough cut, shot selection",
+    focusAreas: "AI 辅助视频剪辑、自动粗剪、镜头选择",
     currentQuestions: "最近有哪些 AI 视频剪辑工作流论文值得测试？",
     informationGaps: "multi-asset understanding and batch processing",
   }), undefined, undefined, {

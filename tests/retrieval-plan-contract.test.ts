@@ -25,6 +25,7 @@ const upstreamPlan: RetrievalPlan = {
     "AI video editing automation official changelog",
     "AI video editing workflow release notes",
   ],
+  topicAnchors: ["AI video editing", "automated rough cut"],
   selectedSourceType: "GENERAL_WEB",
   fallbackSourceTypes: ["PRIMARY"],
   allowedProviderIds: ["public-web", "product-hunt"],
@@ -43,6 +44,7 @@ test("upstream RetrievalPlan queries are the pipeline's actual queries", () => {
   assert.deepEqual(resolved.plan.searchCombinations, upstreamPlan.queries);
   assert.equal(resolved.plan.selectedSourceType, "GENERAL_WEB");
   assert.deepEqual(resolved.plan.allowedProviderIds, ["public-web", "product-hunt"]);
+  assert.deepEqual(resolved.plan.topicAnchors, upstreamPlan.topicAnchors);
 });
 
 test("deterministically derived query-planner fields are not required for upstream plan validity", () => {

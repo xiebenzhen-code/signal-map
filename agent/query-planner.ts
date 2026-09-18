@@ -1,4 +1,4 @@
-import { planQuery } from "../research/query-planner.ts";
+import { buildDiversifiedQueries, planQuery } from "../research/query-planner.ts";
 import type { ResearchInput } from "../research/types.ts";
 import type { ResearchPlan, ResearchStrategy } from "./types.ts";
 import type { SourceSelection } from "./source-selector.ts";
@@ -53,13 +53,19 @@ export function createResearchPlan(
     joinDistinctSegments([input.focusAreas, input.trackedEntities]) ||
     question
   ).trim();
+  const diversifiedQueries = buildDiversifiedQueries(
+    planned.topicAnchors,
+    planned.topicKeywords,
+    subject,
+    maxQueries,
+  );
   const strategyQueries: Record<Exclude<ResearchStrategy, "STOP">, string[]> = {
-    INITIAL: [`${subject} recent changes`, `${subject} official documentation`, `${subject} release notes`],
-    REFRESH: [`${subject} latest update`, `${subject} official announcement`, `${subject} recent release notes`],
-    DEEPEN: [`${subject} technical details`, `${subject} primary document`, `${subject} implementation limitation`],
-    BROADEN: [`${subject} independent coverage`, `${subject} alternate source`, `${subject} different perspective`],
-    ESCALATE_SOURCE: [`${subject} official source`, `${subject} primary document`, `${subject} original announcement`],
-    VERIFY_CONFLICT: [`${subject} conflicting claim`, `${subject} exact status official`, `${subject} authoritative source`],
+    INITIAL: diversifiedQueries,
+    REFRESH: diversifiedQueries.map((query) => `${query} latest update`),
+    DEEPEN: diversifiedQueries.map((query) => `${query} technical details`),
+    BROADEN: diversifiedQueries.map((query) => `${query} independent coverage`),
+    ESCALATE_SOURCE: diversifiedQueries.map((query) => `${query} official source`),
+    VERIFY_CONFLICT: diversifiedQueries.map((query) => `${query} conflicting claim`),
   };
   const intentQueries: Partial<Record<IntentClassification["primaryIntent"], string[]>> = {
     JOB_SEARCH: [
@@ -105,6 +111,7 @@ export function createResearchPlan(
     reason: sourceSelection?.reason,
     sourceSelectionReason: sourceSelection?.reason,
     resolvedEntities: planned.resolvedEntities,
+    topicAnchors: planned.topicAnchors,
     topicKeywords: planned.topicKeywords,
     intent,
     freshnessWindow: planned.requestedFreshnessWindow,

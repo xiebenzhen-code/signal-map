@@ -66,6 +66,7 @@ export type Claim = {
 export type QueryPlan = {
   originalNeed: string;
   coreKeywords: string[];
+  topicAnchors?: string[];
   topicKeywords?: string[];
   englishKeywords: string[];
   synonyms: string[];
@@ -88,6 +89,7 @@ export type QueryPlan = {
 
 export type RetrievalPlan = {
   queries: string[];
+  topicAnchors?: string[];
   topicKeywords?: string[];
   selectedSourceType?: string;
   fallbackSourceTypes?: string[];

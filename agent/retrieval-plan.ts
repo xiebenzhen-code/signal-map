@@ -4,6 +4,7 @@ import type { ResearchPlan } from "./types.ts";
 export function toRetrievalPlan(plan: ResearchPlan): RetrievalPlan {
   return {
     queries: [...plan.queries],
+    topicAnchors: plan.topicAnchors ? [...plan.topicAnchors] : undefined,
     topicKeywords: plan.topicKeywords ? [...plan.topicKeywords] : undefined,
     selectedSourceType: plan.selectedSourceType,
     fallbackSourceTypes: plan.fallbackSourceTypes ? [...plan.fallbackSourceTypes] : undefined,

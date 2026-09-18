@@ -139,6 +139,7 @@ export function resolvePipelinePlan(input: ResearchInput, upstream?: RetrievalPl
       plan: {
         originalNeed: input.currentQuestions?.trim() || input.industry,
         coreKeywords: deterministicTerms([input.focusAreas, input.trackedEntities, input.currentQuestions, ...upstreamQueries]),
+        topicAnchors: upstream.topicAnchors ?? derivedPlan.topicAnchors,
         topicKeywords: upstream.topicKeywords ?? derivedPlan.topicKeywords,
         englishKeywords: upstream.topicKeywords ? derivedPlan.englishKeywords : [],
         synonyms: [],
@@ -601,6 +602,7 @@ const providerQueryNoise = new Set([
 
 function retrievalTopicKeywords(plan: QueryPlan) {
   const values = [
+    ...(plan.topicAnchors ?? []),
     ...(plan.topicKeywords ?? []),
     ...plan.entities,
     ...plan.coreKeywords,
@@ -625,20 +627,26 @@ function retrievalTopicKeywords(plan: QueryPlan) {
 }
 
 function providerQuery(plan: QueryPlan, providerId: string, fallbackQuery?: string) {
-  const topics = retrievalTopicKeywords(plan).slice(0, 5);
+  const topics = retrievalTopicKeywords(plan).slice(0, 4);
   const topic = topics.join(" ");
-  const base = fallbackQuery && fallbackQuery.length <= 120 && !/[?？。！!]/.test(fallbackQuery)
-    ? fallbackQuery.trim()
-    : "";
+  const queryIntent = fallbackQuery
+    ?.replace(/\s+/g, " ")
+    .trim()
+    .split(/\s+(?=(?:product|workflow|research|official|implementation|commercial|tool|model|launch|release|changelog|technical)\b)/i)
+    .at(-1)
+    ?.trim() || "";
   const modifier = {
     "public-web": "latest",
     "product-hunt": "tool product",
-    "hacker-news": "tool workflow",
-    huggingface: "model space dataset",
-    arxiv: "research paper",
+    "hacker-news": "workflow tool implementation",
+    huggingface: "model space dataset implementation",
+    arxiv: "research paper method",
     "primary-web-search": "official technical",
   }[providerId] || "";
-  return [...new Set([topic, base, modifier].filter(Boolean))].join(" ").trim();
+  const intent = ["product-hunt", "hacker-news", "huggingface", "arxiv"].includes(providerId)
+    ? ""
+    : queryIntent;
+  return [...new Set([topic, intent, modifier].filter(Boolean))].join(" ").trim();
 }
 
 function providerQueries(plan: QueryPlan, providerId: string, queries: string[], limit: number) {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { planQuery } from "../research/query-planner.ts";
+import { buildDiversifiedQueries, planQuery } from "../research/query-planner.ts";
 import { normalizeQueryForDedup, resolveResearchEntities, deduplicateQueries } from "../research/entity-resolution.ts";
 import { createResearchPlan } from "../agent/query-planner.ts";
 
@@ -110,6 +110,50 @@ test("agent queries extract a concise topic from a long quality question", () =>
   assert.ok(plan.topicKeywords?.some((keyword) => /自动粗剪|镜头选择|视频剪辑/u.test(keyword)));
   assert.ok(plan.queries.every((query) => query.length < question.length));
   assert.equal(plan.queries.some((query) => query.includes("过去 30 天内")), false);
+});
+
+test("topic extraction keeps capability anchors and drops user instructions", () => {
+  const plan = planQuery({
+    identity: "researcher",
+    industry: "AI video tools",
+    focusAreas: "AI 辅助视频剪辑、多素材理解、自动粗剪、镜头选择、批量处理、可商用工作流",
+    currentQuestions: "排除纯营销。告诉我为什么值得关注，优先可验证的新工具。",
+    knownInformation: "",
+    informationGaps: "",
+    trackedEntities: "",
+    trackedEvents: "",
+    userJudgements: "",
+    evidenceHistory: "",
+    freshnessWindow: "30d",
+  });
+  const text = plan.topicKeywords?.join(" ") || "";
+
+  assert.ok(plan.topicAnchors?.includes("AI video editing"));
+  assert.ok(plan.topicAnchors?.includes("multi-asset understanding"));
+  assert.ok(plan.topicAnchors?.includes("automated rough cut"));
+  assert.ok(plan.topicAnchors?.includes("shot selection"));
+  assert.ok(plan.topicAnchors?.includes("batch processing"));
+  assert.ok(plan.topicAnchors?.includes("commercial workflow"));
+  assert.doesNotMatch(text, /排除|告诉我|为什么值得关注|优先|纯营销/);
+});
+
+test("diversified queries cover different retrieval intents", () => {
+  const queries = buildDiversifiedQueries([
+    "AI video editing",
+    "automated rough cut",
+    "multi-asset understanding",
+    "shot selection",
+    "batch processing",
+    "commercial workflow",
+  ], [], "AI video tools", 5);
+
+  assert.equal(queries.length, 5);
+  assert.ok(queries.some((query) => /product launch|release/i.test(query)));
+  assert.ok(queries.some((query) => /workflow|tool/i.test(query)));
+  assert.ok(queries.some((query) => /research|model/i.test(query)));
+  assert.ok(queries.some((query) => /official|changelog/i.test(query)));
+  assert.ok(queries.some((query) => /implementation|commercial/i.test(query)));
+  assert.ok(new Set(queries.map((query) => query.replace(/\b(product launch release|workflow tool|research model|official changelog|implementation commercial workflow)\b/gi, "").trim())).size > 2);
 });
 
 test("valid company and product names remain entity candidates", () => {

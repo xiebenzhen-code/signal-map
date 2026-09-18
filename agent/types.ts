@@ -37,6 +37,7 @@ export type ResearchPlan = {
   reason?: string;
   sourceSelectionReason?: string;
   resolvedEntities?: QueryPlan["resolvedEntities"];
+  topicAnchors?: QueryPlan["topicAnchors"];
   topicKeywords?: QueryPlan["topicKeywords"];
   intent?: IntentClassification;
   freshnessWindow?: ResearchInput["freshnessWindow"];

@@ -67,11 +67,71 @@ const topicNoise = new Set([
   "for", "from", "how", "is", "it", "latest", "new", "news", "official",
   "please", "recent", "research", "the", "this", "today", "update", "updates",
   "artificial", "intelligence", "foundation", "model", "release",
-  "what", "when", "where", "which", "who", "why", "with",
+  "what", "when", "where", "which", "who", "why", "with", "domain", "field",
 ]);
 
+const topicAnchorRules: Array<{ anchor: string; patterns: RegExp[] }> = [
+  {
+    anchor: "AI video editing",
+    patterns: [
+      /AI\s*(?:assisted|辅助)?\s*(?:video\s*)?editing/i,
+      /AI\s*辅助视频剪辑/u,
+      /AI\s*视频剪辑/u,
+      /视频剪辑/u,
+      /video editing/i,
+    ],
+  },
+  {
+    anchor: "automated rough cut",
+    patterns: [/自动粗剪/u, /automatic(?:ally)?\s+rough\s+cut/i, /rough\s+cut/i],
+  },
+  {
+    anchor: "multi-asset understanding",
+    patterns: [
+      /多素材理解/u,
+      /multi[-\s]?asset understanding/i,
+      /multi[-\s]?clip understanding/i,
+    ],
+  },
+  {
+    anchor: "shot selection",
+    patterns: [/镜头选择/u, /shot selection/i],
+  },
+  {
+    anchor: "batch processing",
+    patterns: [/批量处理/u, /batch processing/i],
+  },
+  {
+    anchor: "commercial workflow",
+    patterns: [/可商用工作流/u, /commercial workflow/i, /production workflow/i],
+  },
+];
+
+function stripInstructionClauses(value: string) {
+  return value
+    .replace(/(?:排除|不要|避免|只看|优先|exclude|avoid|prefer|only consider)[^，,。；;.!！？?\n]*/giu, " ")
+    .replace(/(?:告诉我|为什么值得关注|值得我测试|为什么重要|why it matters|worth testing)[^，,。；;.!！？?\n]*/giu, " ")
+    .replace(/(?:重点关注|重点是|focus on|prioritize)\s*/giu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function topicAnchorsFor(input: ResearchInput) {
+  const source = stripInstructionClauses([
+    input.industry,
+    input.focusAreas,
+    input.currentQuestions,
+    input.informationGaps,
+    input.trackedEntities,
+    input.trackedEvents,
+  ].filter(Boolean).join("；"));
+  return topicAnchorRules
+    .filter((rule) => rule.patterns.some((pattern) => pattern.test(source)))
+    .map((rule) => rule.anchor);
+}
+
 function englishPhrases(value: string) {
-  return [...value.matchAll(/\b[A-Za-z][A-Za-z0-9+.#-]*(?:\s+[A-Za-z][A-Za-z0-9+.#-]*){1,5}\b/g)]
+  return [...stripInstructionClauses(value).matchAll(/\b[A-Za-z][A-Za-z0-9+.#-]*(?:\s+[A-Za-z][A-Za-z0-9+.#-]*){1,5}\b/g)]
     .map((match) => match[0].trim())
     .filter((phrase) =>
       phrase.split(/\s+/).some((word) => !topicNoise.has(word.toLocaleLowerCase())),
@@ -89,24 +149,59 @@ function isTopicPhrase(value: string) {
   ) {
     return false;
   }
+  if (/排除|告诉我|为什么|值得|优先|不要|避免|只看|exclude|tell|why|worth|prefer|avoid|only/iu.test(normalized)) {
+    return false;
+  }
   return normalized.split(/\s+/).some((word) => {
     const token = word.toLocaleLowerCase().replace(/[^\p{L}\p{N}+#.-]/gu, "");
     return token.length > 2 && !topicNoise.has(token);
   });
 }
 
-function topicKeywordsFor(input: ResearchInput, englishKeywords: string[]) {
-  return unique([
+function topicKeywordsFor(input: ResearchInput, englishKeywords: string[], topicAnchors: string[]) {
+  const sourceSegments = [
     input.industry,
-    ...tokens(input.focusAreas),
-    ...tokens(input.informationGaps),
-    ...tokens(input.trackedEntities),
-    ...tokens(input.trackedEvents),
+    input.focusAreas,
+    input.currentQuestions,
+    input.informationGaps,
+    input.trackedEntities,
+    input.trackedEvents,
+  ].flatMap((value) =>
+    stripInstructionClauses(value || "")
+      .split(/[，,、；;：:\n.!！？?]+/u)
+      .map((segment) => segment.trim())
+      .filter(Boolean),
+  );
+  return unique([
+    ...topicAnchors,
+    ...sourceSegments,
     ...englishPhrases(input.focusAreas),
     ...englishPhrases(input.currentQuestions),
     ...englishPhrases(input.informationGaps),
-    ...englishKeywords,
-  ].filter(isTopicPhrase), 16);
+    ...englishKeywords.filter((keyword) => !topicNoise.has(keyword.toLocaleLowerCase())),
+  ].filter((value) =>
+    isTopicPhrase(value) &&
+    !/(?:排除|告诉我|为什么|值得|优先|不要|避免|只看|有哪些|什么|过去|最近|当前|exclude|tell|why|worth|prefer|avoid|only|what|recent|latest)/iu.test(value),
+  ), 16);
+}
+
+export function buildDiversifiedQueries(
+  topicAnchors: string[] = [],
+  topicKeywords: string[] = [],
+  fallbackSubject = "",
+  limit = 5,
+) {
+  const anchors = [...new Set([...topicAnchors, ...topicKeywords].map((value) => value.trim()).filter(Boolean))];
+  const first = anchors[0] || fallbackSubject.trim();
+  const second = anchors.slice(1, 3).join(" ") || first;
+  const third = anchors.slice(3, 5).join(" ") || second;
+  return [...new Set([
+    `${first} product launch release`,
+    `${second} workflow tool`,
+    `${third} research model`,
+    `${first} official documentation release notes`,
+    `${second} implementation ${anchors[5] || "commercial workflow"}`,
+  ].map((query) => query.trim()).filter(Boolean))].slice(0, limit);
 }
 
 const genericEntityWords = new Set([
@@ -222,7 +317,8 @@ export function planQuery(input: ResearchInput): QueryPlan {
       originalNeed.match(/\b[A-Za-z][A-Za-z0-9.-]{1,}\b/g) || [],
     ),
   );
-  const topicKeywords = topicKeywordsFor(input, englishKeywords);
+  const topicAnchors = topicAnchorsFor(input);
+  const topicKeywords = topicKeywordsFor(input, englishKeywords, topicAnchors);
   const synonyms = unique(matched.flatMap((item) => item.synonyms));
   const entities = unique([
     ...tokens(input.trackedEntities),
@@ -272,8 +368,7 @@ export function planQuery(input: ResearchInput): QueryPlan {
       `${entity} official announcement`,
       `${entity} latest update`,
     ]),
-    ...topicKeywords.slice(0, 6).map((keyword) => `${keyword} latest update`),
-    topicKeywords.slice(0, 4).join(" "),
+    ...buildDiversifiedQueries(topicAnchors, topicKeywords, input.industry, 5),
     ...englishKeywords.map((keyword) => `${keyword} latest update`),
     `${input.industry} 官方公告`,
     `${input.industry} 权威媒体`,
@@ -285,6 +380,7 @@ export function planQuery(input: ResearchInput): QueryPlan {
   return {
     originalNeed,
     coreKeywords,
+    topicAnchors,
     topicKeywords,
     englishKeywords,
     synonyms,
