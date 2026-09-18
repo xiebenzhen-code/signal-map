@@ -102,6 +102,8 @@ test("high-relevance academic evidence stays library-only without an executable 
   assert.equal(result.actionabilityStatus, "LIBRARY_ONLY");
   assert.equal(result.hasExecutableAction, false);
   assert.match(result.action, /研究资料|立即测试/);
+  assert.doesNotMatch(result.action, /Demo|Model Card|代码入口|运行一个最小样例/);
+  assert.equal(result.executionEntry, undefined);
 });
 
 test("a public API or workflow entry creates a test-now candidate", () => {
@@ -125,6 +127,31 @@ test("a public API or workflow entry creates a test-now candidate", () => {
   assert.equal(result.actionabilityStatus, "TEST_NOW");
   assert.equal(result.hasExecutableAction, true);
   assert.match(result.action, /API|最小/);
+  assert.equal(result.executionEntry?.type, "API");
+  assert.match(result.executionEntry?.evidence ?? "", /API|api/);
+});
+
+test("an explicit repository URL is the only code entry that can ground a test action", () => {
+  const result = assessSignalActionability({
+    title: "Video editing research implementation",
+    summary: "The paper links to the source code repository for reproduction.",
+    sourceUrl: "https://github.com/example/video-editing",
+    tags: ["AI video editing"],
+    sourceType: "primary",
+    sourceTier: "S",
+    eventStatus: "NEW",
+    knowledgeStatus: "NOVEL",
+    noveltyScore: 90,
+    relevanceScore: 92,
+    reliabilityScore: 92,
+    freshnessScore: 90,
+    verificationStatus: "verified",
+    informationType: "FACT",
+  });
+
+  assert.equal(result.actionabilityStatus, "TEST_NOW");
+  assert.equal(result.executionEntry?.type, "REPOSITORY");
+  assert.match(result.action, /代码仓库/);
 });
 
 test("known evidence is explicitly marked as having no information gain", () => {

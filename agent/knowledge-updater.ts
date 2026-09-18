@@ -46,6 +46,7 @@ function signalText(signal: ResearchSignal) {
 function canWriteKnowledge(signal: ResearchSignal, change: KnowledgeChange) {
   return signal.reliabilityScore >= 55 &&
     signal.topicRelevance?.decision !== "TOPIC_MISMATCH" &&
+    signal.informationGainStatus !== "NO_INFORMATION_GAIN" &&
     signal.verificationStatus !== "unverified" &&
     signal.informationType !== "SIGNAL" &&
     change.classification !== "CONTRADICTS";

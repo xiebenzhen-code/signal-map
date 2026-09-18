@@ -891,6 +891,17 @@ function producedEvidenceCountFromResponseData(data) {
   return Array.isArray(data?.evidenceRecords) ? data.evidenceRecords.length : "unavailable";
 }
 
+function actionabilityDiagnostics(signals) {
+  return signals.map((signal) => ({
+    title: unavailable(signal?.title),
+    action: unavailable(signal?.action),
+    actionabilityStatus: unavailable(signal?.actionabilityStatus),
+    informationGainStatus: unavailable(signal?.informationGainStatus),
+    hasExecutableAction: unavailable(signal?.hasExecutableAction),
+    executionEntry: unavailable(signal?.executionEntry),
+  }));
+}
+
 const MAPPED_REJECTION_REASON_KEYS = new Set([
   "stale",
   "duplicate",
@@ -1069,6 +1080,11 @@ function evidenceDiagnostics(data, summary, signals, latestRun, phaseTrace) {
       verificationStatus: unavailable(signal.verificationStatus),
       contentQuality: unavailable(signal.contentQuality),
       contentFailureReason: unavailable(signal.contentFailureReason),
+      action: unavailable(signal.action),
+      actionabilityStatus: unavailable(signal.actionabilityStatus),
+      informationGainStatus: unavailable(signal.informationGainStatus),
+      hasExecutableAction: unavailable(signal.hasExecutableAction),
+      executionEntry: unavailable(signal.executionEntry),
     })),
   };
 }
@@ -1376,6 +1392,7 @@ function buildQualityReport({ query, signalRun, agentRuns, secondRun }) {
     result: {
       finalNaturalLanguageConclusion: unavailable(data.finalConclusion || data.summary || data.answer),
       recommendedUserTests: unavailable(signals.map((signal) => signal.action).filter(Boolean)),
+      actionability: actionabilityDiagnostics(signals),
       outputMode: unavailable(data.outputMode || data.intentOutput?.mode),
       intentOutput: unavailable(data.intentOutput),
     },
@@ -1552,6 +1569,7 @@ function qualityMarkdown(report) {
     "",
     `- final conclusion: ${compact(report.result.finalNaturalLanguageConclusion, 800)}`,
     `- recommended user tests: ${compact(report.result.recommendedUserTests, 800)}`,
+    `- actionability: ${compact(report.result.actionability, 1600)}`,
     "",
     "## STATE",
     "",
@@ -1951,4 +1969,5 @@ export {
   producedEvidenceCountFromResponseData,
   rejectionAccounting,
   runCumulativeDiagnostics,
+  actionabilityDiagnostics,
 };

@@ -1974,6 +1974,7 @@ export async function runResearchPipeline(
         actionabilityStatus: actionability.actionabilityStatus,
         informationGainStatus: actionability.informationGainStatus,
         hasExecutableAction: actionability.hasExecutableAction,
+        executionEntry: actionability.executionEntry,
         attentionDecision: preliminaryEligible ? "LIBRARY_ONLY" : "IGNORE",
         presentation: primaryPresentation,
         contentQuality: primaryPresentation?.contentQuality,

@@ -48,14 +48,27 @@ export function compareKnowledge(response: ResearchResponse, knownInformation: s
     const knownMatch = relatedToKnowledge(signal, known);
     const isConflict = signal.verificationStatus === "conflicting";
     const isUpdate = signal.eventStatus === "UPDATED" || signal.knowledgeStatus === "UPDATED";
-    const classification = isConflict ? "CONTRADICTS" : isUpdate ? "UPDATES" : knownMatch ? (signal.knowledgeStatus === "KNOWN" ? "DUPLICATE" : "CONFIRMS") : "NEW";
+    const noInformationGain =
+      signal.informationGainStatus === "NO_INFORMATION_GAIN" ||
+      signal.knowledgeStatus === "KNOWN";
+    const classification = isConflict
+      ? "CONTRADICTS"
+      : noInformationGain
+        ? "DUPLICATE"
+        : isUpdate
+          ? "UPDATES"
+          : knownMatch
+            ? "CONFIRMS"
+            : "NEW";
     return {
       signalId: signal.id,
       classification,
       supportingEvidenceIds: signal.claims.map((claim) => claim.sourceUrl),
       previousRevision,
       currentRevision: classification === "NEW" || classification === "UPDATES" || classification === "CONTRADICTS" ? previousRevision + 1 : previousRevision,
-      reason: classification === "DUPLICATE" ? "与已有 Knowledge State 高度重合" : `基于 ${signal.verificationStatus} evidence 与事件状态判断`,
+      reason: classification === "DUPLICATE"
+        ? "NO_INFORMATION_GAIN：与已有 Knowledge State 高度重合"
+        : `基于 ${signal.verificationStatus} evidence 与事件状态判断`,
     };
   });
 }

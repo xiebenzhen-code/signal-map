@@ -8,6 +8,7 @@ import {
   producedEvidenceCountFromResponseData,
   rejectionAccounting,
   runCumulativeDiagnostics,
+  actionabilityDiagnostics,
 } from "../scripts/signal-map-agent-loop-e2e.mjs";
 
 const trace = [
@@ -141,5 +142,25 @@ test("complete rejection mapping is explicitly complete", () => {
     evidenceWithMappedPrimaryReasonCount: 12,
     unclassifiedRejectedEvidenceCount: 0,
     rejectionAccountingComplete: true,
+  });
+});
+
+test("quality artifact exposes actionability, information gain, and grounded execution entry", () => {
+  const diagnostics = actionabilityDiagnostics([{
+    title: "Video API release",
+    action: "打开公开 API/SDK 文档，用一个最小输入完成一次调用并记录结果。",
+    actionabilityStatus: "TEST_NOW",
+    informationGainStatus: "NEW_INFORMATION",
+    hasExecutableAction: true,
+    executionEntry: { type: "API", evidence: "公开 API 文档", sourceUrl: "https://example.com/docs/api" },
+  }]);
+
+  assert.deepEqual(diagnostics[0], {
+    title: "Video API release",
+    action: "打开公开 API/SDK 文档，用一个最小输入完成一次调用并记录结果。",
+    actionabilityStatus: "TEST_NOW",
+    informationGainStatus: "NEW_INFORMATION",
+    hasExecutableAction: true,
+    executionEntry: { type: "API", evidence: "公开 API 文档", sourceUrl: "https://example.com/docs/api" },
   });
 });

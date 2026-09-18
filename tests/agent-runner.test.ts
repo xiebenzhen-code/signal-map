@@ -525,6 +525,71 @@ test("CONFIRMS updates provenance without duplicate knowledge or revision", asyn
   assert.equal(repository.getResearchContextRevision(context), beforeRevision);
 });
 
+test("NO_INFORMATION_GAIN blocks a duplicate Knowledge write and revision", async () => {
+  const repository = new InMemorySignalRepository();
+  repository.addPersonalKnowledge(context, {
+    type: "KNOWN_INFORMATION",
+    text: "Codex workflow supports batch review",
+  }, "2026-09-05T00:00:00.000Z");
+  const beforeRevision = repository.getResearchContextRevision(context);
+  const duplicate = signal({
+    id: "duplicate-actionability",
+    title: "Codex workflow supports batch review",
+    summary: "The same workflow fact is repeated without a new capability.",
+    knowledgeStatus: "KNOWN",
+    informationGainStatus: "NO_INFORMATION_GAIN",
+    actionabilityStatus: "LIBRARY_ONLY",
+  });
+
+  const result = await runAgent({
+    input,
+    context,
+    research: async () => response([duplicate]),
+  });
+
+  assert.equal(result.knowledgeChanges[0]?.classification, "DUPLICATE");
+  assert.equal(repository.listPersonalKnowledge(context).length, 1);
+  assert.equal(repository.getResearchContextRevision(context), beforeRevision);
+});
+
+test("UPDATED_INFORMATION permits a changed fact to update Knowledge", async () => {
+  const repository = new InMemorySignalRepository();
+  repository.addPersonalKnowledge(context, {
+    type: "KNOWN_INFORMATION",
+    text: "Model X releaseStatus = false",
+  }, "2026-09-05T00:00:00.000Z");
+  const beforeRevision = repository.getResearchContextRevision(context);
+  const updated = signal({
+    id: "updated-actionability",
+    title: "Model X releaseStatus = true",
+    summary: "Official release evidence changes the previously known status.",
+    eventStatus: "UPDATED",
+    knowledgeStatus: "UPDATED",
+    informationGainStatus: "UPDATED_INFORMATION",
+    actionabilityStatus: "REVIEW_FIRST",
+  });
+
+  const result = await updateKnowledgeFromChanges({
+    context,
+    repository,
+    response: response([updated]),
+    changes: [{
+      signalId: updated.id,
+      classification: "UPDATES",
+      supportingEvidenceIds: [],
+      previousRevision: beforeRevision,
+      currentRevision: beforeRevision + 1,
+      reason: "UPDATED_INFORMATION",
+    }],
+    runId: "updated-actionability",
+    now: "2026-09-06T00:00:00.000Z",
+  });
+
+  assert.equal(result.persistedChanges[0]?.classification, "UPDATES");
+  assert.equal(repository.getResearchContextRevision(context), beforeRevision + 1);
+  assert.ok(repository.listPersonalKnowledge(context).some((record) => record.text === updated.title));
+});
+
 test("UPDATES and CONTRADICTS create revisions while preserving previous knowledge", async () => {
   const repository = new InMemorySignalRepository();
   repository.addPersonalKnowledge(context, {
