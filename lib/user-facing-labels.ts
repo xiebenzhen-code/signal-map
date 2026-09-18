@@ -30,6 +30,7 @@ const LABELS: Record<string, string> = {
   BACKGROUND_ONLY: "仅作背景参考",
   lowNovelty: "新增信息有限",
   lowActionability: "暂时不影响行动",
+  TOPIC_MISMATCH: "与当前问题主题不匹配",
 };
 
 export function userFacingLabel(value: unknown, fallback = "暂未满足展示条件") {

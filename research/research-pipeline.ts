@@ -37,6 +37,7 @@ import { enrichDetail, maxDetailFetchesPerRound, shouldEnrichDetail, sourceCapab
 import type { DetailEnrichmentSummary } from "../source-enrichment/types.ts";
 import { discardResponseBody, throwAfterDiscardingBody } from "../lib/http-response.ts";
 import { recordsFromSignal, type EvidenceRecord } from "../information/rag-records.ts";
+import { assessTopicRelevance } from "./topic-relevance.ts";
 import type {
   PipelineCounts,
   PipelineProgress,
@@ -539,7 +540,7 @@ async function searchDirectProvider(
       // Discovery providers have already applied their own source query. Do not
       // discard their candidates a second time with the generic keyword gate;
       // detail enrichment and the existing downstream gates remain authoritative.
-      .filter((item) => discoveryProvider || relevant(item, plan))
+      .filter((item) => discoveryProvider || providerId === "arxiv" || relevant(item, plan))
       .map((item) => ({
         ...item,
         sourceType,
@@ -593,15 +594,7 @@ function primaryDomains(plan: QueryPlan) {
 }
 
 function relevant(item: LiveItem, plan: QueryPlan) {
-  const text = `${item.title} ${item.snippet}`.toLowerCase();
-  const terms = [
-    ...plan.coreKeywords,
-    ...plan.englishKeywords,
-    ...plan.synonyms,
-    ...plan.entities,
-    ...(plan.aliasesConsidered || []),
-  ].filter((term) => term.length > 1);
-  return terms.some((term) => text.includes(term.toLowerCase()));
+  return assessTopicRelevance(`${item.title} ${item.snippet}`, plan).decision === "MATCH";
 }
 
 function unique(items: ResearchCandidate[]) {
@@ -657,10 +650,8 @@ function sourceTier(sourceType: SourceType) {
 }
 
 function usefulness(item: LiveItem, plan: QueryPlan) {
-  const text = `${item.title} ${item.snippet}`.toLowerCase();
-  const hits = [...plan.coreKeywords, ...plan.englishKeywords, ...plan.entities, ...(plan.aliasesConsidered || [])].filter(
-    (term) => text.includes(term.toLowerCase()),
-  ).length;
+  const topic = assessTopicRelevance(`${item.title} ${item.snippet}`, plan);
+  const hits = topic.matchedTerms.length;
   return Math.min(98, 64 + hits * 7);
 }
 
@@ -1462,6 +1453,7 @@ export async function runResearchPipeline(
       const entityMatches = trackedEntityTerms.filter((term) =>
         clusterText.includes(term),
       );
+      const topicRelevance = assessTopicRelevance(clusterText, plan);
       const trackedEventMatches = trackedEventTerms.filter((term) =>
         clusterText.includes(term),
       );
@@ -1646,6 +1638,7 @@ export async function runResearchPipeline(
       };
       const canEnterLibrary =
         validContent &&
+        topicRelevance.decision === "MATCH" &&
         ((libraryBranch.reliability.pass &&
           libraryBranch.relevance.pass &&
           libraryBranch.novelty.pass) ||
@@ -1656,6 +1649,7 @@ export async function runResearchPipeline(
       const preliminaryIgnoreFailures: PreliminaryEligibilityFailure[] = canEnterLibrary
         ? []
         : [
+            ...(topicRelevance.decision === "MATCH" ? [] : ["topic_mismatch" as const]),
             ...(libraryBranch.reliability.pass ? [] : ["library_reliability_below_55" as const]),
             ...(libraryBranch.relevance.pass ? [] : ["library_relevance_below_58" as const]),
             ...(libraryBranch.novelty.pass ? [] : ["library_novelty_below_38" as const]),
@@ -1796,6 +1790,7 @@ export async function runResearchPipeline(
           failedConditions: preliminaryIgnoreFailures,
         },
         contextMatches: {
+          topicMatches: topicRelevance.matchedTerms,
           entityMatches,
           trackedEventMatches,
           questionMatches,
@@ -1869,6 +1864,7 @@ export async function runResearchPipeline(
           : "imported",
         confidence: reliabilityScore,
         verificationStatus,
+        topicRelevance,
         relevanceScore,
         reliabilityScore,
         freshnessScore,
@@ -1933,6 +1929,7 @@ export async function runResearchPipeline(
   for (const signal of allSignals) {
     const passesGates =
       signal.reliabilityScore >= 70 &&
+      signal.topicRelevance?.decision !== "TOPIC_MISMATCH" &&
       signal.relevanceScore >= 75 &&
       signal.noveltyScore >= 60 &&
       signal.judgementImpactScore >= 48 &&
@@ -1962,6 +1959,7 @@ export async function runResearchPipeline(
   for (const signal of allSignals) {
     const canWatch =
       signal.attentionDecision !== "MUST_READ" &&
+      signal.topicRelevance?.decision !== "TOPIC_MISMATCH" &&
       signal.contentQuality !== "INSUFFICIENT_CONTENT" &&
       signal.eventStatus === "SIGNAL" &&
       signal.timestampStatus === "valid" &&

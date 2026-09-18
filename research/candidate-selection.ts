@@ -28,7 +28,8 @@ export type PreliminaryEligibilityFailure =
   | "signal_event_status_not_signal"
   | "signal_relevance_below_70"
   | "signal_freshness_below_80"
-  | "signal_novelty_below_65";
+  | "signal_novelty_below_65"
+  | "topic_mismatch";
 
 export type CandidateEligibilityAudit = {
   scores: {
@@ -54,6 +55,7 @@ export type CandidateEligibilityAudit = {
     failedConditions: PreliminaryEligibilityFailure[];
   };
   contextMatches: {
+    topicMatches?: string[];
     entityMatches: string[];
     trackedEventMatches: string[];
     questionMatches: string[];

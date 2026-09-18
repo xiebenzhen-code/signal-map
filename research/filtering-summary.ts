@@ -12,10 +12,12 @@ const emptyReasons = (): FilteringSummary["filteredReasons"] => ({
   lowActionability: 0,
   noInformationGain: 0,
   insufficientContent: 0,
+  topicMismatch: 0,
 });
 
 function primaryFilteringReason(signal: ResearchSignal): FilteringReason | null {
   if (signal.contentQuality === "INSUFFICIENT_CONTENT") return "INSUFFICIENT_CONTENT";
+  if (signal.topicRelevance?.decision === "TOPIC_MISMATCH") return "TOPIC_MISMATCH";
   if (signal.verificationStatus === "conflicting" || signal.signalType === "CONFLICT") return "UNRESOLVED_CONFLICT";
   if (signal.knowledgeStatus === "KNOWN" || signal.signalType === "NOISE" || (signal.duplicateRatio ?? 0) >= 0.5) return "DUPLICATE";
   if (signal.timestampStatus !== "valid" || signal.freshnessScore < 25) return "STALE";
@@ -39,6 +41,7 @@ function increment(reasons: FilteringSummary["filteredReasons"], reason: Filteri
   if (reason === "LOW_ACTIONABILITY") reasons.lowActionability = (reasons.lowActionability ?? 0) + 1;
   if (reason === "NO_INFORMATION_GAIN") reasons.noInformationGain = (reasons.noInformationGain ?? 0) + 1;
   if (reason === "INSUFFICIENT_CONTENT") reasons.insufficientContent = (reasons.insufficientContent ?? 0) + 1;
+  if (reason === "TOPIC_MISMATCH") reasons.topicMismatch = (reasons.topicMismatch ?? 0) + 1;
 }
 
 function strongestHidden(hidden: ResearchSignal[]): FilteringSummary["strongestHiddenSignal"] {

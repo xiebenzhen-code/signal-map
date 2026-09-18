@@ -18,6 +18,14 @@ export type VerificationStatus =
   | "unverified"
   | "conflicting";
 
+export type TopicRelevanceDecision = "MATCH" | "TOPIC_MISMATCH";
+
+export type TopicRelevance = {
+  decision: TopicRelevanceDecision;
+  matchedTerms: string[];
+  score: number;
+};
+
 type SourceRole = "discovery" | "verification";
 
 export type EvidenceSource = {
@@ -168,6 +176,7 @@ export type ResearchSignal = {
   dataOrigin: "demo" | "live" | "imported";
   confidence: number;
   verificationStatus: VerificationStatus;
+  topicRelevance?: TopicRelevance;
   relevanceScore: number;
   reliabilityScore: number;
   freshnessScore: number;
@@ -235,7 +244,8 @@ export type FilteringReason =
   | "UNRESOLVED_CONFLICT"
   | "LOW_ACTIONABILITY"
   | "NO_INFORMATION_GAIN"
-  | "INSUFFICIENT_CONTENT";
+  | "INSUFFICIENT_CONTENT"
+  | "TOPIC_MISMATCH";
 
 export type FilteringSummary = {
   retrievedCount: number;
@@ -252,6 +262,7 @@ export type FilteringSummary = {
     lowActionability?: number;
     noInformationGain?: number;
     insufficientContent?: number;
+    topicMismatch?: number;
   };
   detailEnrichment?: DetailEnrichmentSummary;
   strongestHiddenSignal?: {

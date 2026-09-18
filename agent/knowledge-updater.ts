@@ -25,7 +25,9 @@ export async function persistResearchRecords(options: {
   response: ResearchResponse;
 }): Promise<{ evidenceIds: string[] }> {
   const allEvidenceIds: string[] = [];
-  for (const signal of options.response.signals) {
+  for (const signal of options.response.signals.filter(
+    (candidate) => candidate.topicRelevance?.decision !== "TOPIC_MISMATCH",
+  )) {
     const records = recordsFromSignal(signal);
     await Promise.resolve(options.repository.upsertEvent(records.event));
     for (const claim of records.claims) await Promise.resolve(options.repository.upsertClaim(claim));
@@ -43,6 +45,7 @@ function signalText(signal: ResearchSignal) {
 
 function canWriteKnowledge(signal: ResearchSignal, change: KnowledgeChange) {
   return signal.reliabilityScore >= 55 &&
+    signal.topicRelevance?.decision !== "TOPIC_MISMATCH" &&
     signal.verificationStatus !== "unverified" &&
     signal.informationType !== "SIGNAL" &&
     change.classification !== "CONTRADICTS";

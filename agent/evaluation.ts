@@ -15,11 +15,12 @@ function relatedToKnowledge(signal: ResearchSignal, known: string[]) {
 
 export function evaluateEvidence(response: ResearchResponse, round: number, maxRounds: number): EvidenceEvaluation {
   const signals = response.signals;
-  const conflictSignals = signals.filter((signal) => signal.verificationStatus === "conflicting");
+  const topicRelevant = signals.filter((signal) => signal.topicRelevance?.decision !== "TOPIC_MISMATCH");
+  const conflictSignals = topicRelevant.filter((signal) => signal.verificationStatus === "conflicting");
   const conflictDetected = conflictSignals.length > 0;
-  const reliable = signals.filter((signal) => signal.verificationStatus === "verified");
-  const socialOnly = signals.length > 0 && signals.every((signal) => signal.informationType === "SIGNAL" || signal.sourceType === "social");
-  const informationGain = signals.filter((signal) => signal.knowledgeStatus !== "KNOWN" && signal.noveltyScore >= 38).length;
+  const reliable = topicRelevant.filter((signal) => signal.verificationStatus === "verified");
+  const socialOnly = topicRelevant.length > 0 && topicRelevant.every((signal) => signal.informationType === "SIGNAL" || signal.sourceType === "social");
+  const informationGain = topicRelevant.filter((signal) => signal.knowledgeStatus !== "KNOWN" && signal.noveltyScore >= 38).length;
   const sufficientEvidence = reliable.length > 0 && !conflictDetected;
   const shouldContinue = round < maxRounds && (!sufficientEvidence || conflictDetected || socialOnly) && informationGain > 0;
   let reason = sufficientEvidence ? "已有一致的高可靠证据" : "当前证据尚不足以确认结论";
