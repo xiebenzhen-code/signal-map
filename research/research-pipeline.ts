@@ -38,6 +38,7 @@ import type { DetailEnrichmentSummary } from "../source-enrichment/types.ts";
 import { discardResponseBody, throwAfterDiscardingBody } from "../lib/http-response.ts";
 import { recordsFromSignal, type EvidenceRecord } from "../information/rag-records.ts";
 import { assessTopicRelevance } from "./topic-relevance.ts";
+import { assessSignalActionability } from "./actionability.ts";
 import type {
   PipelineCounts,
   PipelineProgress,
@@ -1825,6 +1826,24 @@ export async function runResearchPipeline(
         : knownMatches.length
           ? "UPDATED"
           : "NOVEL";
+      const actionability = assessSignalActionability({
+        title: primaryPresentation?.headline || item.title,
+        summary: primaryPresentation?.oneLineSummary || primaryPresentation?.fact || item.snippet || item.title,
+        sourceUrl: item.url,
+        tags: [...plan.coreKeywords, ...plan.topicKeywords || [], ...plan.entities],
+        sourceType: item.sourceType,
+        sourceTier: sourceTier(item.sourceType),
+        eventStatus,
+        knowledgeStatus,
+        noveltyScore,
+        relevanceScore,
+        reliabilityScore,
+        freshnessScore,
+        verificationStatus,
+        informationType,
+        knownMatches: knownMatches.map((match) => match.knownInformationItem),
+        evidenceText: ordered.map((candidate) => candidate.snippet).join(" "),
+      });
       const protectedReasons: ProtectedReason[] = [
         ...(entityMatches.length ? ["tracked_entity" as const] : []),
         ...(trackedEventMatches.length ? ["tracked_event" as const] : []),
@@ -1894,9 +1913,7 @@ export async function runResearchPipeline(
           ...plan.entities,
         ],
         action:
-          verificationStatus === "verified"
-            ? "阅读最高权重原文，确认适用范围后再行动。"
-            : "先查看证据与冲突点；在补齐独立来源前不要将其当作事实传播。",
+          actionability.action,
         why: explanation,
         official,
         social: socialSources,
@@ -1954,6 +1971,9 @@ export async function runResearchPipeline(
         eventStatus,
         informationType,
         knowledgeStatus,
+        actionabilityStatus: actionability.actionabilityStatus,
+        informationGainStatus: actionability.informationGainStatus,
+        hasExecutableAction: actionability.hasExecutableAction,
         attentionDecision: preliminaryEligible ? "LIBRARY_ONLY" : "IGNORE",
         presentation: primaryPresentation,
         contentQuality: primaryPresentation?.contentQuality,
@@ -1990,6 +2010,8 @@ export async function runResearchPipeline(
       signal.relevanceScore >= 75 &&
       signal.noveltyScore >= 60 &&
       signal.judgementImpactScore >= 48 &&
+      signal.actionabilityStatus === "TEST_NOW" &&
+      signal.informationGainStatus !== "NO_INFORMATION_GAIN" &&
       signal.contentQuality !== "INSUFFICIENT_CONTENT" &&
       signal.knowledgeStatus !== "KNOWN" &&
       signal.verificationStatus !== "unverified" &&
@@ -2016,6 +2038,7 @@ export async function runResearchPipeline(
   for (const signal of allSignals) {
     const canWatch =
       signal.attentionDecision !== "MUST_READ" &&
+      signal.actionabilityStatus !== "BACKGROUND" &&
       signal.topicRelevance?.decision !== "TOPIC_MISMATCH" &&
       signal.contentQuality !== "INSUFFICIENT_CONTENT" &&
       signal.eventStatus === "SIGNAL" &&

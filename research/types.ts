@@ -5,6 +5,7 @@ import type { IntentClassification, IntentMappedOutput, SourceProfile } from "..
 import type { SignalClassification, SignalCluster, SourceRole as FusionSourceRole } from "../signal-fusion/types.ts";
 import type { ContentQuality, SignalPresentation } from "../content-processing/types.ts";
 import type { DetailEnrichmentMetadata, DetailEnrichmentSummary, SourceCapabilityRole } from "../source-enrichment/types.ts";
+import type { ActionabilityStatus, InformationGainStatus } from "./actionability.ts";
 
 export type SourceType =
   | "primary"
@@ -214,6 +215,9 @@ export type ResearchSignal = {
   eventStatus: "NEW" | "UPDATED" | "FOLLOW_UP" | "SIGNAL" | "BACKGROUND";
   informationType: "FACT" | "INTERPRETATION" | "SIGNAL";
   knowledgeStatus: "NOVEL" | "UPDATED" | "KNOWN";
+  actionabilityStatus?: ActionabilityStatus;
+  informationGainStatus?: InformationGainStatus;
+  hasExecutableAction?: boolean;
   attentionDecision:
     | "MUST_READ"
     | "WORTH_WATCHING"

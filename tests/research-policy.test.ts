@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { chooseResearchStrategy } from "../agent/research-policy.ts";
 import { createResearchPlan } from "../agent/query-planner.ts";
+import { assessSignalActionability } from "../research/actionability.ts";
 import type { ResearchPolicyInput } from "../agent/types.ts";
 import type { ResearchResponse, ResearchSignal } from "../research/types.ts";
 
@@ -78,4 +79,94 @@ test("policy trace is deterministic without historical strategies", () => {
   const first = chooseResearchStrategy(policy());
   const second = chooseResearchStrategy(policy());
   assert.deepEqual(first, second);
+});
+
+test("high-relevance academic evidence stays library-only without an executable action", () => {
+  const result = assessSignalActionability({
+    title: "A video editing research paper proposes a new shot selection method",
+    summary: "The arXiv manuscript evaluates the method on a benchmark dataset.",
+    sourceUrl: "https://arxiv.org/abs/1234.5678",
+    tags: ["AI video editing", "shot selection"],
+    sourceType: "primary",
+    sourceTier: "S",
+    eventStatus: "NEW",
+    knowledgeStatus: "NOVEL",
+    noveltyScore: 90,
+    relevanceScore: 92,
+    reliabilityScore: 92,
+    freshnessScore: 90,
+    verificationStatus: "verified",
+    informationType: "FACT",
+  });
+
+  assert.equal(result.actionabilityStatus, "LIBRARY_ONLY");
+  assert.equal(result.hasExecutableAction, false);
+  assert.match(result.action, /研究资料|立即测试/);
+});
+
+test("a public API or workflow entry creates a test-now candidate", () => {
+  const result = assessSignalActionability({
+    title: "New batch video editing API release",
+    summary: "The public API and quickstart support automated rough cuts and export.",
+    sourceUrl: "https://example.com/docs/video-api",
+    tags: ["AI video editing", "batch processing"],
+    sourceType: "primary",
+    sourceTier: "S",
+    eventStatus: "NEW",
+    knowledgeStatus: "NOVEL",
+    noveltyScore: 90,
+    relevanceScore: 92,
+    reliabilityScore: 92,
+    freshnessScore: 90,
+    verificationStatus: "verified",
+    informationType: "FACT",
+  });
+
+  assert.equal(result.actionabilityStatus, "TEST_NOW");
+  assert.equal(result.hasExecutableAction, true);
+  assert.match(result.action, /API|最小/);
+});
+
+test("known evidence is explicitly marked as having no information gain", () => {
+  const result = assessSignalActionability({
+    title: "Known video workflow release",
+    summary: "The same workflow capability is already documented in Knowledge.",
+    sourceUrl: "https://example.com/release",
+    tags: ["workflow"],
+    sourceType: "primary",
+    sourceTier: "S",
+    eventStatus: "UPDATED",
+    knowledgeStatus: "KNOWN",
+    knownMatches: ["Known video workflow release"],
+    noveltyScore: 30,
+    relevanceScore: 92,
+    reliabilityScore: 92,
+    freshnessScore: 90,
+    verificationStatus: "verified",
+    informationType: "FACT",
+  });
+
+  assert.equal(result.informationGainStatus, "NO_INFORMATION_GAIN");
+  assert.equal(result.actionabilityStatus, "LIBRARY_ONLY");
+});
+
+test("background evidence is separated from current actionability", () => {
+  const result = assessSignalActionability({
+    title: "Archived video editing workflow paper",
+    summary: "A prior study describes a historical editing workflow.",
+    sourceUrl: "https://example.com/archive",
+    tags: ["research"],
+    sourceType: "primary",
+    sourceTier: "S",
+    eventStatus: "BACKGROUND",
+    knowledgeStatus: "NOVEL",
+    noveltyScore: 80,
+    relevanceScore: 90,
+    reliabilityScore: 90,
+    freshnessScore: 20,
+    verificationStatus: "verified",
+    informationType: "FACT",
+  });
+
+  assert.equal(result.actionabilityStatus, "BACKGROUND");
 });

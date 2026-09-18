@@ -20,7 +20,11 @@ export function evaluateEvidence(response: ResearchResponse, round: number, maxR
   const conflictDetected = conflictSignals.length > 0;
   const reliable = topicRelevant.filter((signal) => signal.verificationStatus === "verified");
   const socialOnly = topicRelevant.length > 0 && topicRelevant.every((signal) => signal.informationType === "SIGNAL" || signal.sourceType === "social");
-  const informationGain = topicRelevant.filter((signal) => signal.knowledgeStatus !== "KNOWN" && signal.noveltyScore >= 38).length;
+  const informationGain = topicRelevant.filter((signal) =>
+    signal.informationGainStatus !== "NO_INFORMATION_GAIN" &&
+    signal.knowledgeStatus !== "KNOWN" &&
+    signal.noveltyScore >= 38,
+  ).length;
   const sufficientEvidence = reliable.length > 0 && !conflictDetected;
   const shouldContinue = round < maxRounds && (!sufficientEvidence || conflictDetected || socialOnly) && informationGain > 0;
   let reason = sufficientEvidence ? "已有一致的高可靠证据" : "当前证据尚不足以确认结论";

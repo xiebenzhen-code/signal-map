@@ -24,8 +24,14 @@ function primaryFilteringReason(signal: ResearchSignal): FilteringReason | null 
   if (signal.eventStatus === "BACKGROUND") return "BACKGROUND_ONLY";
   if (signal.reliabilityScore < 55) return "LOW_RELIABILITY";
   if (signal.verificationStatus === "unverified") return "INSUFFICIENT_VERIFICATION";
+  if (signal.informationGainStatus === "NO_INFORMATION_GAIN") return "NO_INFORMATION_GAIN";
   if (signal.noveltyScore < 38) return "LOW_NOVELTY";
-  if (signal.relevanceScore < 58 || signal.judgementImpactScore < 34) return "LOW_ACTIONABILITY";
+  if (
+    signal.actionabilityStatus === "LIBRARY_ONLY" ||
+    signal.actionabilityStatus === "BACKGROUND" ||
+    signal.relevanceScore < 58 ||
+    signal.judgementImpactScore < 34
+  ) return "LOW_ACTIONABILITY";
   if (!signal.confirmationGain && signal.noveltyScore < 60) return "NO_INFORMATION_GAIN";
   return null;
 }
