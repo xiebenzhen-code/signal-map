@@ -6,6 +6,8 @@ import {
   qualityAcceptance,
   qualityMarkdown,
   producedEvidenceCountFromResponseData,
+  rejectionAccounting,
+  runCumulativeDiagnostics,
 } from "../scripts/signal-map-agent-loop-e2e.mjs";
 
 const trace = [
@@ -77,6 +79,10 @@ test("quality acceptance fails when rejection reasons do not cover rejected evid
 test("markdown uses the same request and final counts", () => {
   const report = {
     acceptanceStatus: "PARTIAL",
+    executionStatus: "PASS",
+    qualityStatus: "PARTIAL",
+    runCumulative: { retrievedCount: 12, cumulativeEvidenceCount: 2 },
+    finalResponse: { displayedCount: 0, signalCount: 0, finalEvidenceCount: 0 },
     query: { original: "discover" },
     inference: { inferredIntent: "PRODUCT_UPDATE", freshnessMentionedByUser: "30d", freshnessInferred: "3d", freshnessTimeRange: "3d", sourcePreference: [], sourceSelection: {}, entitiesTopic: [] },
     retrieval: { retrievedCount: 12, evaluatedCount: 2, clusteredCount: 2, displayedCount: 0, search: { attempts: [], selectedSourceTypes: [], discoveryMode: true, verificationSourceTypes: [], sourceSelectionReason: "discover", resolvedEntities: [], agentGeneratedQueries: ["discover"], pipelineActualQueries: ["discover"], searchProvider: [], providerCallAttempted: [], providerReturnedCount: [], emptyResultReason: "all_results_empty", fallbackUsed: true, retrievalPlanSource: "upstream_agent_plan", fallbackReason: "empty" }, detailFetch: {}, aggregation: {} },
@@ -87,6 +93,10 @@ test("markdown uses the same request and final counts", () => {
   };
   const markdown = qualityMarkdown(report);
   assert.match(markdown, /request-1/);
+  assert.match(markdown, /executionStatus: `PASS`/);
+  assert.match(markdown, /qualityStatus: `PARTIAL`/);
+  assert.match(markdown, /runCumulative: .*retrievedCount.*12/);
+  assert.match(markdown, /finalResponse: .*finalEvidenceCount.*0/);
   assert.match(markdown, /cumulativeEvidenceCount: 2/);
   assert.match(markdown, /finalEvidenceCount: 0/);
 });
@@ -94,4 +104,42 @@ test("markdown uses the same request and final counts", () => {
 test("produced evidence count is sourced only from evidenceRecords", () => {
   assert.equal(producedEvidenceCountFromResponseData({ evidenceRecords: [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }], evidenceAccounting: { producedEvidenceCount: 12 } }), 4);
   assert.equal(producedEvidenceCountFromResponseData({ evidenceAccounting: { producedEvidenceCount: 12 } }), "unavailable");
+});
+
+test("run cumulative retrieval keeps primary attempt results when fallback is empty", () => {
+  const attempts = attemptDiagnostics(trace);
+  const cumulative = runCumulativeDiagnostics(attempts, {
+    producedEvidenceCount: 4,
+    cumulativeEvidenceCount: 4,
+  });
+  assert.equal(cumulative.retrievedCount, 12);
+});
+
+test("candidate counts cannot inflate produced Evidence count", () => {
+  assert.equal(producedEvidenceCountFromResponseData({
+    overview: { scanned: 12, events: 12 },
+    evidenceRecords: [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }],
+    evidenceAccounting: { discoveredCandidateCount: 12, producedEvidenceCount: 12 },
+    sourceOutcomes: [{ resultCount: 12, newEvidenceCount: 12 }],
+  }), 4);
+});
+
+test("partial rejection mapping reports unclassified rejected Evidence", () => {
+  assert.deepEqual(rejectionAccounting(12, [{ insufficientVerification: 5 }]), {
+    primaryRejectionReasonCounts: { insufficientVerification: 5 },
+    rejectionReasonOccurrences: 5,
+    evidenceWithMappedPrimaryReasonCount: 5,
+    unclassifiedRejectedEvidenceCount: 7,
+    rejectionAccountingComplete: false,
+  });
+});
+
+test("complete rejection mapping is explicitly complete", () => {
+  assert.deepEqual(rejectionAccounting(12, [{ insufficientVerification: 5, stale: 7 }]), {
+    primaryRejectionReasonCounts: { insufficientVerification: 5, stale: 7 },
+    rejectionReasonOccurrences: 12,
+    evidenceWithMappedPrimaryReasonCount: 12,
+    unclassifiedRejectedEvidenceCount: 0,
+    rejectionAccountingComplete: true,
+  });
 });
