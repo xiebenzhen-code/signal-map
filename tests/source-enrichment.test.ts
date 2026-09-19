@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { cleanContent, extractClaim } from "../content-processing/index.ts";
+import { createResearchPlan } from "../agent/query-planner.ts";
+import { toRetrievalPlan } from "../agent/retrieval-plan.ts";
 import { enrichDetail, maxDetailFetchesPerRound, shouldEnrichDetail, sourceCapability } from "../source-enrichment/index.ts";
 import { normalizeArxivResults, runResearchPipeline } from "../research/research-pipeline.ts";
 import type { ResearchInput } from "../research/types.ts";
@@ -164,6 +166,76 @@ test("arXiv XML fixture reaches aggregation when normalization and admission pas
   assert.equal(diagnostics?.admittedCandidateCount, 1);
   assert.equal(diagnostics?.candidateAdmissionRejectionReasons && Object.keys(diagnostics.candidateAdmissionRejectionReasons).length, 0);
   assert.ok(result.counts.candidates >= 1);
+});
+
+test("P1 controlled E2E admits relevant video editing results and rejects generic neighbors", async (t) => {
+  const input = baseInput({
+    industry: "AI video tools",
+    focusAreas: "AI video editing, automated rough cut, shot selection, multi-asset understanding, batch processing, commercial workflow",
+    currentQuestions: "Which new AI video editing tools and workflows are worth testing?",
+    informationGaps: "new AI video editing products and workflow updates",
+    freshnessWindow: "30d",
+  });
+  const researchPlan = createResearchPlan(input, 1, 5, [], "INITIAL");
+  const retrievalPlan = toRetrievalPlan(researchPlan);
+  const entries = [
+    `<title>AI-assisted medical endoscopic video observations</title>
+     <id>https://arxiv.org/abs/2601.11111</id>
+     <summary>A medical AI model studies endoscopic video observations in clinical settings.</summary>
+     <published>2026-09-18T00:00:00Z</published>`,
+    `<title>Generic multimodal foundation model for observation</title>
+     <id>https://arxiv.org/abs/2601.22222</id>
+     <summary>A foundation model handles multimodal observations across generic benchmarks.</summary>
+     <published>2026-09-17T00:00:00Z</published>`,
+    `<title>New AI video editing tool release with automated rough cut</title>
+     <id>https://arxiv.org/abs/2601.33333</id>
+     <summary>A product update adds automated rough cut generation for an AI video editing workflow and supports testing with creator footage.</summary>
+     <published>2026-09-16T00:00:00Z</published>`,
+    `<title>Shot selection for multi-asset video editing workflow</title>
+     <id>https://arxiv.org/abs/2601.44444</id>
+     <summary>This system selects shots across multiple video assets for batch editing workflows and evaluates the resulting edit.</summary>
+     <published>2026-09-15T00:00:00Z</published>`,
+  ];
+  t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => {
+    if (new URL(String(target)).hostname === "export.arxiv.org") {
+      return new Response(arxivFeed(entries), {
+        status: 200,
+        headers: { "content-type": "application/atom+xml" },
+      });
+    }
+    return new Response("", { status: 404 });
+  });
+
+  const result = await runResearchPipeline(input, undefined, undefined, {
+    ...retrievalPlan,
+    selectedSourceType: "PRIMARY",
+    fallbackSourceTypes: [],
+    allowedProviderIds: ["arxiv"],
+    reason: "controlled P1 positive and negative path fixture",
+  });
+  const diagnostics = result.sourceDiagnostics?.find((item) => item.providerId === "arxiv");
+  const rejected = diagnostics?.candidateAdmissionRejectedSamples || [];
+  const positiveDetails = result.filteringSummary?.filteringDetails?.filter((detail) =>
+    detail.sources.some((source) => /2601\.(33333|44444)/.test(source.sourceUrl)),
+  ) || [];
+
+  assert.equal(diagnostics?.rawProviderResultCount, 4);
+  assert.equal(diagnostics?.normalizedCandidateCount, 4);
+  assert.equal(diagnostics?.rejectedRawCount, 0);
+  assert.deepEqual(diagnostics?.candidateAdmissionRejectionReasons, { TOPIC_MISMATCH: 2 });
+  assert.equal(Object.values(diagnostics?.candidateAdmissionRejectionReasons || {}).reduce((sum, count) => sum + count, 0), 2);
+  assert.equal(diagnostics?.admittedCandidateCount, 2);
+  assert.equal(rejected.length, 2);
+  assert.ok(rejected.every((sample) => sample.rejectionReason === "TOPIC_MISMATCH"));
+  assert.equal(positiveDetails.length, 2);
+  assert.equal(result.evidenceRecords?.length, 2);
+  assert.ok(positiveDetails.every((detail) => detail.topicRelevance?.relevanceGateApplied === true));
+  assert.ok(positiveDetails.every((detail) => detail.topicRelevance?.relevanceGatePassed === true));
+  assert.ok(positiveDetails.every((detail) => (detail.topicRelevance?.matchedDomainAnchors?.length || 0) > 0));
+  assert.ok(positiveDetails.every((detail) => (detail.topicRelevance?.matchedTaskAnchors?.length || 0) > 0));
+  assert.ok(positiveDetails.every((detail) =>
+    detail.topicRelevance?.matchedTaskAnchors?.some((task) => !["ai", "model", "workflow", "video"].includes(task)),
+  ));
 });
 
 test("discovery sources are marked for detail enrichment while evidence sources are not", () => {
