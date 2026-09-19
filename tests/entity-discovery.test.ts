@@ -156,6 +156,27 @@ test("diversified queries cover different retrieval intents", () => {
   assert.ok(new Set(queries.map((query) => query.replace(/\b(product launch release|workflow tool|research model|official changelog|implementation commercial workflow)\b/gi, "").trim())).size > 2);
 });
 
+test("Agent ResearchPlan preserves the generated topic profile", () => {
+  const plan = createResearchPlan({
+    identity: "researcher",
+    industry: "AI video tools",
+    focusAreas: "AI video editing, automated rough cut, shot selection",
+    currentQuestions: "Find video workflow tools",
+    knownInformation: "",
+    informationGaps: "",
+    trackedEntities: "",
+    trackedEvents: "",
+    userJudgements: "",
+    evidenceHistory: "",
+    freshnessWindow: "30d",
+  }, 1, 5, [], "INITIAL");
+
+  assert.ok(plan.topicProfile);
+  assert.ok(plan.topicProfile.domainAnchors.some((anchor) => /video/i.test(anchor)));
+  assert.ok(plan.topicProfile.taskAnchors.some((anchor) => /editing|rough cut|shot selection/i.test(anchor)));
+  assert.ok(plan.topicProfile.genericTerms.includes("ai"));
+});
+
 test("valid company and product names remain entity candidates", () => {
   const plan = planQuery({
     identity: "researcher",

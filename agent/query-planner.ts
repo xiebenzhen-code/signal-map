@@ -113,6 +113,7 @@ export function createResearchPlan(
     resolvedEntities: planned.resolvedEntities,
     topicAnchors: planned.topicAnchors,
     topicKeywords: planned.topicKeywords,
+    topicProfile: planned.topicProfile,
     intent,
     freshnessWindow: planned.requestedFreshnessWindow,
     retrievalWindows: planned.retrievalWindows,

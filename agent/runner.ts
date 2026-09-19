@@ -224,6 +224,8 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     selectedSourceType: plan.selectedSourceType,
     fallbackSourceTypes: plan.fallbackSourceTypes,
     allowedProviderIds: plan.allowedProviderIds,
+    topicProfile: plan.topicProfile,
+    topicProfileSource: plan.topicProfile ? "agent_research_plan" : "unavailable",
     strategy: plan.strategy,
   });
   add("PLAN", "completed", { round: 1 }, plan);
@@ -302,6 +304,8 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
             selectedSourceType: plan.selectedSourceType,
             fallbackSourceTypes: plan.fallbackSourceTypes,
             allowedProviderIds: plan.allowedProviderIds,
+            topicProfile: plan.topicProfile,
+            topicProfileSource: plan.topicProfile ? "agent_research_plan" : "unavailable",
             strategy: plan.strategy,
           });
           add("SOURCE_SELECTOR", "completed", { round, fallback: true }, fallbackSelection, "首选来源无有效结果，执行 fallback 来源");
@@ -550,6 +554,8 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       selectedSourceType: plan.selectedSourceType,
       fallbackSourceTypes: plan.fallbackSourceTypes,
       allowedProviderIds: plan.allowedProviderIds,
+      topicProfile: plan.topicProfile,
+      topicProfileSource: plan.topicProfile ? "agent_research_plan" : "unavailable",
       strategy: plan.strategy,
     });
     add("PLAN", "completed", { round: round + 1 }, plan);

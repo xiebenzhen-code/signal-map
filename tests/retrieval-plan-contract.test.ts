@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { createResearchPlan } from "../agent/query-planner.ts";
 import { toRetrievalPlan } from "../agent/retrieval-plan.ts";
 import type { ResearchPlan } from "../agent/types.ts";
-import { resolvePipelinePlan } from "../research/research-pipeline.ts";
+import { resolvePipelinePlan, runResearchPipeline } from "../research/research-pipeline.ts";
+import { assessTopicRelevance } from "../research/topic-relevance.ts";
 import type { ResearchInput, RetrievalPlan } from "../research/types.ts";
 
 const input: ResearchInput = {
@@ -26,6 +28,11 @@ const upstreamPlan: RetrievalPlan = {
     "AI video editing workflow release notes",
   ],
   topicAnchors: ["AI video editing", "automated rough cut"],
+  topicProfile: {
+    domainAnchors: ["video editing"],
+    taskAnchors: ["automated rough cut", "shot selection"],
+    genericTerms: ["ai", "model", "multimodal", "workflow"],
+  },
   selectedSourceType: "GENERAL_WEB",
   fallbackSourceTypes: ["PRIMARY"],
   allowedProviderIds: ["public-web", "product-hunt"],
@@ -45,6 +52,7 @@ test("upstream RetrievalPlan queries are the pipeline's actual queries", () => {
   assert.equal(resolved.plan.selectedSourceType, "GENERAL_WEB");
   assert.deepEqual(resolved.plan.allowedProviderIds, ["public-web", "product-hunt"]);
   assert.deepEqual(resolved.plan.topicAnchors, upstreamPlan.topicAnchors);
+  assert.deepEqual(resolved.plan.topicProfile, upstreamPlan.topicProfile);
 });
 
 test("deterministically derived query-planner fields are not required for upstream plan validity", () => {
@@ -92,6 +100,7 @@ test("ResearchPlan converts to RetrievalPlan without inheriting runtime-only fie
     allowedProviderIds: ["public-web"],
     reason: "selected by Agent",
     resolvedEntities: upstreamPlan.resolvedEntities,
+    topicProfile: upstreamPlan.topicProfile,
     freshnessWindow: "30d",
     retrievalWindows: ["30d"],
   };
@@ -103,8 +112,37 @@ test("ResearchPlan converts to RetrievalPlan without inheriting runtime-only fie
   assert.equal(roundTrip.selectedSourceType, researchPlan.selectedSourceType);
   assert.deepEqual(roundTrip.allowedProviderIds, researchPlan.allowedProviderIds);
   assert.deepEqual(roundTrip.resolvedEntities, researchPlan.resolvedEntities);
+  assert.deepEqual(roundTrip.topicProfile, researchPlan.topicProfile);
   assert.equal(Object.hasOwn(roundTrip, "preferredSourceTypes"), false);
   assert.equal(Object.hasOwn(roundTrip, "maxQueries"), false);
+});
+
+test("Agent planning carries one topic profile through pipeline resolution and evaluation", async (t) => {
+  const agentPlan = createResearchPlan(input, 1, 5, [], "INITIAL");
+  const retrievalPlan = toRetrievalPlan(agentPlan);
+  const phases: Array<{ phase: string; diagnostic?: Record<string, unknown> }> = [];
+  t.mock.method(globalThis, "fetch", async () => new Response("<feed></feed>", {
+    status: 200,
+    headers: { "content-type": "application/atom+xml" },
+  }));
+
+  const response = await runResearchPipeline(input, undefined, {
+    onPhase: (event) => phases.push(event),
+  }, {
+    ...retrievalPlan,
+    selectedSourceType: "PRIMARY",
+    allowedProviderIds: ["arxiv"],
+  });
+  const resolved = resolvePipelinePlan(input, retrievalPlan);
+  const searchStarted = phases.find((event) => event.phase === "search_started");
+
+  assert.deepEqual(resolved.plan.topicProfile, agentPlan.topicProfile);
+  assert.deepEqual(searchStarted?.diagnostic?.topicProfile, agentPlan.topicProfile);
+  assert.equal(searchStarted?.diagnostic?.topicProfileSource, "retrieval_plan");
+  assert.equal(searchStarted?.diagnostic?.topicProfileApplied, true);
+  assert.equal(assessTopicRelevance("A medical AI model for colorectal imaging", resolved.plan).decision, "TOPIC_MISMATCH");
+  assert.equal(assessTopicRelevance("AI video editing automates rough cut shot selection", resolved.plan).decision, "MATCH");
+  assert.deepEqual(response.queryPlan.topicProfile, agentPlan.topicProfile);
 });
 
 test("runtime environment changes do not alter query or routing contract", () => {

@@ -753,6 +753,10 @@ function searchDiagnostics(data, phaseTrace) {
   const finalProviderFailed = Array.isArray(finalProviderErrors)
     ? finalProviderErrors.length > 0
     : finalProviderErrors !== "unavailable";
+  const topicProfileAttempt = attempts
+    .map((attempt) => attempt.searchStarted?.topicProfile)
+    .find((profile) => profile && typeof profile === "object");
+  const topicProfile = topicProfileAttempt || queryPlan.topicProfile || "unavailable";
   return {
     attempts,
     perRoundSearch: attempts.length
@@ -783,6 +787,13 @@ function searchDiagnostics(data, phaseTrace) {
     discoveryMode: sourceSelections.find((entry) => entry.discoveryMode !== undefined)?.discoveryMode ?? "unavailable",
     verificationSourceTypes: sourceSelections.find((entry) => entry.verificationSourceTypes !== undefined)?.verificationSourceTypes ?? "unavailable",
     sourceSelectionReason: sourceSelections[0]?.sourceSelectionReason || sourceSelections[0]?.reason || "unavailable",
+    topicProfile,
+    topicProfileSource: topicProfileAttempt
+      ? (primaryAttempt?.searchStarted?.topicProfileSource || "pipeline_trace")
+      : (queryPlan.topicProfile ? "research_response" : "unavailable"),
+    topicProfileApplied: topicProfileAttempt
+      ? primaryAttempt?.searchStarted?.topicProfileApplied === true
+      : Boolean(queryPlan.topicProfile),
     searchProvider: attempts.map((attempt) => ({
       attemptId: attempt.attemptId,
       round: attempt.round,
@@ -1348,6 +1359,9 @@ function buildQualityReport({ query, signalRun, agentRuns, secondRun }) {
       entitiesTopic: data.queryPlan?.resolvedEntities ?? data.queryPlan?.entities ?? data.queryPlan?.coreKeywords ?? "unavailable",
     },
     planning: planningTiming,
+    topicProfile: search.topicProfile,
+    topicProfileSource: search.topicProfileSource,
+    topicProfileApplied: search.topicProfileApplied,
     retrieval: {
       ...runCumulative,
       retrievedCount: runCumulative.retrievedCount,
@@ -1506,6 +1520,9 @@ function qualityMarkdown(report) {
     `- post-source-selection pre-retrieval window: ${compact(report.planning?.postSourceSelectionPreRetrievalWindowMs)}ms`,
     `- remaining deadline before runResearchPipeline: ${compact(report.planning?.remainingDeadlineMsBeforeRunResearchPipeline)}ms`,
     `- retrieval started: ${compact(report.planning?.retrievalStarted)}`,
+    `- topicProfile: ${compact(report.topicProfile, 1200)}`,
+    `- topicProfileSource: ${compact(report.topicProfileSource)}`,
+    `- topicProfileApplied: ${compact(report.topicProfileApplied)}`,
     `- deadline error code: ${compact(report.planning?.deadlineErrorCode)}`,
     `- note: ${compact(report.planning?.observabilityNote, 500)}`,
     "",
