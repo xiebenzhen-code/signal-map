@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { runResearchPipeline } from "../research/research-pipeline.ts";
 import type { ResearchResponse } from "../research/types.ts";
 import { BudgetManager, type BudgetSnapshot } from "./budget-manager.ts";
-import { compareKnowledge, evaluateEvidence } from "./evaluation.ts";
+import { compareKnowledge, evaluateEvidence, reconcileInformationGain } from "./evaluation.ts";
 import { persistResearchRecords, updateKnowledgeFromChanges } from "./knowledge-updater.ts";
 import { createResearchPlan } from "./query-planner.ts";
 import { ResearchRunState, mergeRoundAttempts, type EvidencePreservationSnapshot } from "./research-run-state.ts";
@@ -102,6 +102,9 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
   add("UNDERSTAND", "completed", { query: options.input.currentQuestions || options.input.industry }, { filterContext: "accepted" });
   const persistedKnowledge = options.repository && options.context
     ? await Promise.resolve(options.repository.listPersonalKnowledge(options.context))
+    : [];
+  const persistedEvidence = options.repository?.listEvidence
+    ? await Promise.resolve(options.repository.listEvidence())
     : [];
   const previousRun = options.repository && options.context
     ? await Promise.resolve(options.repository.getLatestRunMetadata(options.context))
@@ -352,6 +355,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     cumulativeResponse.outputMode = sourceProfile.outputMode;
     cumulativeResponse.intentOutput = mapIntentOutput(cumulativeResponse, sourceProfile);
     response = cumulativeResponse;
+    reconcileInformationGain(response, persistedKnowledge, persistedEvidence);
     add("RESEARCH", "completed", { round }, {
       signals: response.signals.length,
       dataMode: response.dataMode,
@@ -425,7 +429,13 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     previousStrategies = [...previousStrategies, policy.strategy];
     previousSourceOutcomes = [...previousSourceOutcomes, ...currentSourceOutcomes];
     if (policy.strategy === "STOP") {
-      const changes = compareKnowledge(response, researchInput.knownInformation, generatedFromRevision);
+      const changes = compareKnowledge(
+        response,
+        researchInput.knownInformation,
+        generatedFromRevision,
+        persistedKnowledge,
+        persistedEvidence,
+      );
       const finalAttention = !evaluation.sufficientEvidence || evaluation.conflictDetected
         ? []
         : response.signals.map((signal) => signal.attentionDecision);

@@ -150,7 +150,7 @@ export function stableRecordId(parts: string[]) {
   return Math.abs(hash >>> 0).toString(36);
 }
 
-function canonicalizeUrl(sourceUrl: string) {
+export function canonicalizeUrl(sourceUrl: string) {
   try {
     const url = new URL(sourceUrl);
     url.hash = "";
@@ -158,6 +158,10 @@ function canonicalizeUrl(sourceUrl: string) {
   } catch {
     return sourceUrl.trim();
   }
+}
+
+export function claimFingerprint(claim: Pick<ResearchSignal["claims"][number], "claimText" | "canonicalClaimFingerprint">) {
+  return normalizeText(claim.canonicalClaimFingerprint || claim.claimText);
 }
 
 function evidenceFromSource(

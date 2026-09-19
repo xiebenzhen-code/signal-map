@@ -500,6 +500,115 @@ test("Run A persists NEW knowledge and Run B retrieves it for planning", async (
   assert.match(runB.steps.find((step) => step.state === "RETRIEVE")?.output as string, /Model X is now released/);
 });
 
+test("the first evidence is NEW_INFORMATION and an identical second run is deduplicated", async () => {
+  const repository = new InMemorySignalRepository();
+  const evidence = (sourceUrl: string, claimText: string) => evidenceSignal({
+    id: `signal-${sourceUrl}`,
+    title: claimText,
+    summary: claimText,
+    sourceUrl,
+    claims: [{
+      claimText,
+      sourceUrl,
+      publisher: "Official",
+      sourceType: "primary",
+      sourceTier: "S",
+      evidenceSnippet: claimText,
+      verificationStatus: "verified",
+      contentType: "FACT",
+      independentEvidenceCount: 1,
+      evidenceSources: [],
+    }],
+  });
+
+  const first = await runAgent({
+    input, context: { ...context, filterId: "filter-dedup-first" }, repository, maxRounds: 1,
+    research: async () => response([evidence("https://example.com/video-tool", "Video tool supports batch processing")]),
+  });
+  assert.equal(first.response?.signals[0]?.informationGainStatus, "NEW_INFORMATION");
+  assert.equal(first.knowledgeChanges[0]?.classification, "NEW");
+
+  const second = await runAgent({
+    input, context: { ...context, filterId: "filter-dedup-first" }, repository, maxRounds: 1,
+    research: async () => response([evidence("https://example.com/video-tool", "Video tool supports batch processing")]),
+  });
+  assert.equal(second.response?.signals[0]?.informationGainStatus, "NO_INFORMATION_GAIN");
+  assert.equal(second.knowledgeChanges.length, 0);
+  assert.equal(repository.getResearchContextRevision({ ...context, filterId: "filter-dedup-first" }), 2);
+  assert.equal(repository.listPersonalKnowledge({ ...context, filterId: "filter-dedup-first" }).length, 1);
+});
+
+test("the same source with a changed claim is UPDATED_INFORMATION and advances Knowledge", async () => {
+  const repository = new InMemorySignalRepository();
+  const runContext = { ...context, filterId: "filter-dedup-update" };
+  const makeEvidence = (claimText: string) => evidenceSignal({
+    id: `signal-${claimText}`,
+    title: claimText,
+    summary: claimText,
+    sourceUrl: "https://example.com/video-tool",
+    claims: [{
+      claimText,
+      sourceUrl: "https://example.com/video-tool",
+      publisher: "Official",
+      sourceType: "primary",
+      sourceTier: "S",
+      evidenceSnippet: claimText,
+      verificationStatus: "verified",
+      contentType: "FACT",
+      independentEvidenceCount: 1,
+      evidenceSources: [],
+    }],
+  });
+
+  await runAgent({
+    input, context: runContext, repository, maxRounds: 1,
+    research: async () => response([makeEvidence("Video tool supports batch processing")]),
+  });
+  const beforeRevision = repository.getResearchContextRevision(runContext);
+  const updated = await runAgent({
+    input, context: runContext, repository, maxRounds: 1,
+    research: async () => response([makeEvidence("Video tool supports batch processing with multi-clip understanding")]),
+  });
+  assert.equal(updated.response?.signals[0]?.informationGainStatus, "UPDATED_INFORMATION");
+  assert.equal(updated.knowledgeChanges[0]?.classification, "UPDATES");
+  assert.equal(repository.getResearchContextRevision(runContext), beforeRevision + 1);
+});
+
+test("an equivalent claim from a different URL does not create a duplicate Knowledge record", async () => {
+  const repository = new InMemorySignalRepository();
+  const runContext = { ...context, filterId: "filter-dedup-equivalent" };
+  const makeEvidence = (sourceUrl: string) => evidenceSignal({
+    id: `signal-${sourceUrl}`,
+    title: "Video tool supports batch processing",
+    summary: "Video tool supports batch processing",
+    sourceUrl,
+    claims: [{
+      claimText: "Video tool supports batch processing",
+      sourceUrl,
+      publisher: "Video Tools",
+      sourceType: "primary",
+      sourceTier: "S",
+      evidenceSnippet: "Video tool supports batch processing",
+      verificationStatus: "verified",
+      contentType: "FACT",
+      independentEvidenceCount: 1,
+      evidenceSources: [],
+    }],
+  });
+
+  await runAgent({
+    input, context: runContext, repository, maxRounds: 1,
+    research: async () => response([makeEvidence("https://example.com/video-tool")]),
+  });
+  const second = await runAgent({
+    input, context: runContext, repository, maxRounds: 1,
+    research: async () => response([makeEvidence("https://docs.example.com/video-tool")]),
+  });
+  assert.equal(second.response?.signals[0]?.informationGainStatus, "NO_INFORMATION_GAIN");
+  assert.equal(second.knowledgeChanges.length, 0);
+  assert.equal(repository.listPersonalKnowledge(runContext).length, 1);
+});
+
 test("CONFIRMS updates provenance without duplicate knowledge or revision", async () => {
   const repository = new InMemorySignalRepository();
   repository.addPersonalKnowledge(context, {
