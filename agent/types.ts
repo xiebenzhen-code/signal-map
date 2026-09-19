@@ -39,6 +39,7 @@ export type ResearchPlan = {
   resolvedEntities?: QueryPlan["resolvedEntities"];
   topicAnchors?: QueryPlan["topicAnchors"];
   topicKeywords?: QueryPlan["topicKeywords"];
+  topicProfile?: QueryPlan["topicProfile"];
   intent?: IntentClassification;
   freshnessWindow?: ResearchInput["freshnessWindow"];
   retrievalWindows?: QueryPlan["retrievalWindows"];

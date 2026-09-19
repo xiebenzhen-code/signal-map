@@ -6,6 +6,13 @@ export function toRetrievalPlan(plan: ResearchPlan): RetrievalPlan {
     queries: [...plan.queries],
     topicAnchors: plan.topicAnchors ? [...plan.topicAnchors] : undefined,
     topicKeywords: plan.topicKeywords ? [...plan.topicKeywords] : undefined,
+    topicProfile: plan.topicProfile
+      ? {
+          domainAnchors: [...plan.topicProfile.domainAnchors],
+          taskAnchors: [...plan.topicProfile.taskAnchors],
+          genericTerms: [...plan.topicProfile.genericTerms],
+        }
+      : undefined,
     selectedSourceType: plan.selectedSourceType,
     fallbackSourceTypes: plan.fallbackSourceTypes ? [...plan.fallbackSourceTypes] : undefined,
     allowedProviderIds: plan.allowedProviderIds ? [...plan.allowedProviderIds] : undefined,

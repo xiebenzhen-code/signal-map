@@ -142,6 +142,7 @@ export function resolvePipelinePlan(input: ResearchInput, upstream?: RetrievalPl
         coreKeywords: deterministicTerms([input.focusAreas, input.trackedEntities, input.currentQuestions, ...upstreamQueries]),
         topicAnchors: upstream.topicAnchors ?? derivedPlan.topicAnchors,
         topicKeywords: upstream.topicKeywords ?? derivedPlan.topicKeywords,
+        topicProfile: upstream.topicProfile ?? derivedPlan.topicProfile,
         englishKeywords: upstream.topicKeywords ? derivedPlan.englishKeywords : [],
         synonyms: [],
         entities,

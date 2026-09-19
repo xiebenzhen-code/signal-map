@@ -21,6 +21,12 @@ export type VerificationStatus =
 
 export type TopicRelevanceDecision = "MATCH" | "TOPIC_MISMATCH";
 
+export type TopicProfile = {
+  domainAnchors: string[];
+  taskAnchors: string[];
+  genericTerms: string[];
+};
+
 export type TopicRelevance = {
   decision: TopicRelevanceDecision;
   matchedTerms: string[];
@@ -69,6 +75,7 @@ export type QueryPlan = {
   coreKeywords: string[];
   topicAnchors?: string[];
   topicKeywords?: string[];
+  topicProfile?: TopicProfile;
   englishKeywords: string[];
   synonyms: string[];
   entities: string[];
@@ -92,6 +99,7 @@ export type RetrievalPlan = {
   queries: string[];
   topicAnchors?: string[];
   topicKeywords?: string[];
+  topicProfile?: TopicProfile;
   selectedSourceType?: string;
   fallbackSourceTypes?: string[];
   allowedProviderIds?: string[];

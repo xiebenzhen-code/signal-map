@@ -1,4 +1,4 @@
-import type { QueryPlan, ResearchInput } from "./types";
+import type { QueryPlan, ResearchInput, TopicProfile } from "./types";
 import { deduplicateQueries, resolveResearchEntities } from "./entity-resolution.ts";
 
 const expansions: Array<{
@@ -185,6 +185,53 @@ function topicKeywordsFor(input: ResearchInput, englishKeywords: string[], topic
   ), 16);
 }
 
+const genericProfileTerms = [
+  "ai",
+  "artificial intelligence",
+  "model",
+  "models",
+  "multimodal",
+  "multi modal",
+  "observation",
+  "observations",
+  "workflow",
+  "automation",
+  "research",
+  "paper",
+  "dataset",
+  "method",
+  "system",
+];
+
+const domainProfileHints = /\b(video|audio|image|text|code|coding|software|developer|medical|health|finance|financial|education|legal|robotics|marketing|security)\b|视频|音频|图像|文本|代码|软件|医疗|健康|金融|教育|法律|机器人|营销|安全/iu;
+const taskProfileHints = /\b(edit|editing|rough cut|shot selection|multi[- ]?(?:asset|clip)|batch|workflow|automation|generation|detection|classification|retrieval|summarization|translation|production)\b|剪辑|粗剪|镜头|素材|批量|工作流|自动化|生成|检测|分类|检索|摘要|翻译/iu;
+
+function topicProfileFor(
+  input: ResearchInput,
+  topicAnchors: string[],
+  topicKeywords: string[],
+): TopicProfile {
+  const candidates = unique([
+    input.industry,
+    ...topicAnchors,
+    ...topicKeywords,
+  ]).map((value) => value.trim()).filter(Boolean);
+  const words = unique(candidates.flatMap((value) => value.split(/\s+/u)));
+  const domainAnchors = unique([
+    ...candidates.filter((value) => domainProfileHints.test(value)),
+    ...words.filter((value) => domainProfileHints.test(value)),
+  ]);
+  const taskAnchors = unique([
+    ...candidates.filter((value) => taskProfileHints.test(value)),
+    ...words.filter((value) => taskProfileHints.test(value) && !genericProfileTerms.includes(value.toLocaleLowerCase())),
+  ]);
+  return {
+    domainAnchors: domainAnchors.length ? domainAnchors : candidates.slice(0, 1),
+    taskAnchors,
+    genericTerms: genericProfileTerms,
+  };
+}
+
 export function buildDiversifiedQueries(
   topicAnchors: string[] = [],
   topicKeywords: string[] = [],
@@ -319,6 +366,7 @@ export function planQuery(input: ResearchInput): QueryPlan {
   );
   const topicAnchors = topicAnchorsFor(input);
   const topicKeywords = topicKeywordsFor(input, englishKeywords, topicAnchors);
+  const topicProfile = topicProfileFor(input, topicAnchors, topicKeywords);
   const synonyms = unique(matched.flatMap((item) => item.synonyms));
   const entities = unique([
     ...tokens(input.trackedEntities),
@@ -382,6 +430,7 @@ export function planQuery(input: ResearchInput): QueryPlan {
     coreKeywords,
     topicAnchors,
     topicKeywords,
+    topicProfile,
     englishKeywords,
     synonyms,
     entities,

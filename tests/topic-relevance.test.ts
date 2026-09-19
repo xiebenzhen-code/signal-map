@@ -18,6 +18,11 @@ const videoPlan: QueryPlan = {
   changeKeywords: [],
   knowledgeAwareQueries: [],
   searchCombinations: ["AI video editing"],
+  topicProfile: {
+    domainAnchors: ["AI video editing", "video production"],
+    taskAnchors: ["automated rough cut", "shot selection", "multi-asset understanding", "batch processing", "commercial workflow"],
+    genericTerms: ["AI", "model", "multimodal", "observation", "workflow", "automation"],
+  },
   retrievalWindows: ["30d"],
   requestedFreshnessWindow: "30d",
 };
@@ -114,6 +119,29 @@ test("matching arXiv video editing evidence remains eligible for evaluation", ()
   ]), 1, 1);
   assert.equal(evaluation.sufficientEvidence, true);
   assert.equal(evaluation.decision, "STOP");
+});
+
+test("generic AI or multimodal language cannot satisfy a domain-task topic profile", () => {
+  for (const text of [
+    "A generic AI model for multiple observations",
+    "A multimodal research paper with no video editing or workflow task",
+    "A medical AI model for medical imaging",
+  ]) {
+    const relevance = assessTopicRelevance(text, videoPlan);
+    assert.equal(relevance.decision, "TOPIC_MISMATCH", text);
+    assert.equal(relevance.score, 0, text);
+  }
+});
+
+test("domain and task anchors jointly admit matching video evidence", () => {
+  for (const text of [
+    "AI video editing tool release for automated rough cut workflows",
+    "A paper directly studies shot selection for multi-asset video editing",
+  ]) {
+    const relevance = assessTopicRelevance(text, videoPlan);
+    assert.equal(relevance.decision, "MATCH", text);
+    assert.ok(relevance.matchedTerms.length >= 2);
+  }
 });
 
 test("high reliability cannot override a topic mismatch", () => {
