@@ -38,6 +38,7 @@ import type { DetailEnrichmentSummary } from "../source-enrichment/types.ts";
 import { discardResponseBody, throwAfterDiscardingBody } from "../lib/http-response.ts";
 import { recordsFromSignal, type EvidenceRecord } from "../information/rag-records.ts";
 import { assessTopicRelevance } from "./topic-relevance.ts";
+import { isGenericQuestionTerm } from "./topic-relevance.ts";
 import { assessSignalActionability } from "./actionability.ts";
 import type {
   PipelineCounts,
@@ -1455,7 +1456,7 @@ export async function runResearchPipeline(
   });
   markPhase("evidence_started");
   const gapTerms = filterTerms(input.informationGaps);
-  const questionTerms = filterTerms(input.currentQuestions);
+  const questionTerms = filterTerms(input.currentQuestions).filter((term) => !isGenericQuestionTerm(term));
   const focusAreaTerms = filterTerms(input.focusAreas);
   const trackedEntityTerms = entityFilterTerms(input.trackedEntities).filter(
     (term) =>

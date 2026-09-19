@@ -60,6 +60,13 @@ const PROFILE_GENERIC_TERMS = new Set([
 
 const PROFILE_DOMAIN_HINTS = /\b(video|audio|image|text|code|coding|software|developer|medical|health|finance|financial|education|legal|robotics|marketing|security)\b|视频|音频|图像|文本|代码|软件|医疗|健康|金融|教育|法律|机器人|营销|安全/iu;
 const PROFILE_TASK_HINTS = /\b(edit|editing|rough cut|shot selection|multi[- ]?(?:asset|clip)|batch|generation|detection|classification|retrieval|summarization|translation|production)\b|剪辑|粗剪|镜头|素材|批量|生成|检测|分类|检索|摘要|翻译/iu;
+const TASK_SPECIFIC_PATTERN = /\b(video editing|audio editing|rough cut|shot selection|multi[- ]?(?:asset|clip) understanding|batch processing|production|generation|detection|classification|retrieval|summarization|translation)\b|剪辑|粗剪|镜头选择|素材理解|批量处理|工作流|自动化|生成|检测|分类|检索|摘要|翻译/iu;
+const QUESTION_GENERIC_TERMS = new Set([
+  ...PROFILE_GENERIC_TERMS,
+  "video",
+  "editing",
+]);
+const PROFILE_ANCHOR_INSTRUCTION = /排除|告诉我|为什么|值得|优先|不要|避免|只看|有哪些|什么|过去|最近|当前|现在|exclude|tell|why|worth|prefer|avoid|only|what|recent|latest/iu;
 
 function normalize(value: string) {
   return value
@@ -102,19 +109,46 @@ function matches(text: string, term: string) {
   return new RegExp(`(?:^|\\s)${escaped}(?=\\s|$)`, "i").test(text);
 }
 
+function isTaskAnchor(term: string) {
+  const normalized = normalize(term);
+  return normalized.length > 2 && !PROFILE_GENERIC_TERMS.has(normalized) && TASK_SPECIFIC_PATTERN.test(normalized);
+}
+
+function isUsableProfileAnchor(term: string) {
+  const raw = term.trim();
+  const normalized = normalize(raw);
+  return Boolean(normalized) && raw.length <= 80 &&
+    !PROFILE_ANCHOR_INSTRUCTION.test(raw) &&
+    !(normalized.split(" ").length > 8) &&
+    !(raw.length > 24 && /[\u3400-\u9fff]/u.test(raw));
+}
+
+function domainParts(term: string) {
+  const normalized = normalize(term);
+  const parts = normalized.split(" ").filter((part) => /^(video|audio|image|text|code|software|developer|medical|health|finance|education|legal|robotics|marketing|security)$/i.test(part));
+  return parts.length ? parts : [normalized];
+}
+
+export function isGenericQuestionTerm(term: string) {
+  return QUESTION_GENERIC_TERMS.has(normalize(term));
+}
+
 function topicProfile(plan: QueryPlan): { profile: TopicProfile; explicit: boolean } {
   if (plan.topicProfile) {
     const genericTerms = new Set(plan.topicProfile.genericTerms.map(normalize));
-    const expand = (terms: string[]) => [...new Set(terms
-      .flatMap((term) => {
-        const normalized = normalize(term);
-        return [normalized, ...normalized.split(" ")];
-      })
+    const cleanDomainInputs = plan.topicProfile.domainAnchors.filter(isUsableProfileAnchor);
+    const cleanTaskInputs = plan.topicProfile.taskAnchors.filter(isUsableProfileAnchor);
+    const domainAnchors = [...new Set(cleanDomainInputs
+      .flatMap(domainParts)
       .filter((term) => term.length > 1 && !PROFILE_GENERIC_TERMS.has(term) && !genericTerms.has(term)))];
+    const taskAnchors = [...new Set([...cleanDomainInputs, ...cleanTaskInputs]
+      .map(normalize)
+      .filter((term) => isTaskAnchor(term) && !genericTerms.has(term)))];
+    const taskSet = new Set(taskAnchors);
     return {
       profile: {
-        domainAnchors: expand(plan.topicProfile.domainAnchors),
-        taskAnchors: expand(plan.topicProfile.taskAnchors),
+        domainAnchors: domainAnchors.filter((term) => !taskSet.has(term)),
+        taskAnchors,
         genericTerms: [...genericTerms],
       },
       explicit: true,
@@ -158,25 +192,23 @@ export function assessTopicRelevance(text: string, plan: QueryPlan): TopicReleva
     const hasTaskAnchors = profile.taskAnchors.length > 0;
     const domainMatch = matchedDomainAnchors.length > 0;
     const taskMatch = matchedTaskAnchors.length > 0;
-    const queryTermMatch = matchedQueryTerms.length > 0;
-    const decision = hasDomainAnchors && hasTaskAnchors
-      ? domainMatch && taskMatch ? "MATCH" : "TOPIC_MISMATCH"
-      : hasDomainAnchors
-        ? domainMatch || queryTermMatch ? "MATCH" : "TOPIC_MISMATCH"
-        : hasTaskAnchors
-          ? taskMatch || queryTermMatch ? "MATCH" : "TOPIC_MISMATCH"
-          : queryTermMatch ? "MATCH" : "TOPIC_MISMATCH";
-    const reason: TopicRelevanceReason = hasDomainAnchors && hasTaskAnchors
-      ? domainMatch && taskMatch
-        ? "DOMAIN_AND_TASK_ANCHOR_MATCH"
+    const distinctAnchorMatch = matchedDomainAnchors.some((domain) =>
+      matchedTaskAnchors.some((task) => domain !== task),
+    );
+    const decision = hasDomainAnchors && hasTaskAnchors && domainMatch && taskMatch && distinctAnchorMatch
+      ? "MATCH"
+      : "TOPIC_MISMATCH";
+    const reason: TopicRelevanceReason = !hasDomainAnchors
+      ? "MISSING_DOMAIN_ANCHOR"
+      : !hasTaskAnchors
+        ? "MISSING_TASK_ANCHOR"
         : !domainMatch
           ? "MISSING_DOMAIN_ANCHOR"
-          : "MISSING_TASK_ANCHOR"
-      : hasDomainAnchors
-        ? domainMatch ? "DOMAIN_ANCHOR_MATCH" : queryTermMatch ? "LEGACY_QUERY_TERM_MATCH" : "MISSING_DOMAIN_ANCHOR"
-        : hasTaskAnchors
-          ? taskMatch ? "TASK_ANCHOR_MATCH" : queryTermMatch ? "LEGACY_QUERY_TERM_MATCH" : "MISSING_TASK_ANCHOR"
-          : queryTermMatch ? "LEGACY_QUERY_TERM_MATCH" : "PROFILE_HAS_NO_NON_GENERIC_ANCHORS";
+          : !taskMatch
+            ? "MISSING_TASK_ANCHOR"
+            : !distinctAnchorMatch
+              ? "NO_DOMAIN_OR_TASK_ANCHOR_MATCH"
+              : "DOMAIN_AND_TASK_ANCHOR_MATCH";
     return {
       decision,
       reason,

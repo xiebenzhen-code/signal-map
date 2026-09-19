@@ -203,6 +203,10 @@ const genericProfileTerms = [
   "system",
 ];
 
+const genericProfileTermSet = new Set(genericProfileTerms);
+
+const profileInstructionPattern = /排除|告诉我|为什么|值得|优先|不要|避免|只看|有哪些|什么|过去|最近|当前|现在|exclude|tell|why|worth|prefer|avoid|only|what|recent|latest/iu;
+
 const domainProfileHints = /\b(video|audio|image|text|code|coding|software|developer|medical|health|finance|financial|education|legal|robotics|marketing|security)\b|视频|音频|图像|文本|代码|软件|医疗|健康|金融|教育|法律|机器人|营销|安全/iu;
 const taskProfileHints = /\b(edit|editing|rough cut|shot selection|multi[- ]?(?:asset|clip)|batch|workflow|automation|generation|detection|classification|retrieval|summarization|translation|production)\b|剪辑|粗剪|镜头|素材|批量|工作流|自动化|生成|检测|分类|检索|摘要|翻译/iu;
 
@@ -210,24 +214,35 @@ function topicProfileFor(
   input: ResearchInput,
   topicAnchors: string[],
   topicKeywords: string[],
-): TopicProfile {
+): TopicProfile | undefined {
   const candidates = unique([
     input.industry,
     ...topicAnchors,
     ...topicKeywords,
-  ]).map((value) => value.trim()).filter(Boolean);
-  const words = unique(candidates.flatMap((value) => value.split(/\s+/u)));
+  ]).map((value) => value.trim().replace(/\s+/g, " "))
+    .filter((value) => value.length >= 3 && value.length <= 80 && !profileInstructionPattern.test(value));
+  const words = unique(candidates.flatMap((value) => value.split(/\s+/u)))
+    .filter((value) => value.length >= 2 && !genericProfileTermSet.has(value.toLocaleLowerCase()));
+  const taskSpecific = (value: string) =>
+    /\b(video editing|audio editing|rough cut|shot selection|multi[- ]?(?:asset|clip) understanding|batch processing|production|generation|detection|classification|retrieval|summarization|translation)\b|剪辑|粗剪|镜头选择|素材理解|批量处理|工作流|自动化|生成|检测|分类|检索|摘要|翻译/iu.test(value) &&
+    !genericProfileTermSet.has(value.toLocaleLowerCase());
   const domainAnchors = unique([
     ...candidates.filter((value) => domainProfileHints.test(value)),
     ...words.filter((value) => domainProfileHints.test(value)),
   ]);
   const taskAnchors = unique([
-    ...candidates.filter((value) => taskProfileHints.test(value)),
-    ...words.filter((value) => taskProfileHints.test(value) && !genericProfileTerms.includes(value.toLocaleLowerCase())),
+    ...domainAnchors.filter((value) => taskSpecific(value)),
+    ...candidates.filter((value) => taskProfileHints.test(value) && taskSpecific(value)),
+    ...words.filter((value) => taskProfileHints.test(value) && taskSpecific(value)),
   ]);
+  const taskSet = new Set(taskAnchors.map((value) => value.toLocaleLowerCase()));
+  const filteredDomainAnchors = (domainAnchors.length ? domainAnchors : candidates.slice(0, 1))
+    .filter((value) => !taskSet.has(value.toLocaleLowerCase()));
+  if (!filteredDomainAnchors.length || !taskAnchors.length) return undefined;
   return {
-    domainAnchors: domainAnchors.length ? domainAnchors : candidates.slice(0, 1),
-    taskAnchors,
+    domainAnchors: filteredDomainAnchors,
+    taskAnchors: taskAnchors.filter((value, index, values) =>
+      values.findIndex((candidate) => candidate.toLocaleLowerCase() === value.toLocaleLowerCase()) === index),
     genericTerms: genericProfileTerms,
   };
 }

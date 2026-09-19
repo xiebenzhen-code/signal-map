@@ -5,7 +5,7 @@ import { evaluateEvidence } from "../agent/evaluation.ts";
 import { updateKnowledgeFromChanges } from "../agent/knowledge-updater.ts";
 import { InMemorySignalRepository } from "../information/repositories/in-memory.ts";
 import { buildFilteringSummary } from "../research/filtering-summary.ts";
-import { assessTopicRelevance } from "../research/topic-relevance.ts";
+import { assessTopicRelevance, isGenericQuestionTerm } from "../research/topic-relevance.ts";
 import type { QueryPlan, ResearchSignal } from "../research/types.ts";
 
 const videoPlan: QueryPlan = {
@@ -142,6 +142,34 @@ test("generic AI or multimodal language cannot satisfy a domain-task topic profi
   }
 });
 
+test("medical endoscopy video matches only the domain anchor", () => {
+  const relevance = assessTopicRelevance(
+    "An endoscopic video dataset supports AI recognition of colorectal polyposis.",
+    videoPlan,
+  );
+
+  assert.equal(relevance.decision, "TOPIC_MISMATCH");
+  assert.deepEqual(relevance.matchedDomainAnchors, ["video"]);
+  assert.deepEqual(relevance.matchedTaskAnchors, []);
+  assert.equal(relevance.relevanceGatePassed, false);
+});
+
+test("video dataset without editing tasks is a topic mismatch", () => {
+  const relevance = assessTopicRelevance("A video dataset for medical observation", videoPlan);
+  assert.equal(relevance.decision, "TOPIC_MISMATCH");
+  assert.deepEqual(relevance.matchedTaskAnchors, []);
+});
+
+test("task-specific anchors match without relying on generic terms", () => {
+  for (const text of ["AI video editing tool", "video automated rough cut system"]) {
+    const relevance = assessTopicRelevance(text, videoPlan);
+    assert.equal(relevance.decision, "MATCH", text);
+    assert.ok(relevance.matchedDomainAnchors?.length);
+    assert.ok(relevance.matchedTaskAnchors?.length);
+    assert.notDeepEqual(relevance.matchedDomainAnchors, relevance.matchedTaskAnchors);
+  }
+});
+
 test("domain and task anchors jointly admit matching video evidence", () => {
   for (const text of [
     "AI video editing tool release for automated rough cut workflows",
@@ -178,6 +206,13 @@ test("explicit topic profile does not fall back to generic query overlap", () =>
   assert.equal(relevance.matchedQueryTerms?.includes("ai"), false);
   assert.equal(relevance.matchedGenericTerms?.includes("ai"), true);
   assert.equal(relevance.reason, "MISSING_DOMAIN_ANCHOR");
+});
+
+test("generic question terms cannot create positive relevance explanations", () => {
+  for (const term of ["ai", "model", "video"]) {
+    assert.equal(isGenericQuestionTerm(term), true, term);
+  }
+  assert.equal(isGenericQuestionTerm("video editing"), false);
 });
 
 test("topic mismatch is rejected before knowledge persistence", async () => {

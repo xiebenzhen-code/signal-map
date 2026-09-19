@@ -179,6 +179,17 @@ test("full pipeline rejects medical generic-AI overlap instead of accepting it",
   );
 });
 
+test("Agent-built profile keeps domain and task anchors mutually exclusive", () => {
+  const plan = createResearchPlan(input, 1, 5, [], "INITIAL");
+  const domain = new Set(plan.topicProfile?.domainAnchors.map((anchor) => anchor.toLocaleLowerCase()));
+  const task = new Set(plan.topicProfile?.taskAnchors.map((anchor) => anchor.toLocaleLowerCase()));
+  assert.equal([...domain].some((anchor) => task.has(anchor)), false);
+  assert.equal(plan.topicProfile?.domainAnchors.includes("video"), true);
+  assert.equal(plan.topicProfile?.taskAnchors.includes("video"), false);
+  assert.equal(plan.topicProfile?.domainAnchors.some((anchor) => anchor.length > 80), false);
+  assert.equal(plan.topicProfile?.taskAnchors.some((anchor) => anchor.length > 80), false);
+});
+
 test("runtime environment changes do not alter query or routing contract", () => {
   const before = process.env.MODEL_PROVIDER;
   process.env.MODEL_PROVIDER = "runtime-a";
