@@ -110,6 +110,107 @@ function response(signals: ResearchSignal[]): ResearchResponse {
   };
 }
 
+const dedupSourceUrl = `https://example.com/signal-map/p3-dedup/${runKey}`;
+const dedupClaimFingerprint = `p3-dedup-claim-${runKey}`;
+const dedupClaimText = `AI video tool supports multi-asset batch editing ${runKey}.`;
+
+function dedupSignal() {
+  const base = signal({
+    id: `p3-dedup-signal-${runKey}`,
+    title: dedupClaimText,
+    summary: dedupClaimText,
+    sourceUrl: dedupSourceUrl,
+  });
+  return {
+    ...base,
+    claims: base.claims.map((claim) => ({
+      ...claim,
+      claimText: dedupClaimText,
+      canonicalClaimFingerprint: dedupClaimFingerprint,
+      sourceUrl: dedupSourceUrl,
+      evidenceSnippet: dedupClaimText,
+    })),
+  };
+}
+
+test("P3 PostgreSQL stateful E2E deduplicates the same Evidence across runs", {
+  skip: databaseConfigured() ? undefined : "DATABASE_URL not configured",
+}, async () => {
+  const pool = getPostgresPool();
+  await runRagCoreMigration(pool);
+  const context = {
+    authenticatedUserId: `p3-dedup-user-${runKey}`,
+    filterId: `p3-dedup-filter-${runKey}`,
+  };
+  const repositoryA = createPostgresRepository(pool);
+
+  try {
+    const revisionBeforeA = await repositoryA.getResearchContextRevision(context);
+    const runA = await runAgent({
+      input,
+      context,
+      repository: repositoryA,
+      userQuery: "Does this AI video tool support multi-asset batch editing?",
+      runId: `p3-dedup-run-a-${runKey}`,
+      maxRounds: 1,
+      research: async () => response([dedupSignal()]),
+    });
+    const revisionAfterA = await repositoryA.getResearchContextRevision(context);
+    const knowledgeAfterA = await repositoryA.listPersonalKnowledge(context);
+    const evidenceAfterA = (await repositoryA.listEvidence()).filter((record) => record.sourceUrl === dedupSourceUrl);
+
+    assert.equal(runA.status, "completed");
+    assert.equal(runA.response?.signals[0]?.informationGainStatus, "NEW_INFORMATION");
+    assert.equal(runA.knowledgeChanges.length, 1);
+    assert.equal(runA.knowledgeChanges[0]?.classification, "NEW");
+    assert.equal(revisionBeforeA, 1);
+    assert.equal(revisionAfterA, revisionBeforeA + 1);
+    assert.equal(knowledgeAfterA.length, 1);
+    assert.equal(evidenceAfterA.length, 1);
+    assert.equal(evidenceAfterA[0]?.sourceUrl, dedupSourceUrl);
+    assert.equal(evidenceAfterA[0]?.canonicalUrl, dedupSourceUrl);
+
+    const repositoryB = createPostgresRepository(pool);
+    const revisionBeforeB = await repositoryB.getResearchContextRevision(context);
+    const knowledgeBeforeB = await repositoryB.listPersonalKnowledge(context);
+    const evidenceBeforeB = (await repositoryB.listEvidence()).filter((record) => record.sourceUrl === dedupSourceUrl);
+    const runB = await runAgent({
+      input,
+      context,
+      repository: repositoryB,
+      userQuery: "Does this AI video tool support multi-asset batch editing?",
+      runId: `p3-dedup-run-b-${runKey}`,
+      maxRounds: 1,
+      research: async () => response([dedupSignal()]),
+    });
+    const revisionAfterB = await repositoryB.getResearchContextRevision(context);
+    const knowledgeAfterB = await repositoryB.listPersonalKnowledge(context);
+    const evidenceAfterB = (await repositoryB.listEvidence()).filter((record) => record.sourceUrl === dedupSourceUrl);
+
+    assert.equal(runB.status, "completed");
+    assert.equal(runB.response?.signals[0]?.informationGainStatus, "NO_INFORMATION_GAIN");
+    assert.equal(runB.knowledgeChanges.length, 0);
+    assert.equal(revisionBeforeB, revisionAfterA);
+    assert.equal(revisionAfterB, revisionBeforeB);
+    assert.equal(knowledgeBeforeB.length, 1);
+    assert.equal(knowledgeAfterB.length, knowledgeBeforeB.length);
+    assert.equal(evidenceBeforeB.length, 1);
+    assert.equal(evidenceAfterB.length, evidenceBeforeB.length);
+    assert.equal(evidenceAfterB[0]?.id, evidenceAfterA[0]?.id);
+    assert.equal(evidenceAfterB[0]?.canonicalUrl, dedupSourceUrl);
+    assert.equal(dedupClaimFingerprint, String(runA.response?.signals[0]?.claims[0]?.canonicalClaimFingerprint));
+    assert.equal(dedupClaimFingerprint, String(runB.response?.signals[0]?.claims[0]?.canonicalClaimFingerprint));
+  } finally {
+    await pool.query("DELETE FROM research_run_metadata WHERE user_id = $1 AND filter_id = $2", [context.authenticatedUserId, context.filterId]);
+    await pool.query("DELETE FROM personal_knowledge WHERE user_id = $1 AND filter_id = $2", [context.authenticatedUserId, context.filterId]);
+    await pool.query("DELETE FROM research_context_revisions WHERE user_id = $1 AND filter_id = $2", [context.authenticatedUserId, context.filterId]);
+    await pool.query("DELETE FROM evidence WHERE source_url = $1", [dedupSourceUrl]);
+    await pool.query("DELETE FROM claims WHERE claim_text = $1", [dedupClaimText]);
+    await pool.query("DELETE FROM events WHERE id = $1", [`p3-dedup-signal-${runKey}`]);
+    await closePostgresPool();
+  }
+});
+
 test("Phase 4 PostgreSQL Agent memory survives repository recreation and remains isolated", {
   skip: databaseConfigured() ? undefined : "DATABASE_URL not configured",
 }, async () => {
@@ -199,7 +300,8 @@ test("Phase 4 PostgreSQL Agent memory survives repository recreation and remains
       maxRounds: 1,
       research: async () => response([signal()]),
     });
-    assert.equal(confirm.knowledgeChanges[0]?.classification, "CONFIRMS");
+    assert.equal(confirm.response?.signals[0]?.informationGainStatus, "NO_INFORMATION_GAIN");
+    assert.equal(confirm.knowledgeChanges.length, 0);
     assert.equal(await repositoryB.getResearchContextRevision(contextA), beforeConfirmRevision);
     assert.equal((await repositoryB.listPersonalKnowledge(contextA)).length, beforeConfirmCount);
 
@@ -210,12 +312,20 @@ test("Phase 4 PostgreSQL Agent memory survives repository recreation and remains
       userQuery: "Did Model X launch?",
       runId: `phase4-run-update-${runKey}`,
       maxRounds: 1,
-      research: async () => response([signal({
-        id: `phase4-event-update-${runKey}`,
-        title: `Model X launch expanded ${runKey}`,
-        eventStatus: "UPDATED",
-        knowledgeStatus: "UPDATED",
-      })]),
+      research: async () => {
+        const updatedClaim = `Model X is now released with expanded access ${runKey}.`;
+        return response([signal({
+          id: `phase4-event-update-${runKey}`,
+          title: `Model X launch expanded ${runKey}`,
+          eventStatus: "UPDATED",
+          knowledgeStatus: "UPDATED",
+          claims: signal().claims.map((claim) => ({
+            ...claim,
+            claimText: updatedClaim,
+            evidenceSnippet: updatedClaim,
+          })),
+        })]);
+      },
     });
     assert.equal(update.knowledgeChanges[0]?.classification, "UPDATES");
     assert.ok((await repositoryB.getResearchContextRevision(contextA)) > beforeConfirmRevision);
