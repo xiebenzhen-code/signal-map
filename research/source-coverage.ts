@@ -1,7 +1,15 @@
 import type { ProviderSearchFailureCode } from "../social/providers/types.ts";
 
+export type ProviderRejectionSample = {
+  title: string;
+  urlPresent: boolean;
+  rejectionStage: "normalization" | "candidate_admission";
+  rejectionReason: string;
+};
+
 export type SourceExecutionOutcome = {
   source: string;
+  providerId?: string;
   execution:
     | "searched_with_results"
     | "searched_no_results"
@@ -13,6 +21,11 @@ export type SourceExecutionOutcome = {
   resultCount: number;
   rawResultCount?: number;
   normalizedCandidateCount?: number;
+  rejectedRawCount?: number;
+  normalizationRejectionReasons?: Record<string, number>;
+  normalizationRejectedSamples?: ProviderRejectionSample[];
+  candidateAdmissionRejectionReasons?: Record<string, number>;
+  candidateAdmissionRejectedSamples?: ProviderRejectionSample[];
   requestCount?: number;
   failureCode?: ProviderSearchFailureCode;
 };

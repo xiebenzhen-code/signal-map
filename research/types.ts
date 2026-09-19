@@ -6,6 +6,7 @@ import type { SignalClassification, SignalCluster, SourceRole as FusionSourceRol
 import type { ContentQuality, SignalPresentation } from "../content-processing/types.ts";
 import type { DetailEnrichmentMetadata, DetailEnrichmentSummary, SourceCapabilityRole } from "../source-enrichment/types.ts";
 import type { ActionabilityStatus, ExecutionEntry, InformationGainStatus } from "./actionability.ts";
+import type { ProviderRejectionSample } from "./source-coverage.ts";
 
 export type SourceType =
   | "primary"
@@ -366,6 +367,11 @@ export type SourceStageDiagnostics = {
   pipelineRetrievedCount: number;
   displayedCount: number;
   rejectionReasons?: Record<string, number>;
+  rejectedRawCount?: number;
+  normalizationRejectionReasons?: Record<string, number>;
+  normalizationRejectedSamples?: ProviderRejectionSample[];
+  candidateAdmissionRejectionReasons?: Record<string, number>;
+  candidateAdmissionRejectedSamples?: ProviderRejectionSample[];
 };
 
 type ResearchSourceOutcome = {

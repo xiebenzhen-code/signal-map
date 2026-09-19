@@ -30,7 +30,7 @@ import {
   type NoveltyClusterMember,
 } from "./novelty-attribution.ts";
 import { translateSignalsForPresentation } from "./translation.ts";
-import { buildSourceCoverage, type SourceExecutionOutcome } from "./source-coverage.ts";
+import { buildSourceCoverage, type ProviderRejectionSample, type SourceExecutionOutcome } from "./source-coverage.ts";
 import { fuseSignal } from "../signal-fusion/fusion.ts";
 import type { FusionEvidence } from "../signal-fusion/types.ts";
 import { enrichDetail, maxDetailFetchesPerRound, shouldEnrichDetail, sourceCapability } from "../source-enrichment/index.ts";
@@ -492,7 +492,89 @@ async function companyRegistrySearch(plan: QueryPlan): Promise<LiveItem[]> {
   return settled.flatMap((result) => result.status === "fulfilled" && result.value ? [result.value] : []);
 }
 
-async function arxivSearch(query: string): Promise<LiveItem[]> {
+export type ArxivRawResult = {
+  title?: string;
+  url?: string;
+  snippet?: string;
+  publishedAt?: string;
+};
+
+export type ArxivNormalizationResult = {
+  items: LiveItem[];
+  rawResultCount: number;
+  normalizedCandidateCount: number;
+  rejectedRawCount: number;
+  normalizationRejectionReasons: Record<string, number>;
+  normalizationRejectedSamples: ProviderRejectionSample[];
+};
+
+function rejectionSample(
+  result: { title?: string; url?: string },
+  rejectionStage: ProviderRejectionSample["rejectionStage"],
+  rejectionReason: string,
+): ProviderRejectionSample {
+  return {
+    title: (result.title || "").replace(/\s+/g, " ").trim().slice(0, 160) || "[untitled]",
+    urlPresent: Boolean(result.url?.trim()),
+    rejectionStage,
+    rejectionReason,
+  };
+}
+
+export function normalizeArxivResults(rawResults: ArxivRawResult[], retrievedAt = new Date().toISOString()): ArxivNormalizationResult {
+  const normalizationRejectionReasons: Record<string, number> = {};
+  const normalizationRejectedSamples: ProviderRejectionSample[] = [];
+  const incrementRejected = (result: ArxivRawResult, reason: string) => {
+    normalizationRejectionReasons[reason] = (normalizationRejectionReasons[reason] || 0) + 1;
+    if (normalizationRejectedSamples.length < 3) {
+      normalizationRejectedSamples.push(rejectionSample(result, "normalization", reason));
+    }
+  };
+  const items = rawResults.flatMap((result, index) => {
+    const title = result.title?.trim() || "";
+    const url = result.url?.trim() || "";
+    if (!title) {
+      incrementRejected(result, "missing_title");
+      return [];
+    }
+    if (!url) {
+      incrementRejected(result, "missing_url");
+      return [];
+    }
+    try {
+      new URL(url);
+    } catch {
+      incrementRejected(result, "invalid_url");
+      return [];
+    }
+    return [{
+      id: `arxiv-${index}-${url}`,
+      title,
+      url,
+      snippet: result.snippet?.trim() || title,
+      source: "arXiv",
+      publishedAt: result.publishedAt?.trim() || undefined,
+      firstSeenAt: retrievedAt,
+      retrievedAt,
+      dataOrigin: "live",
+      channel: "官方",
+      authority: 82,
+      origin: "official",
+    } satisfies LiveItem];
+  });
+  return {
+    items,
+    rawResultCount: rawResults.length,
+    normalizedCandidateCount: items.length,
+    rejectedRawCount: rawResults.length - items.length,
+    normalizationRejectionReasons,
+    normalizationRejectedSamples,
+  };
+}
+
+type DirectProviderSearchResult = ArxivNormalizationResult | LiveItem[];
+
+async function arxivSearch(query: string): Promise<ArxivNormalizationResult> {
   const retrievedAt = new Date().toISOString();
   const params = new URLSearchParams({
     search_query: `all:${query}`,
@@ -507,56 +589,67 @@ async function arxivSearch(query: string): Promise<LiveItem[]> {
   });
   if (!response.ok) await throwAfterDiscardingBody(response, new Error(`arXiv returned ${response.status}`));
   const xml = await response.text();
-  return [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/gi)].map((match) => {
+  const rawResults = [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/gi)].map((match) => {
     const block = match[1];
     return {
       title: xmlValue(block, "title"),
       url: xmlValue(block, "id"),
       snippet: xmlValue(block, "summary"),
-      source: "arXiv",
       publishedAt: xmlValue(block, "published") || xmlValue(block, "updated"),
-      firstSeenAt: retrievedAt,
-      retrievedAt,
-      dataOrigin: "live",
-      channel: "官方",
-      authority: 82,
-      origin: "official",
-    } satisfies LiveItem;
-  }).filter((item) => item.title && item.url);
+    } satisfies ArxivRawResult;
+  });
+  return normalizeArxivResults(rawResults, retrievedAt);
 }
 
 async function searchDirectProvider(
   source: string,
-  search: () => Promise<LiveItem[]>,
+  search: () => Promise<DirectProviderSearchResult>,
   sourceType: SourceType,
   plan: QueryPlan,
   failures: string[],
   providerId?: string,
 ) {
   try {
-    const rawItems = await search();
+    const providerResult = await search() as DirectProviderSearchResult;
+    const normalization = Array.isArray(providerResult) ? undefined : providerResult;
+    const rawItems: LiveItem[] = normalization
+      ? normalization.items
+      : (providerResult as LiveItem[]);
     const discoveryProvider = providerId ? sourceCapability(providerId) === "DISCOVERY" : false;
-    const normalizedItems = rawItems
-      // Discovery providers have already applied their own source query. Do not
-      // discard their candidates a second time with the generic keyword gate;
-      // detail enrichment and the existing downstream gates remain authoritative.
-      .filter((item) => discoveryProvider || relevant(item, plan))
-      .map((item) => ({
+    const candidateAdmissionRejectionReasons: Record<string, number> = {};
+    const candidateAdmissionRejectedSamples: ProviderRejectionSample[] = [];
+    const normalizedItems = rawItems.flatMap((item) => {
+      if (discoveryProvider || relevant(item, plan)) {
+        return [{
         ...item,
         sourceType,
         providerId,
         sourceCapability: providerId ? sourceCapability(providerId) : undefined,
-      }));
+        }];
+      }
+      const reason = "TOPIC_MISMATCH";
+      candidateAdmissionRejectionReasons[reason] = (candidateAdmissionRejectionReasons[reason] || 0) + 1;
+      if (candidateAdmissionRejectedSamples.length < 3) {
+        candidateAdmissionRejectedSamples.push(rejectionSample(item, "candidate_admission", reason));
+      }
+      return [];
+    });
     const items = unique(normalizedItems);
     return {
       items,
       outcome: {
+        providerId,
         source,
         execution: items.length ? "searched_with_results" as const : "searched_no_results" as const,
         searched: true,
         resultCount: items.length,
-        rawResultCount: rawItems.length,
-        normalizedCandidateCount: normalizedItems.length,
+        rawResultCount: normalization?.rawResultCount ?? rawItems.length,
+        normalizedCandidateCount: normalization?.normalizedCandidateCount ?? rawItems.length,
+        rejectedRawCount: normalization?.rejectedRawCount ?? 0,
+        normalizationRejectionReasons: normalization?.normalizationRejectionReasons,
+        normalizationRejectedSamples: normalization?.normalizationRejectedSamples,
+        candidateAdmissionRejectionReasons,
+        candidateAdmissionRejectedSamples,
         requestCount: 1,
       },
     };
@@ -565,6 +658,7 @@ async function searchDirectProvider(
     return {
       items: [] as ResearchCandidate[],
       outcome: {
+        providerId,
         source,
         execution: "failed" as const,
         searched: true,
@@ -1004,13 +1098,12 @@ function buildSourceDiagnostics(
   eligibleByProvider: Record<string, number>,
 ): SourceStageDiagnostics[] {
   const providerIds = new Set([
-    ...sourceOutcomes
-      .map((outcome) => outcome.source.toLowerCase() === "product hunt" ? "product-hunt" : "")
+    ...sourceOutcomes.map((outcome) => outcome.providerId || (outcome.source.toLowerCase() === "product hunt" ? "product-hunt" : ""))
       .filter(Boolean),
     ...candidates.map((candidate) => candidate.providerId).filter(Boolean) as string[],
   ]);
   return [...providerIds].map((providerId) => {
-    const outcome = sourceOutcomes.find((candidate) =>
+    const outcome = sourceOutcomes.find((candidate) => candidate.providerId === providerId) || sourceOutcomes.find((candidate) =>
       providerId === "product-hunt" && candidate.source.toLowerCase() === "product hunt",
     );
     const providerCandidates = candidates.filter((candidate) => candidate.providerId === providerId);
@@ -1021,6 +1114,11 @@ function buildSourceDiagnostics(
       providerId,
       rawProviderResultCount: outcome?.rawResultCount ?? outcome?.resultCount ?? 0,
       normalizedCandidateCount: outcome?.normalizedCandidateCount ?? outcome?.resultCount ?? 0,
+      rejectedRawCount: outcome?.rejectedRawCount ?? 0,
+      normalizationRejectionReasons: outcome?.normalizationRejectionReasons,
+      normalizationRejectedSamples: outcome?.normalizationRejectedSamples,
+      candidateAdmissionRejectionReasons: outcome?.candidateAdmissionRejectionReasons,
+      candidateAdmissionRejectedSamples: outcome?.candidateAdmissionRejectedSamples,
       admittedCandidateCount: providerCandidates.length,
       enrichmentEligibleCount: eligibleByProvider[providerId] || 0,
       detailAttempted,
@@ -1383,11 +1481,17 @@ export async function runResearchPipeline(
     pipelineActualQueries: plan.searchCombinations.slice(0, 10),
     providerOutcomes: sourceOutcomes.map((outcome) => ({
       providerName: outcome.source,
+      providerId: outcome.providerId,
       execution: outcome.execution,
       searched: outcome.searched,
       resultCount: outcome.resultCount,
       rawResultCount: outcome.rawResultCount,
       normalizedCandidateCount: outcome.normalizedCandidateCount,
+      rejectedRawCount: outcome.rejectedRawCount,
+      normalizationRejectionReasons: outcome.normalizationRejectionReasons,
+      normalizationRejectedSamples: outcome.normalizationRejectedSamples,
+      candidateAdmissionRejectionReasons: outcome.candidateAdmissionRejectionReasons,
+      candidateAdmissionRejectedSamples: outcome.candidateAdmissionRejectedSamples,
       requestCount: outcome.requestCount,
       failureCode: outcome.failureCode,
     })),

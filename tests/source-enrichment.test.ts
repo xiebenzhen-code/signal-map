@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { cleanContent, extractClaim } from "../content-processing/index.ts";
 import { enrichDetail, maxDetailFetchesPerRound, shouldEnrichDetail, sourceCapability } from "../source-enrichment/index.ts";
-import { runResearchPipeline } from "../research/research-pipeline.ts";
+import { normalizeArxivResults, runResearchPipeline } from "../research/research-pipeline.ts";
 import type { ResearchInput } from "../research/types.ts";
 
 const baseInput = (overrides: Partial<ResearchInput> = {}): ResearchInput => ({
@@ -18,6 +18,152 @@ const baseInput = (overrides: Partial<ResearchInput> = {}): ResearchInput => ({
   evidenceHistory: "",
   freshnessWindow: "7d",
   ...overrides,
+});
+
+const arxivFeed = (entries: string[]) => `<feed>${entries.map((entry) => `<entry>${entry}</entry>`).join("")}</feed>`;
+
+const matchingArxivEntry = (overrides = "") => `
+  <title>Automated rough cut for multi-asset video editing</title>
+  <id>https://arxiv.org/abs/2601.12345</id>
+  <summary>A video editing workflow selects shots and creates an automated rough cut from multiple assets.</summary>
+  <published>2026-09-01T00:00:00Z</published>
+  ${overrides}
+`;
+
+const videoRetrievalPlan = {
+  queries: ["AI video editing automated rough cut"],
+  topicProfile: {
+    domainAnchors: ["video editing"],
+    taskAnchors: ["automated rough cut", "shot selection"],
+    genericTerms: ["ai", "model", "workflow"],
+  },
+  selectedSourceType: "PRIMARY",
+  fallbackSourceTypes: [],
+  allowedProviderIds: ["arxiv"],
+  reason: "provider normalization fixture",
+};
+
+test("normalizeArxivResults admits a valid arXiv result", () => {
+  const result = normalizeArxivResults([{
+    title: "Automated rough cut for video editing",
+    url: "https://arxiv.org/abs/2601.12345",
+    snippet: "A method for selecting shots in a video editing workflow.",
+    publishedAt: "2026-09-01T00:00:00Z",
+  }], "2026-09-19T00:00:00Z");
+
+  assert.equal(result.rawResultCount, 1);
+  assert.equal(result.normalizedCandidateCount, 1);
+  assert.equal(result.rejectedRawCount, 0);
+  assert.deepEqual(result.normalizationRejectionReasons, {});
+  assert.equal(result.items[0]?.source, "arXiv");
+});
+
+test("normalizeArxivResults reports invalid raw results instead of dropping them silently", () => {
+  const result = normalizeArxivResults([
+    { url: "https://arxiv.org/abs/2601.1", snippet: "missing title" },
+    { title: "Missing URL", snippet: "missing link" },
+    { title: "Invalid URL", url: "not-a-url", snippet: "invalid link" },
+  ]);
+
+  assert.equal(result.rawResultCount, 3);
+  assert.equal(result.normalizedCandidateCount, 0);
+  assert.equal(result.rejectedRawCount, 3);
+  assert.deepEqual(result.normalizationRejectionReasons, {
+    missing_title: 1,
+    missing_url: 1,
+    invalid_url: 1,
+  });
+  assert.equal(result.normalizationRejectedSamples.length, 3);
+  assert.deepEqual(result.normalizationRejectedSamples.map((sample) => sample.rejectionStage), [
+    "normalization",
+    "normalization",
+    "normalization",
+  ]);
+  assert.equal(result.normalizationRejectedSamples[0]?.urlPresent, true);
+});
+
+test("arXiv fixture exposes normalization failures in the pipeline trace", async (t) => {
+  t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => {
+    if (new URL(String(target)).hostname === "export.arxiv.org") {
+      return new Response(arxivFeed([
+        "<summary>entry without title or id</summary>",
+        "<title>Entry without a link</title><summary>missing id</summary>",
+      ]), { status: 200, headers: { "content-type": "application/atom+xml" } });
+    }
+    return new Response("", { status: 404 });
+  });
+
+  const result = await runResearchPipeline(baseInput({
+    industry: "AI video tools",
+    focusAreas: "AI video editing",
+    currentQuestions: "Which AI video editing tools are worth testing?",
+  }), undefined, undefined, videoRetrievalPlan);
+  const diagnostics = result.sourceDiagnostics?.find((item) => item.providerId === "arxiv");
+
+  assert.equal(diagnostics?.rawProviderResultCount, 2);
+  assert.equal(diagnostics?.normalizedCandidateCount, 0);
+  assert.equal(diagnostics?.rejectedRawCount, 2);
+  assert.deepEqual(diagnostics?.normalizationRejectionReasons, {
+    missing_title: 1,
+    missing_url: 1,
+  });
+  assert.equal(diagnostics?.normalizationRejectedSamples?.length, 2);
+  assert.equal(diagnostics?.candidateAdmissionRejectionReasons && Object.keys(diagnostics.candidateAdmissionRejectionReasons).length, 0);
+});
+
+test("arXiv normalization and candidate admission remain separate", async (t) => {
+  t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => {
+    if (new URL(String(target)).hostname === "export.arxiv.org") {
+      return new Response(arxivFeed([
+        `<title>Medical AI model for endoscopic video observations</title>
+         <id>https://arxiv.org/abs/2601.54321</id>
+         <summary>A medical imaging model analyzes endoscopic observations.</summary>
+         <published>2026-09-01T00:00:00Z</published>`,
+      ]), { status: 200, headers: { "content-type": "application/atom+xml" } });
+    }
+    return new Response("", { status: 404 });
+  });
+
+  const result = await runResearchPipeline(baseInput({
+    industry: "AI video tools",
+    focusAreas: "AI video editing",
+    currentQuestions: "Which AI video editing tools are worth testing?",
+  }), undefined, undefined, videoRetrievalPlan);
+  const diagnostics = result.sourceDiagnostics?.find((item) => item.providerId === "arxiv");
+
+  assert.equal(diagnostics?.rawProviderResultCount, 1);
+  assert.equal(diagnostics?.normalizedCandidateCount, 1);
+  assert.equal(diagnostics?.rejectedRawCount, 0);
+  assert.equal(diagnostics?.admittedCandidateCount, 0);
+  assert.deepEqual(diagnostics?.normalizationRejectionReasons, {});
+  assert.deepEqual(diagnostics?.candidateAdmissionRejectionReasons, { TOPIC_MISMATCH: 1 });
+  assert.equal(diagnostics?.candidateAdmissionRejectedSamples?.[0]?.rejectionStage, "candidate_admission");
+  assert.equal(result.signals.length, 0);
+});
+
+test("arXiv XML fixture reaches aggregation when normalization and admission pass", async (t) => {
+  t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => {
+    if (new URL(String(target)).hostname === "export.arxiv.org") {
+      return new Response(arxivFeed([matchingArxivEntry()]), {
+        status: 200,
+        headers: { "content-type": "application/atom+xml" },
+      });
+    }
+    return new Response("", { status: 404 });
+  });
+
+  const result = await runResearchPipeline(baseInput({
+    industry: "AI video tools",
+    focusAreas: "AI video editing",
+    currentQuestions: "Which AI video editing tools are worth testing?",
+  }), undefined, undefined, videoRetrievalPlan);
+  const diagnostics = result.sourceDiagnostics?.find((item) => item.providerId === "arxiv");
+
+  assert.equal(diagnostics?.rawProviderResultCount, 1);
+  assert.equal(diagnostics?.normalizedCandidateCount, 1);
+  assert.equal(diagnostics?.admittedCandidateCount, 1);
+  assert.equal(diagnostics?.candidateAdmissionRejectionReasons && Object.keys(diagnostics.candidateAdmissionRejectionReasons).length, 0);
+  assert.ok(result.counts.candidates >= 1);
 });
 
 test("discovery sources are marked for detail enrichment while evidence sources are not", () => {
