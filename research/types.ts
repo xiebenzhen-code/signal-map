@@ -21,6 +21,18 @@ export type VerificationStatus =
 
 export type TopicRelevanceDecision = "MATCH" | "TOPIC_MISMATCH";
 
+export type TopicRelevanceReason =
+  | "DOMAIN_AND_TASK_ANCHOR_MATCH"
+  | "DOMAIN_ANCHOR_MATCH"
+  | "TASK_ANCHOR_MATCH"
+  | "MISSING_DOMAIN_ANCHOR"
+  | "MISSING_TASK_ANCHOR"
+  | "NO_DOMAIN_OR_TASK_ANCHOR_MATCH"
+  | "PROFILE_HAS_NO_NON_GENERIC_ANCHORS"
+  | "LEGACY_QUERY_TERM_MATCH"
+  | "NO_QUERY_TERM_MATCH"
+  | "NO_TOPIC_TERMS";
+
 export type TopicProfile = {
   domainAnchors: string[];
   taskAnchors: string[];
@@ -29,7 +41,14 @@ export type TopicProfile = {
 
 export type TopicRelevance = {
   decision: TopicRelevanceDecision;
+  reason?: TopicRelevanceReason;
   matchedTerms: string[];
+  matchedDomainAnchors?: string[];
+  matchedTaskAnchors?: string[];
+  matchedGenericTerms?: string[];
+  matchedQueryTerms?: string[];
+  relevanceGateApplied?: boolean;
+  relevanceGatePassed?: boolean;
   score: number;
 };
 
@@ -294,6 +313,7 @@ export type FilteringSummary = {
     decision: "displayed" | "filtered";
     reason?: FilteringReason;
     explanation: string;
+    topicRelevance?: Pick<TopicRelevance, "decision" | "reason" | "matchedDomainAnchors" | "matchedTaskAnchors" | "matchedGenericTerms" | "matchedQueryTerms" | "relevanceGateApplied" | "relevanceGatePassed">;
     sources: Array<{ publisher: string; sourceUrl: string }>;
   }>;
   summaryText: string;

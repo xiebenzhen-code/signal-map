@@ -145,6 +145,40 @@ test("Agent planning carries one topic profile through pipeline resolution and e
   assert.deepEqual(response.queryPlan.topicProfile, agentPlan.topicProfile);
 });
 
+test("full pipeline rejects medical generic-AI overlap instead of accepting it", async (t) => {
+  const agentPlan = createResearchPlan(input, 1, 5, [], "INITIAL");
+  const retrievalPlan = toRetrievalPlan(agentPlan);
+  t.mock.method(globalThis, "fetch", async (url: string | URL | Request) => {
+    if (String(url).startsWith("https://www.producthunt.com/search?")) {
+      return new Response('<a href="/products/medical-ai-model">AI model for colorectal imaging</a>', { status: 200 });
+    }
+    return new Response("", { status: 200 });
+  });
+
+  const phases: Array<{ phase: string; diagnostic?: Record<string, unknown> }> = [];
+  const response = await runResearchPipeline(input, undefined, {
+    onPhase: (event) => phases.push(event),
+  }, {
+    ...retrievalPlan,
+    selectedSourceType: "PRIMARY",
+    allowedProviderIds: ["product-hunt"],
+  });
+  const searchStarted = phases.find((event) => event.phase === "search_started");
+
+  assert.equal(searchStarted?.diagnostic?.topicProfileApplied, true);
+  assert.deepEqual(response.queryPlan.topicProfile, agentPlan.topicProfile);
+  assert.deepEqual(response.signals, []);
+  assert.equal(response.filteringSummary?.filteredReasons.topicMismatch, 1);
+  assert.equal(response.filteringSummary?.filteringDetails?.[0]?.topicRelevance?.decision, "TOPIC_MISMATCH");
+  assert.equal(
+    assessTopicRelevance(
+      "ERCPMP-Gx: A General AI Model for Multiple Observations. A medical imaging model for colorectal polyp detection.",
+      response.queryPlan,
+    ).decision,
+    "TOPIC_MISMATCH",
+  );
+});
+
 test("runtime environment changes do not alter query or routing contract", () => {
   const before = process.env.MODEL_PROVIDER;
   process.env.MODEL_PROVIDER = "runtime-a";

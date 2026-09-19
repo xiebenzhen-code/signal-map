@@ -102,6 +102,12 @@ test("medical AI evidence is rejected by topic relevance for a video editing que
   );
 
   assert.equal(relevance.decision, "TOPIC_MISMATCH");
+  assert.equal(relevance.reason, "MISSING_DOMAIN_ANCHOR");
+  assert.deepEqual(relevance.matchedDomainAnchors, []);
+  assert.deepEqual(relevance.matchedTaskAnchors, []);
+  assert.ok(relevance.matchedGenericTerms?.includes("ai"));
+  assert.equal(relevance.relevanceGateApplied, true);
+  assert.equal(relevance.relevanceGatePassed, false);
   assert.deepEqual(relevance.matchedTerms, []);
   assert.equal(relevance.score, 0);
 });
@@ -113,6 +119,9 @@ test("matching arXiv video editing evidence remains eligible for evaluation", ()
   );
 
   assert.equal(relevance.decision, "MATCH");
+  assert.equal(relevance.reason, "DOMAIN_AND_TASK_ANCHOR_MATCH");
+  assert.equal(relevance.relevanceGateApplied, true);
+  assert.equal(relevance.relevanceGatePassed, true);
   assert.ok(relevance.matchedTerms.includes("video"));
   const evaluation = evaluateEvidence(response([
     signal({ topicRelevance: relevance }),
@@ -161,6 +170,14 @@ test("high reliability cannot override a topic mismatch", () => {
 
   assert.equal(evaluation.sufficientEvidence, false);
   assert.equal(evaluation.decision, "STOP");
+});
+
+test("explicit topic profile does not fall back to generic query overlap", () => {
+  const relevance = assessTopicRelevance("A generic AI model for multiple observations", videoPlan);
+  assert.equal(relevance.decision, "TOPIC_MISMATCH");
+  assert.equal(relevance.matchedQueryTerms?.includes("ai"), false);
+  assert.equal(relevance.matchedGenericTerms?.includes("ai"), true);
+  assert.equal(relevance.reason, "MISSING_DOMAIN_ANCHOR");
 });
 
 test("topic mismatch is rejected before knowledge persistence", async () => {

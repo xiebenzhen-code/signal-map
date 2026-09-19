@@ -663,6 +663,7 @@ function unique(values) {
 }
 
 function keptSource(signal) {
+  const topicRelevance = signal?.topicRelevance;
   return {
     title: unavailable(signal?.title),
     url: unavailable(signal?.sourceUrl),
@@ -675,6 +676,14 @@ function keptSource(signal) {
     whyKept: unavailable(signal?.why || signal?.whyItMatters),
     reliability: unavailable(signal?.reliabilityScore ?? signal?.truth),
     verificationStatus: unavailable(signal?.verificationStatus),
+    topicRelevanceStatus: unavailable(topicRelevance?.decision),
+    topicRelevanceReason: unavailable(topicRelevance?.reason),
+    matchedDomainAnchors: unavailable(topicRelevance?.matchedDomainAnchors),
+    matchedTaskAnchors: unavailable(topicRelevance?.matchedTaskAnchors),
+    matchedGenericTerms: unavailable(topicRelevance?.matchedGenericTerms),
+    matchedQueryTerms: unavailable(topicRelevance?.matchedQueryTerms),
+    relevanceGateApplied: unavailable(topicRelevance?.relevanceGateApplied),
+    relevanceGatePassed: unavailable(topicRelevance?.relevanceGatePassed),
     evidence: Array.isArray(signal?.claims)
       ? signal.claims.slice(0, 3).map((claim) => ({
           claim: unavailable(claim.claimText),
@@ -699,6 +708,7 @@ function evidenceItems(signals) {
             publisher: claim.publisher,
             snippet: claim.evidenceSnippet,
             verificationStatus: claim.verificationStatus,
+            topicRelevance: signal.topicRelevance,
           }];
         }
         return sources.slice(0, 3).map((source) => ({
@@ -708,6 +718,7 @@ function evidenceItems(signals) {
           publisher: source.publisher,
           snippet: source.evidenceSnippet,
           verificationStatus: source.verificationStatus,
+          topicRelevance: signal.topicRelevance,
         }));
       })
     : []);
@@ -1304,7 +1315,15 @@ function buildQualityReport({ query, signalRun, agentRuns, secondRun }) {
         .map((item) => ({
           title: unavailable(item.title),
           reason: unavailable(item.reason),
-          explanation: unavailable(item.explanation),
+            explanation: unavailable(item.explanation),
+            topicRelevanceStatus: unavailable(item.topicRelevance?.decision),
+            topicRelevanceReason: unavailable(item.topicRelevance?.reason),
+            matchedDomainAnchors: unavailable(item.topicRelevance?.matchedDomainAnchors),
+            matchedTaskAnchors: unavailable(item.topicRelevance?.matchedTaskAnchors),
+            matchedGenericTerms: unavailable(item.topicRelevance?.matchedGenericTerms),
+            matchedQueryTerms: unavailable(item.topicRelevance?.matchedQueryTerms),
+            relevanceGateApplied: unavailable(item.topicRelevance?.relevanceGateApplied),
+            relevanceGatePassed: unavailable(item.topicRelevance?.relevanceGatePassed),
           sources: Array.isArray(item.sources)
             ? item.sources.slice(0, 3).map((source) => ({
                 publisher: unavailable(source.publisher),
@@ -1401,6 +1420,14 @@ function buildQualityReport({ query, signalRun, agentRuns, secondRun }) {
       domain: item.source ? domainFromUrl(item.source) : "unavailable",
       publisher: unavailable(item.publisher),
       verificationStatus: unavailable(item.verificationStatus),
+      topicRelevanceStatus: unavailable(item.topicRelevance?.decision),
+      topicRelevanceReason: unavailable(item.topicRelevance?.reason),
+      matchedDomainAnchors: unavailable(item.topicRelevance?.matchedDomainAnchors),
+      matchedTaskAnchors: unavailable(item.topicRelevance?.matchedTaskAnchors),
+      matchedGenericTerms: unavailable(item.topicRelevance?.matchedGenericTerms),
+      matchedQueryTerms: unavailable(item.topicRelevance?.matchedQueryTerms),
+      relevanceGateApplied: unavailable(item.topicRelevance?.relevanceGateApplied),
+      relevanceGatePassed: unavailable(item.topicRelevance?.relevanceGatePassed),
       snippet: unavailable(item.snippet),
     })),
     result: {
@@ -1537,6 +1564,9 @@ function qualityMarkdown(report) {
           `   - published / freshness: ${compact(source.publishedAt)} / ${compact(source.freshness)}`,
           `   - why kept: ${compact(source.whyKept, 350)}`,
           `   - reliability / evidence: ${compact(source.reliability)} / ${compact(source.verificationStatus)}`,
+          `   - topic relevance: ${compact(source.topicRelevanceStatus)} / ${compact(source.topicRelevanceReason)}`,
+          `   - relevance matches: ${compact({ domain: source.matchedDomainAnchors, task: source.matchedTaskAnchors, generic: source.matchedGenericTerms, query: source.matchedQueryTerms })}`,
+          `   - relevance gate: ${compact({ applied: source.relevanceGateApplied, passed: source.relevanceGatePassed })}`,
         ])
       : ["unavailable"]),
     "",

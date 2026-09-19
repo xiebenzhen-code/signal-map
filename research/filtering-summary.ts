@@ -16,8 +16,8 @@ const emptyReasons = (): FilteringSummary["filteredReasons"] => ({
 });
 
 function primaryFilteringReason(signal: ResearchSignal): FilteringReason | null {
-  if (signal.contentQuality === "INSUFFICIENT_CONTENT") return "INSUFFICIENT_CONTENT";
   if (signal.topicRelevance?.decision === "TOPIC_MISMATCH") return "TOPIC_MISMATCH";
+  if (signal.contentQuality === "INSUFFICIENT_CONTENT") return "INSUFFICIENT_CONTENT";
   if (signal.verificationStatus === "conflicting" || signal.signalType === "CONFLICT") return "UNRESOLVED_CONFLICT";
   if (signal.knowledgeStatus === "KNOWN" || signal.signalType === "NOISE" || (signal.duplicateRatio ?? 0) >= 0.5) return "DUPLICATE";
   if (signal.timestampStatus !== "valid" || signal.freshnessScore < 25) return "STALE";
@@ -103,6 +103,18 @@ export function buildFilteringSummary(input: {
           : reason
             ? userFacingLabel(reason)
             : "暂未达到展示条件",
+        topicRelevance: signal.topicRelevance
+          ? {
+              decision: signal.topicRelevance.decision,
+              reason: signal.topicRelevance.reason,
+              matchedDomainAnchors: signal.topicRelevance.matchedDomainAnchors,
+              matchedTaskAnchors: signal.topicRelevance.matchedTaskAnchors,
+              matchedGenericTerms: signal.topicRelevance.matchedGenericTerms,
+              matchedQueryTerms: signal.topicRelevance.matchedQueryTerms,
+              relevanceGateApplied: signal.topicRelevance.relevanceGateApplied,
+              relevanceGatePassed: signal.topicRelevance.relevanceGatePassed,
+            }
+          : undefined,
         sources: (signal.sources ?? []).map((source) => ({ publisher: source.publisher, sourceUrl: source.sourceUrl })),
       };
     }),
