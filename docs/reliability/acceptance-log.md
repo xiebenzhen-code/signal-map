@@ -220,7 +220,7 @@ Rules:
 
 - Date: 2026-09-20
 - Test / Run ID: real Query /api/signals signals-54bf2eb3-34e2-4921-b45c-9c3905c72e40
-- Commit: PENDING
+- Commit: 0ce661f6f79e89c5aef5880f2c2571d2cbac694a
 - Layer: Intent classification / Source Selection / frontend natural-research-intent
 - Symptom / Failure: AI 视频剪辑工具研究 Query 被错误分类为 JOB_SEARCH，industry 被判为 “AI 招聘与职业机会”，导致 Source Selection 偏向 job/company 来源而非研究型来源。
 - Evidence: Query 含“工作流”；前端 inferredIndustry 正则 `/岗位|招聘|投递|求职|工作|职位|job|career/` 以子串匹配命中“工作”；该 industry 被 backend classifyIntent（读取 filterContext.industry）并入分类文本，“招聘”命中 JOB_SEARCH(0.92) 覆盖了裸 Query 本应命中的 PRODUCT_UPDATE(0.88)。修正前：classifyIntent(裸 query)=PRODUCT_UPDATE，带被污染 industry 后=JOB_SEARCH。
