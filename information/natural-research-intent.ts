@@ -44,7 +44,10 @@ function inferredSourceScope(options: NaturalResearchOptions): SourceScope {
 }
 
 function inferredIndustry(query: string) {
-  if (/岗位|招聘|投递|求职|工作|职位|job|career/i.test(query)) return "AI 招聘与职业机会";
+  // JOB_SEARCH must reflect explicit employment intent; a bare substring like
+  // "工作" inside "工作流" (workflow) must not classify a tool-research query
+  // as a job search. Aligned with intent/classifier.ts JOB_SEARCH rule set.
+  if (/岗位|职位|招聘|求职|投递|内推|job|jobs|career|hiring|opening/i.test(query)) return "AI 招聘与职业机会";
   if (/视频|AIGC|剪辑|生成|影像/i.test(query)) return "AI 视频与创作者工具";
   if (/模型|agent|智能体|工具|AI/i.test(query)) return "人工智能与产品工具";
   return "个人关注方向";

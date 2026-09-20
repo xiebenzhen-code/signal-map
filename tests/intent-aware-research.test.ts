@@ -10,6 +10,7 @@ import { assessActionability } from "../intent/actionability.ts";
 import { mapIntentOutput } from "../intent/output-mapping.ts";
 import { runResearchPipeline } from "../research/research-pipeline.ts";
 import type { ResearchInput, ResearchResponse, ResearchSignal } from "../research/types.ts";
+import { inferNaturalResearchDraft } from "../information/natural-research-intent.ts";
 
 const baseInput: ResearchInput = {
   identity: "AI product builder",
@@ -280,4 +281,69 @@ test("personal knowledge changes relevance path but does not replace external re
   assert.match(receivedKnownInformation, /planning mode/);
   assert.equal(result.response?.intent?.primaryIntent, "PRODUCT_UPDATE");
   assert.equal(result.rounds, 1);
+});
+
+const REAL_AI_VIDEO_RESEARCH_QUERY =
+  "过去 30 天内，AI 辅助视频剪辑与自动化领域有哪些真正值得我测试的新发布、模型、工具或工作流更新？" +
+  "重点关注多素材理解、自动粗剪、镜头选择、批量处理和可商用工作流。" +
+  "优先官方或一手来源，排除纯营销、重复转载和只有概念没有可验证功能的内容。";
+
+test("frontend draft maps an AI video tool research query to a research industry, not a job industry", () => {
+  const draft = inferNaturalResearchDraft(REAL_AI_VIDEO_RESEARCH_QUERY);
+  assert.notEqual(draft.industry, "AI 招聘与职业机会");
+  assert.match(draft.industry, /视频|创作者|工具|人工智能/);
+  assert.equal(draft.focusAreas.some((area) => area.includes("岗位")), false);
+});
+
+test("AI tool research queries are never JOB_SEARCH, while explicit job queries stay JOB_SEARCH", () => {
+  const tool = classifyIntent({ userQuery: "最近有哪些值得测试的 AI 视频剪辑工具？", relatedKnowledge: [] });
+  const job = classifyIntent({ userQuery: "最近有哪些值得投递的 AIGC 岗位？", relatedKnowledge: [] });
+  const model = classifyIntent({ userQuery: "OpenAI 最近有哪些新模型或 API 值得测试？", relatedKnowledge: [] });
+  const hiring = classifyIntent({ userQuery: "最近有哪些公司招聘 AI workflow engineer？", relatedKnowledge: [] });
+  const real = classifyIntent({ userQuery: REAL_AI_VIDEO_RESEARCH_QUERY, relatedKnowledge: [] });
+
+  assert.notEqual(tool.primaryIntent, "JOB_SEARCH");
+  assert.equal(job.primaryIntent, "JOB_SEARCH");
+  assert.notEqual(model.primaryIntent, "JOB_SEARCH");
+  assert.equal(hiring.primaryIntent, "JOB_SEARCH");
+  assert.notEqual(real.primaryIntent, "JOB_SEARCH");
+  assert.equal(real.primaryIntent, "PRODUCT_UPDATE");
+});
+
+test("frontend industry feeds backend intent without forcing JOB_SEARCH for AI tool research", () => {
+  const draft = inferNaturalResearchDraft(REAL_AI_VIDEO_RESEARCH_QUERY);
+  const intent = classifyIntent({
+    userQuery: REAL_AI_VIDEO_RESEARCH_QUERY,
+    filterContext: {
+      industry: draft.industry,
+      focusAreas: draft.focusAreas.join(", "),
+      currentQuestions: REAL_AI_VIDEO_RESEARCH_QUERY,
+    },
+    relatedKnowledge: [],
+  });
+  assert.notEqual(intent.primaryIntent, "JOB_SEARCH");
+  assert.equal(draft.industry.includes("招聘与职业"), false);
+});
+
+test("AI tool research intent selects research source types and builds research queries, not job queries", () => {
+  const draft = inferNaturalResearchDraft(REAL_AI_VIDEO_RESEARCH_QUERY);
+  const intent = classifyIntent({ userQuery: REAL_AI_VIDEO_RESEARCH_QUERY, relatedKnowledge: [] });
+  assert.notEqual(intent.primaryIntent, "JOB_SEARCH");
+  const profile = sourceProfileForIntent(intent.primaryIntent);
+
+  const researchTypes = new Set(["OFFICIAL", "PRIMARY", "GENERAL_WEB", "GITHUB", "PAPER"]);
+  assert.ok(profile.preferredSourceTypes.some((type) => researchTypes.has(type)));
+
+  const plan = createResearchPlan({
+    ...baseInput,
+    industry: draft.industry,
+    focusAreas: draft.focusAreas.join(", "),
+    currentQuestions: REAL_AI_VIDEO_RESEARCH_QUERY,
+  }, 1, 5, [], "INITIAL", undefined, intent, profile);
+  assert.equal(plan.queries.some((query) => /open roles|careers|job board|apply/i.test(query)), false);
+  assert.ok(plan.queries.some((query) => /release|official|changelog|product|github|技术|模型/i.test(query)));
+
+  const selection = selectSource({ strategy: "INITIAL", sourceProfile: profile });
+  assert.notEqual(selection.primarySourceType, "COMPANY_CAREERS");
+  assert.notEqual(selection.primarySourceType, "JOB_BOARD");
 });

@@ -215,3 +215,17 @@ Rules:
 - Minimal Fix: Add explicit `evidenceRecords` to research responses; derive produced, evaluated, accepted, cumulative, rejected, and final counts from stable EvidenceRecord identities; keep provider candidate counts diagnostic-only; expose the same fields in quality artifacts.
 - Re-test Result: Targeted ResearchRunState, AgentRunner, RAG contract, RetrievalPlan, and SourceSelection tests passed; full test suite passed with only the two pre-existing DB-configuration skips; typecheck, API build, and related lint passed.
 - Status: PASS
+
+## 2026-09-20 — Intent / Source Selection — AI Tool Research vs Job Search
+
+- Date: 2026-09-20
+- Test / Run ID: real Query /api/signals signals-54bf2eb3-34e2-4921-b45c-9c3905c72e40
+- Commit: PENDING
+- Layer: Intent classification / Source Selection / frontend natural-research-intent
+- Symptom / Failure: AI 视频剪辑工具研究 Query 被错误分类为 JOB_SEARCH，industry 被判为 “AI 招聘与职业机会”，导致 Source Selection 偏向 job/company 来源而非研究型来源。
+- Evidence: Query 含“工作流”；前端 inferredIndustry 正则 `/岗位|招聘|投递|求职|工作|职位|job|career/` 以子串匹配命中“工作”；该 industry 被 backend classifyIntent（读取 filterContext.industry）并入分类文本，“招聘”命中 JOB_SEARCH(0.92) 覆盖了裸 Query 本应命中的 PRODUCT_UPDATE(0.88)。修正前：classifyIntent(裸 query)=PRODUCT_UPDATE，带被污染 industry 后=JOB_SEARCH。
+- Root Cause: information/natural-research-intent.ts 的 inferredIndustry 用子串“工作”判定就业意图，把“工作流(workflow)”误当 job；后端把 industry 标签并入 intent 分类文本，放大了这次误判。
+- Minimal Fix: 前端 inferredIndustry 就业正则去掉“工作”，并对齐后端 classifyIntent 的显式就业词集合：`/岗位|职位|招聘|求职|投递|内推|job|jobs|career|hiring|opening/`。仅凭 workflow / tool / release / commercial / test 不再触发 JOB_SEARCH。
+- Regression: intent-aware-research.test.ts 新增 A–E 用例（AI 工具研究→research，投递岗位/招聘→JOB_SEARCH，前端 draft industry 不含“AI 招聘与职业机会”，链路 industry→intent 非 JOB_SEARCH，Source Selection 选研究来源、QueryPlan 不含 job 查询）。intent-aware 13 PASS，source-selector 9 PASS；typecheck、lint、git diff --check 通过。
+- Real E2E: POST /api/signals HTTP 200；body industry=“AI 视频与创作者工具”；intent=PRODUCT_UPDATE(0.88, secondary=TOOL_DISCOVERY)；sourceSelectionReason=“PRODUCT_UPDATE + INITIAL 无明确实体，先使用 GENERAL_WEB 发现候选，再用 OFFICIAL / PRIMARY 验证”；allowedProviders=[public-web,product-hunt,hacker-news,huggingface]；无 JS 异常。
+- Status: LOCKED
