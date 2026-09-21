@@ -1,5 +1,5 @@
-import { handleResearchAgent } from "@/backend/handlers";
+import { proxyApiRequest } from "@/backend/api-proxy";
 
 export async function POST(request: Request) {
-  return handleResearchAgent(request);
+  return proxyApiRequest(request);
 }

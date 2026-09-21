@@ -1,5 +1,5 @@
-import { handlePostgresTransportProbe } from "@/backend/postgres-transport-probe";
+import { proxyApiRequest } from "@/backend/api-proxy";
 
 export async function POST(request: Request) {
-  return handlePostgresTransportProbe(request);
+  return proxyApiRequest(request);
 }

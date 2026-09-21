@@ -1,5 +1,5 @@
-import { handleControlGoals } from "@/backend/handlers";
+import { proxyApiRequest } from "@/backend/api-proxy";
 
 export async function GET(request: Request) {
-  return handleControlGoals(request);
+  return proxyApiRequest(request);
 }

@@ -1,5 +1,5 @@
-import { handleControlKnowledge } from "@/backend/handlers";
+import { proxyApiRequest } from "@/backend/api-proxy";
 
 export async function GET(request: Request) {
-  return handleControlKnowledge(request);
+  return proxyApiRequest(request);
 }

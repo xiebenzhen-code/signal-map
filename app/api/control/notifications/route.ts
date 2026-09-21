@@ -1,5 +1,5 @@
-import { handleControlNotifications } from "@/backend/handlers";
+import { proxyApiRequest } from "@/backend/api-proxy";
 
 export async function GET(request: Request) {
-  return handleControlNotifications(request);
+  return proxyApiRequest(request);
 }

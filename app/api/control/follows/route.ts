@@ -1,9 +1,9 @@
-import { handleControlFollows } from "@/backend/handlers";
+import { proxyApiRequest } from "@/backend/api-proxy";
 
 export async function GET(request: Request) {
-  return handleControlFollows(request);
+  return proxyApiRequest(request);
 }
 
 export async function POST(request: Request) {
-  return handleControlFollows(request);
+  return proxyApiRequest(request);
 }

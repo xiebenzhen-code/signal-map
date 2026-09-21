@@ -1,6 +1,5 @@
-import { handleControlGoals } from "@/backend/handlers";
+import { proxyApiRequest } from "@/backend/api-proxy";
 
-export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
-  const params = await context.params;
-  return handleControlGoals(request, params.id);
+export async function GET(request: Request) {
+  return proxyApiRequest(request);
 }

@@ -1,6 +1,5 @@
-import { handleControlNotificationRead } from "@/backend/handlers";
+import { proxyApiRequest } from "@/backend/api-proxy";
 
-export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
-  const params = await context.params;
-  return handleControlNotificationRead(request, params.id);
+export async function POST(request: Request) {
+  return proxyApiRequest(request);
 }
