@@ -303,3 +303,46 @@ Rules:
 - Regression: tests/agent-runner.test.ts（33）+ tests/public-alpha-research.test.ts（11）PASS。
 - Real E2E: /api/signals 在零证据 deadline 下返回 HTTP 200、needs_more_evidence、reason=deadline_exhausted_no_evidence（而非硬失败）。
 - Status: LOCKED
+
+## 2026-09-21 — Content Enrichment Calibration (TDD)
+
+- Date: 2026-09-21
+- Commit: PENDING
+- Layer: Detail enrichment / SourceEnrichment / content-quality
+- Symptom / Failure: 真实 E2E 里相关 HN 候选（Palmier Pro、Mosaic，均 topicRelevance MATCH、有 canonicalUrl）因 canonicalUrl 从未进入 detail enrichment，detailAttempted=0，正文始终为 title-only → contentQuality=INSUFFICIENT_CONTENT → displayed=0。FIRST LOSS STAGE=INSUFFICIENT_CONTENT。
+- Root Cause: shouldEnrichDetail 仅对 DISCOVERY provider（product-hunt/huggingface）开放，HN（EVIDENCE）等带真实 canonicalUrl 的相关候选永不抓正文；enrichDiscoveryCandidates 的 remainingBudgetMs 守卫在 deadline 近耗尽时把 enrichment 饿死（真实 run budget=0）。
+- Fix: detail-enricher.ts 新增 isSafeDetailUrl（SSRF 最小约束：仅 http/https，拒 localhost/loopback/private/link-local/file/data）；shouldEnrichDetail 扩展为"DISCOVERY 保持 或 （相关 EVIDENCE 候选 + canonicalUrl 安全 + 内容不足）"；enrichDetail 新增通用 enrichGenericDetail（抓安全 canonicalUrl、提取正文，fail-soft，无正文/太簿则保持 INSUFFICIENT_CONTENT）；pipeline 传入 url + isRelevant。
+- Regression: tests/detail-enrichment.test.ts 新增 A–F + URL safety + pipeline B/C（A 相关HN+url→eligible；D TOPIC_MISMATCH→不富集；F 无url→不富集；E DISCOVERY 保持；E2 同 URL 只 fetch 一次；URL safety 拒 localhost/127/169.254/file/data；B detail 成功→content 越过 INSUFFICIENT（含可验证主张）；C detail 失败 fail-soft 不伪造正文、保持 INSUFFICIENT、pipeline 不崩）。detail-enrichment 8 PASS；source-enrichment 14、topic-relevance 13、retrieval-coverage 6、intent-aware 13、retrieval-plan-contract 9 PASS；typecheck、lint、api:build、git diff --check、full suite（408 pass / 0 fail）全绿。
+- Real E2E（signals-bac0eebf-ea62-4cbf-af1c-dd2a29e08c62）：raw=2（HN）、admitted=2、**enrichmentEligible=2 但 detailAttempted=0**（enrichDiscoveryCandidates 首迭代因 remainingBudgetMs=0 立即 break，此前搜索消耗 25s deadline）→ 真实 canonicalUrl 未被抓取 → content 仍 INSUFFICIENT_CONTENT(2)、evidence=2、finalEvidence=0、displayed=0。机制经 mock 验证生效；真实 run 被既有 enrichment budget 守卫饿死。
+- New FIRST LOSS STAGE（真实 run）: INSUFFICIENT_CONTENT —— 但现在是"enrichment 未获 budget 而根本没抓正文"，非机制内判定。
+- Status: PARTIAL（机制 CODE-PATH VERIFIED via mock；真实 canonicalUrl detailAttempted=0，未达 LOCKED 要求的"真实 detailAttempted>0 + detailSuccess>0"。下一步为调整 enrichment budget 守卫使真实 run 能执行 enrichment——触及 deadline/budget，需用户授权，不在本轮范围）
+
+## 2026-09-21 — Budget Allocation Calibration — Detail Enrichment Reserve
+
+- Date: 2026-09-21
+- Commit: PENDING
+- Layer: Worker-deadline budget allocation / detail enrichment reserve
+- Symptom / Failure: Content Enrichment 修复后真实 E2E 仍 detailAttempted=0。时间线审计：search 阶段（general-web 4 查询在两引擎不可达时全量超时）消耗 ~30s，远超 25s deadline，enrichment 开始时 remainingMs<=0。
+- Root Cause: FIRST BUDGET STARVATION POINT = search 阶段。enrichment 的 remainingBudgetMs = min(12000, max(0, remaining - 7000)) 在检索超时时已经=0；且 7000ms post 保留对真实后处理（实测 ~30ms）是 ~230 倍。
+- Fix: 引入基于实测的 reserve——DETAIL_FETCH_RESERVE_MS=8000（2×现实 detail 抓取~4s）、POST_PROCESSING_RESERVE_MS=2500（post 实测 30ms 的安全下限）、PLANNING_MARGIN_MS=2500、RETRIEVAL_RESERVATION_MS=13000。general-web/community 属 luxury 发现层，当 remainingMS() <= RETRIEVAL_RESERVATION_MS 时不再启动新请求（don't-start-new-request guard）；enrichment post-reserve 降为实测 floor（2500 而非 7000）。total deadline 25s 不变。
+- Regression: tests/budget-allocation.test.ts 新增 A–D（A 充足预算→enrichment 实际执行；B 预算紧张→luxury 发现让位且 enrichment 仍有执行窗口；C 无 eligible→充足预算下 retrieval 维持现状；D detail 抓取失败 fail-soft 不崩）。budget 4 PASS；agent-runner 33、public-alpha-research 11（E/F 零证据 deadline 与 Evidence>0 不回归）、detail-enrichment 8、source-enrichment 14、topic-relevance 13、retrieval-coverage 6、intent-aware 13、retrieval-plan-contract 9 PASS；typecheck、lint、api:build、git diff --check 通过。
+- Real E2E（signals-ed67831b-8b02-4327-b9a6-ebe11b3b7b5d）：search 从 30029ms→1613ms（general-web 守卫生效），**detailAttempted=1**（修复前 0），detail_fetch durationMs=10014（用满 10s resolver timeout），detailSucceeded=0、detailFailed=1（github.com/palmier-io/palmier-pro 本机 curl ~4.9s 但 pipeline fetch 超 10s）。后处理完成、response 返回。
+- NEW FIRST LOSS STAGE: INSUFFICIENT_CONTENT —— 但现在原因是 canonical detail fetch 真实失败（github 在本环境 >10s resolver timeout），不再是"从未获得执行窗口"。按 PHASE 8 在此停止，不追下一层。
+- 判定: Budget Allocation = LOCKED（PASS1 总 deadline 不变；PASS2 detailAttempted>0；PASS4 后处理完成；PASS5 零证据 deadline 回归全绿；PASS6 单次 enrichment timeout fail-soft）。Content Enrichment = PARTIAL（PASS3 detailSuccess=0——github canonical 在本环境 10s 内抓不全）。
+- Status: Budget Allocation LOCKED / Content Enrichment PARTIAL。
+
+## 2026-09-21 — Canonical Detail Fetch Calibration
+
+- Date: 2026-09-21
+- Commit: PENDING
+- Layer: Detail enrichment canonical fetch / budget allocation
+- Symptom / Failure: 上轮真实 E2E detailAttempted=1 但 detailSucceeded=0（github canonical 10s 超时）；本轮并行 enrichment 曾导致 WORKER_DEADLINE 硬失败。
+- Root Cause: FIRST FAILED OPERATION = github.com/palmier-io/palmier-pro TCP connect 超时（headers 从未到达，AbortError @10s；raw TCP family4 connect 12s 超时，family6 ENOTFOUND）——本沙箱对 github 间歇不可达（curl 偶发 ~5s 成功，undici 常超时），非 resolver body-read/decode bug、非 timeout 过小。mosaic.so/example.com undici 正常（headers 1.95s/0.7s）。并行 Promise.allSettled 会等待挂起 fetch 推过 deadline → WORKER_DEADLINE。
+- Fix: 撤销并行 enrichment（回到 budget 尊重 sequential）；保留 budget floor（POST_PROCESSING_RESERVE_MS=2500）；对 PH/HF（不可靠 luxury 发现层）加 RETRIEVAL_RESERVATION_MS=13000 守卫（HN eligible 来源恒跑）。total deadline 25s 不变。
+- Regression: tests/detail-enrichment.test.ts B2（两 eligible 一通一达→两者尝试、可达者成功）+ budget-allocation A-D；detail-enrichment 9、budget 4、retrieval-coverage 6、agent-runner 33、public-alpha 11 全 PASS；full suite 410 pass/0 fail；typecheck、lint、api:build、git diff --check 通过。
+- Real E2E（signals-f1689eac-e408-4de3-b128-53e3854ea534）：**detailAttempted=2、detailSucceeded=2**（Palmier + Mosaic canonical 均真实抓取成功），无 WORKER_DEADLINE，后处理完成。
+- New FIRST LOSS STAGE:
+  - Palmier（github）：contentQuality 越过 INSUFFICIENT_CONTENT → 现为 **STALE**（发布于 2025-07-23，超出"过去 30 天"窗口）——合法 freshness 过滤。
+  - Mosaic（mosaic.so）：**INSUFFICIENT_CONTENT**（claim 契约：落地页缺动作动词）——符合 Content Quality Contract。
+- 判定: Canonical Detail Fetch = LOCKED（真实 canonical fetch SUCCESS、regression 全绿、fail-soft 保持）。Content Enrichment 升级：content-quality 不再错误杀死相关候选（Palmier 越过 content-insufficient），但 displayed 仍 0 因合法 freshness/claim。Budget Allocation 需 full suite + commit + ledger + push 后才正式工程 LOCKED。
+- Status: Canonical Detail Fetch LOCKED；Content Enrichment content-layer LOCKED（displayed 受合法 freshness/claim 限制）。
