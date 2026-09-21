@@ -114,6 +114,27 @@ function isTaskAnchor(term: string) {
   return normalized.length > 2 && !PROFILE_GENERIC_TERMS.has(normalized) && TASK_SPECIFIC_PATTERN.test(normalized);
 }
 
+// Morphological + qualifier tolerance so a real-language variant of a task
+// concept (e.g. "Agentic Video Editing", "video editor") can match a task
+// anchor ("AI video editing"). Strictly scoped to the profile's task anchors,
+// so a bare "AI" or "video" still cannot satisfy the task half.
+function taskConceptStem(value: string) {
+  return value
+    .toLocaleLowerCase()
+    .replace(/\b(?:agentic|ai[- ]?(?:assisted|powered|driven|native)?|artificial[- ]intelligence)\b/g, " ")
+    .replace(/\bedit(?:or|ing|s|ed)?\b/g, "edit")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function matchesTaskVariant(textStem: string, taskStem: string) {
+  const index = textStem.indexOf(taskStem);
+  if (index < 0) return false;
+  const preceding = textStem.slice(Math.max(0, index - 32), index);
+  return !(/\b(?:no|not|without|none)\s*$/i.test(preceding) || /(?:无|没有|不是|不含)\s*$/u.test(preceding));
+}
+
 function isUsableProfileAnchor(term: string) {
   const raw = term.trim();
   const normalized = normalize(raw);
@@ -191,10 +212,15 @@ export function assessTopicRelevance(text: string, plan: QueryPlan): TopicReleva
     const hasDomainAnchors = profile.domainAnchors.length > 0;
     const hasTaskAnchors = profile.taskAnchors.length > 0;
     const domainMatch = matchedDomainAnchors.length > 0;
-    const taskMatch = matchedTaskAnchors.length > 0;
+    const taskTextStem = taskConceptStem(normalizedText);
+    const variantTaskMatch = profile.taskAnchors.some((anchor) => {
+      const stem = taskConceptStem(normalize(anchor));
+      return Boolean(stem) && matchesTaskVariant(taskTextStem, stem);
+    });
+    const taskMatch = matchedTaskAnchors.length > 0 || variantTaskMatch;
     const distinctAnchorMatch = matchedDomainAnchors.some((domain) =>
       matchedTaskAnchors.some((task) => domain !== task),
-    );
+    ) || (domainMatch && variantTaskMatch);
     const decision = hasDomainAnchors && hasTaskAnchors && domainMatch && taskMatch && distinctAnchorMatch
       ? "MATCH"
       : "TOPIC_MISMATCH";

@@ -208,11 +208,45 @@ test("explicit topic profile does not fall back to generic query overlap", () =>
   assert.equal(relevance.reason, "MISSING_DOMAIN_ANCHOR");
 });
 
+const calibrationPlan: QueryPlan = {
+  ...videoPlan,
+  topicProfile: {
+    domainAnchors: ["AI video editing", "video production"],
+    taskAnchors: ["AI video editing", "automated rough cut", "shot selection", "multi-asset understanding", "batch processing", "commercial workflow"],
+    genericTerms: ["AI", "model", "multimodal", "observation", "workflow", "automation"],
+  },
+};
+
 test("generic question terms cannot create positive relevance explanations", () => {
   for (const term of ["ai", "model", "video"]) {
     assert.equal(isGenericQuestionTerm(term), true, term);
   }
   assert.equal(isGenericQuestionTerm("video editing"), false);
+});
+
+test("AI video editing language variants pass while unrelated variants remain mismatches", () => {
+  const variants = [
+    "Palmier Pro - macOS video editor built for AI",
+    "Launch HN: Mosaic (YC W25) - Agentic Video Editing",
+    "Automated rough cut and multi-asset understanding for AI video editing",
+  ];
+  for (const text of variants) {
+    const relevance = assessTopicRelevance(text, calibrationPlan);
+    assert.equal(relevance.decision, "MATCH", text);
+    assert.equal(relevance.relevanceGatePassed, true, text);
+  }
+
+  for (const text of [
+    "Coding Agents with an Obstacle-Aware Harness for Safe Robot Manipulation",
+    "Can 4D Foundation Models Remember?",
+    "A general multimodal model for language, vision and audio understanding",
+    "A multimodal research paper with no video editing or workflow task",
+    "An endoscopic video dataset supports AI recognition of colorectal polyposis.",
+  ]) {
+    const relevance = assessTopicRelevance(text, calibrationPlan);
+    assert.equal(relevance.decision, "TOPIC_MISMATCH", text);
+    assert.equal(relevance.relevanceGatePassed, false, text);
+  }
 });
 
 test("topic mismatch is rejected before knowledge persistence", async () => {
