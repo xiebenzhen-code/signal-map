@@ -68,6 +68,51 @@ test("anonymous signals use the real pipeline and never substitute demo records"
   assert.ok(response.headers.getSetCookie().some((cookie) => cookie.startsWith("signal_map_guest=") && /HttpOnly/i.test(cookie)));
 });
 
+test("signals return needs_more_evidence when the deadline expires after zero evidence", async (t) => {
+  const prior = process.env.SIGNAL_MAP_GUEST_SECRET;
+  process.env.SIGNAL_MAP_GUEST_SECRET = "test-only-guest-signing-secret";
+  t.after(() => { if (prior === undefined) delete process.env.SIGNAL_MAP_GUEST_SECRET; else process.env.SIGNAL_MAP_GUEST_SECRET = prior; });
+  let currentTime = 2_000_000;
+  let exhausted = false;
+  const traceLines: string[] = [];
+  t.mock.method(Date, "now", () => currentTime);
+  t.mock.method(console, "info", (line: string) => { traceLines.push(line); });
+  t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => {
+    if (!exhausted) {
+      exhausted = true;
+      currentTime += 25_000;
+    }
+    return emptyNetworkResponse(target);
+  });
+
+  const response = await handleBackendRequest(new Request("https://signal.benzhenlab.com/api/signals", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "https://signal.benzhenlab.com",
+      "X-Signal-Map-Request-Id": "deadline-zero-evidence-test",
+    },
+    body: JSON.stringify(input),
+  }));
+  const body = await response.json() as {
+    status?: string;
+    reason?: string;
+    signals?: unknown[];
+    sourceStatus?: unknown[];
+  };
+  const traces = traceLines
+    .map((line) => JSON.parse(line) as { requestId?: string; errorCode?: string })
+    .filter((entry) => entry.requestId === "deadline-zero-evidence-test");
+
+  assert.equal(response.status, 200);
+  assert.equal(body.status, "needs_more_evidence");
+  assert.equal(body.reason, "deadline_exhausted_no_evidence");
+  assert.deepEqual(body.signals, []);
+  assert.ok(Array.isArray(body.sourceStatus));
+  assert.ok(traces.some((entry) => entry.errorCode === "WORKER_DEADLINE"));
+  assert.equal(traces.some((entry) => entry.errorCode === "UNKNOWN_RESEARCH_FAILURE"), false);
+});
+
 test("signals degrade invalid sessions to anonymous research", async (t) => {
   const keys = ["SIGNAL_MAP_GUEST_SECRET", "NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"] as const;
   const previous = keys.map((key) => process.env[key]);

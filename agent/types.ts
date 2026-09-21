@@ -162,6 +162,7 @@ export type AgentStep = {
 
 export type AgentRunResult = {
   status: "completed" | "failed" | "needs_more_evidence";
+  reason?: string;
   rounds: number;
   response?: ResearchResponse;
   plan: ResearchPlan;

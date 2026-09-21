@@ -245,6 +245,45 @@ test("planning WORKER_DEADLINE after evidence returns cumulative result", async 
   assert.equal(result.response?.signals.flatMap((item) => item.claims).length, 1);
 });
 
+test("deadline after an empty research response returns needs_more_evidence with the deadline reason", async (t) => {
+  let currentTime = 1_000_000;
+  let calls = 0;
+  const phases: Array<Parameters<NonNullable<Parameters<typeof runAgent>[0]["onPhase"]>>[0]> = [];
+  t.mock.method(Date, "now", () => currentTime);
+
+  const result = await runAgent({
+    input,
+    maxRounds: 2,
+    deadlineAt: currentTime + 10_000,
+    onPhase: (event) => phases.push(event),
+    research: async () => {
+      calls += 1;
+      currentTime += 10_000;
+      return response([]);
+    },
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(result.status, "needs_more_evidence");
+  assert.equal(result.reason, "deadline_exhausted_no_evidence");
+  assert.deepEqual(result.response?.signals, []);
+  assert.ok(phases.some((event) => event.errorCode === "WORKER_DEADLINE"));
+  assert.equal(phases.some((event) => event.errorCode === "UNKNOWN_RESEARCH_FAILURE"), false);
+});
+
+test("unexpected exception with no evidence remains failed", async () => {
+  const result = await runAgent({
+    input,
+    research: async () => {
+      throw Object.assign(new Error("unexpected provider defect"), { code: "UNEXPECTED_TEST_FAILURE" });
+    },
+  });
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.response, undefined);
+  assert.equal(result.reason, undefined);
+});
+
 test("primary attempt source evidence is merged before empty fallback", async () => {
   let calls = 0;
   const phases: Array<Parameters<NonNullable<Parameters<typeof runAgent>[0]["onPhase"]>>[0]> = [];

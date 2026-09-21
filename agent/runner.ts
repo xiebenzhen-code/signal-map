@@ -336,6 +336,33 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
           skippedNextRoundDueToBudget: true,
         }));
       }
+      if (errorCode === "WORKER_DEADLINE" && preservedResponse) {
+        const snapshot = budget.snapshot();
+        const reason = "deadline_exhausted_no_evidence";
+        const diagnostic = budgetDiagnostics(snapshot, {
+          round,
+          stage: "deadline_degrade_without_evidence",
+          deadlineDegradedGracefully: true,
+          skippedNextRoundDueToBudget: true,
+          reason,
+        });
+        markPhase("budget_checked", false, 0, errorCode, diagnostic);
+        markPhase("agent_finished", true, 0, errorCode, diagnostic);
+        add("RESEARCH", "needs_more_evidence", { round }, { reason }, error instanceof Error ? error.message : "unknown error");
+        add("COMPLETE", "needs_more_evidence", { round }, { reason });
+        return {
+          status: "needs_more_evidence",
+          reason,
+          rounds,
+          response: preservedResponse,
+          plan,
+          evaluation,
+          knowledgeChanges: allKnowledgeChanges,
+          attention: [],
+          steps,
+          trace,
+        };
+      }
       markPhase("agent_finished", false, undefined, errorCode);
       add("RESEARCH", "failed", { round }, { error: "research failed" }, error instanceof Error ? error.message : "unknown error");
       if (runState.cumulativeEvidenceCount > 0 && preservedResponse) {

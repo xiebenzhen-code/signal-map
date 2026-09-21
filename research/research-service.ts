@@ -123,7 +123,13 @@ export async function executeResearch({ identity, input, debug, context, reposit
       }
       throw error;
     }
-    return result.response;
+    const { status: sourceStatus, ...response } = result.response;
+    return {
+      ...response,
+      status: result.status,
+      sourceStatus,
+      ...(result.reason ? { reason: result.reason } : {}),
+    };
   } catch (error) {
     if (!tracedAgentFailure) onPhase?.(summarizeAgentFailure(error, "throw_exception", agentFailurePhase()));
     onPhase?.({ phase: "agent_finished", success: false, errorCode: error && typeof error === "object" && "code" in error ? String(error.code) : "UNKNOWN_RESEARCH_FAILURE" });
