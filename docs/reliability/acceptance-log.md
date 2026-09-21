@@ -229,3 +229,53 @@ Rules:
 - Regression: intent-aware-research.test.ts 新增 A–E 用例（AI 工具研究→research，投递岗位/招聘→JOB_SEARCH，前端 draft industry 不含“AI 招聘与职业机会”，链路 industry→intent 非 JOB_SEARCH，Source Selection 选研究来源、QueryPlan 不含 job 查询）。intent-aware 13 PASS，source-selector 9 PASS；typecheck、lint、git diff --check 通过。
 - Real E2E: POST /api/signals HTTP 200；body industry=“AI 视频与创作者工具”；intent=PRODUCT_UPDATE(0.88, secondary=TOOL_DISCOVERY)；sourceSelectionReason=“PRODUCT_UPDATE + INITIAL 无明确实体，先使用 GENERAL_WEB 发现候选，再用 OFFICIAL / PRIMARY 验证”；allowedProviders=[public-web,product-hunt,hacker-news,huggingface]；无 JS 异常。
 - Status: LOCKED
+
+## 2026-09-21 — Retrieval Coverage — Multi-source resilience
+
+- Date: 2026-09-21
+- Test / Run ID: real Query /api/signals signals-f29bfe82-c802-4eb0-a640-8e74878dfd1b
+- Fix Commit: 28f5ec8ea5fa55e469a4099a190aa9be78d2fa01
+- Layer: Retrieval / Source Coverage / product-hunt classification
+- Symptom / Failure: 最近真实 AI 视频研究 Query 在通用 web 单一引擎（Google News RSS）不可达时 public-web 全部 upstream_error；Product Hunt direct fetch 返回 403；HN/HF 用冗长完整 Query 返回 0；OFFICIAL/GitHub/arXiv 被 allowedProviderIds gating，discovery=0 时完全未贡献。real run raw=0 → candidate=0 → evidence=0。
+- Root Cause: ① GENERAL_WEB 仅 Google News 一个引擎（news.google.com 本环境不可达→0→upstream_error）；② Product Hunt 返回 HTTP 403 却归并成上游错误甚至 silent；③ HN/HF 使用冗长 query→0；④ OFFICIAL/GitHub/arXiv 仅在候选产生后才进入验证阶段，primary discovery 为空时被 gating 排除（github/official/company 尚为 entity-only）。
+- Minimal Fix:
+  1. 通用 web 二级引擎 DuckDuckGo HTML fallback（googleNews 失败/全 0 时尝试），新增 webSearchWithFallback；仅对 general-web/community 层开启；engine/fallbackAttempted 独立记账，两引擎都失败不再把 fallback 抹掉。
+  2. HN/Hugging Face 改用短 topic query（shortQueryFor，≤2 个短 concept + 简短 modifier），不再传完整 prompt。
+  3. 空 discovery 时执行级放开 gated 技术来源（arXiv/GitHub/Official/Company Registry，entity-only 仍保留实体条件），upsert 覆盖 not_searched 记账。
+  4. Product Hunt 失败分类：HTTP 403 → failureCode "forbidden"，fail-soft 不阻塞其他 provider。
+- Regression: tests/retrieval-coverage.test.ts 新增 A–F（主引擎失败→fallback 代码路径执行；HN/HF 短 query；空 discovery→technical fallback 执行；非空 discovery→不无脑放开；PH 403→forbidden 且 pipeline 继续；filter semantics 不变）。A–F 全 PASS；source-selector 9 PASS；intent-aware 13 PASS；typecheck、lint、api:build、git diff --check 通过。
+- Real E2E:
+  - intent = PRODUCT_UPDATE(0.88, secondary TOOL_DISCOVERY)（无 JOB_SEARCH 回归）
+  - General Web: failed/upstream_error, requestCount 4, fallbackAttempted true（googleNews + DDG 均不可达）
+  - Product Hunt: failed/forbidden（fail-soft）
+  - Hacker News: searched, raw=2, normalized=2, TOPIC_MISMATCH=2
+  - arXiv: searched（technical fallback 真实执行）, raw=8, normalized=8, TOPIC_MISMATCH=8
+  - Hugging Face: searched, raw=0；Company Registry: searched, raw=0
+  - total raw = 10（HN 2 + arXiv 8），candidate = 0，evidence = 0，displayed = 0
+  - scanned = 0（scanned 只计准入候选，所有 raw 在 topic-relevance candidate-admission 被拒）
+  - reason = deadline_exhausted_no_evidence
+- DuckDuckGo fallback: CODE-PATH VERIFIED（回归 A）/ RUNTIME AVAILABILITY UNVERIFIED（本环境 html.duckduckgo.com 不可达）——两者已明确区分。
+- Status: LOCKED（Retrieval Coverage 复核后升级：单 provider failure 不导致 retrieval 全空、HN short-query 实际产出 raw、empty discovery 时 arXiv technical fallback 真实执行、PH 403=forbidden 且 fail-soft、combined state 中 scanned/candidate>0）
+- Real E2E Log（Retrieval Coverage）:
+  1. technical fallback E2E — signals-f29bfe82-c802-4eb0-a640-8e74878dfd1b：HN raw=2 + arXiv raw=8（technical fallback 实际执行），candidate=0（当时为 Topic Relevance false negative）。
+  2. calibration 后 E2E — signals-186ac5fb-69f9-455d-b0ae-08ecd7de15d8：HN raw=2 → normalized=2 → admitted candidate=2 → evidence=2。
+
+## 2026-09-21 — Topic Relevance Calibration — AI Video Editing Variants
+
+- Date: 2026-09-21
+- Test / Run ID: real Query /api/signals signals-186ac5fb-69f9-455d-b0ae-08ecd7de15d8
+- Fix Commit: eff9a03d0b7f20938d65d0232e6446419c786f6b
+- Layer: Topic Relevance / candidate admission / filtering
+- Symptom / Failure: Retrieval Coverage 修复后真实 E2E raw=10（HN 2 + arXiv 8），但 candidate=0，10 条全在 candidate admission 被 TOPIC_MISMATCH——含明显相关样本 "Palmier Pro – macOS video editor built for AI"、"Launch HN: Mosaic – Agentic Video Editing"。真实 over-filtering（P1 级误杀）。
+- Root Cause: task-anchor 精确短语匹配（matches(text, anchor) 词边界子串)。任务锚点是固定短语（"AI video editing"/"automated rough cut"/…），真实语言变体（"Agentic Video Editing"、"video editor built for AI"）不含精确短语 → MISSING_TASK_ANCHOR。domain ("video") 命中也因 domain+task 双约束里 task 半失败而拒。FIRST FALSE NEGATIVE RULE = 无形态/语义变体容错的 task-anchor 精确匹配。
+- Minimal Fix: 在 topic-relevance.ts 的显式分支加入受控变体匹配（taskConceptStem）：对齐 anchor 与文本的形态（edit/editor/editing→edit）与限定词（agentic/ai-powered/ai 前缀剥除），并加否定保护（no/not/without/没有/不含 前导 → 不计 task）。变体匹配严格限定于 profile.taskAnchors，禁止裸 "AI"/"video" 通过；保留 domain+task 双约束。
+- Regression: tests/topic-relevance.test.ts 新增 "AI video editing 语言变体通过而无关变体仍拒"（POS=Palmier/Mosaic/显式剪辑；NEG=robotic manipulation/4D foundation/general multimodal/no-video-editing/medical video）。原有 P1 negatives（medical/robotics/general AI/unrelated arXiv）全部继续 reject。topic-relevance 13 PASS、retrieval-coverage 6、source-selector 9、intent-aware 13、retrieval-plan-contract 9、source-enrichment 14；typecheck、lint、api:build、git diff --check 通过。
+- Accounting（PHASE 7）: `scanned` 实际按 admitted candidate 计数，不等同 raw。本轮原始 raw=2（HN），admittedCandidateCount=2，evidenceRecords=2，displayed=0。已记录二者不得混用。
+- Real E2E:
+  - intent = PRODUCT_UPDATE（无 JOB_SEARCH 回归）
+  - Hacker News: raw=2, normalized=2, **admitted=2, TOPIC_MISMATCH=0**（修复前 TOPIC_MISMATCH=2）
+  - arXiv: not_searched（discovery 非空 → technical fallback 未展开，符合 empty-discovery 门控）
+  - General Web: failed/upstream_error（googleNews+DDG 本环境不可达）；Product Hunt: failed/forbidden
+  - candidate=2, scanned=2, evidence=2, displayed=0（瓶颈已从 topic relevance 转移到 evidence→displayed 的 Reliability/Evidence 层，属下一阶段）
+- 判定 PASS: raw>0 ✓；≥1 相关 HN/arXiv item 过 candidate admission ✓（HN 2）；candidate>0 ✓；无关内容继续 TOPIC_MISMATCH ✓（回归锁定）；未为 displayed>0 放宽其他 Evidence/Reliability ✓（displayed 仍 0）。
+- Status: LOCKED（regression PASS + real E2E candidate>0 + negatives 继续 reject 三者齐备）
