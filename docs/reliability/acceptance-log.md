@@ -279,3 +279,27 @@ Rules:
   - candidate=2, scanned=2, evidence=2, displayed=0（瓶颈已从 topic relevance 转移到 evidence→displayed 的 Reliability/Evidence 层，属下一阶段）
 - 判定 PASS: raw>0 ✓；≥1 相关 HN/arXiv item 过 candidate admission ✓（HN 2）；candidate>0 ✓；无关内容继续 TOPIC_MISMATCH ✓（回归锁定）；未为 displayed>0 放宽其他 Evidence/Reliability ✓（displayed 仍 0）。
 - Status: LOCKED（regression PASS + real E2E candidate>0 + negatives 继续 reject 三者齐备）
+
+## 2026-09-21 — Runtime Transport Architecture
+
+- Date: 2026-09-21
+- Fix Commit: c868cccab066d8d173cd9c5bfd112ed6fe21e210
+- Layer: Runtime / workerd<->Node proxy / PostgreSQL transport
+- Symptom / Failure: DB-backed /api 在 workerd RSC runtime 直接执行 pg，因 workerd 无原始出站 TCP（nodejs_compat）→ Connection terminated unexpectedly，authenticated /api/signals agent_failed_before_source_selection、control APIs 503。
+- Root Cause: workerd 内预打包 pg（deps_rsc/pg.js）需要 net/tls 原始 TCP，但 workerd 不支持；独立 Node（真实 net/tls）正常。
+- Fix: DB-backed API 路由经 workerd HTTP proxy（proxyApiRequest）转发到真实 Node backend（dist-api/server.mjs）；workerd 不再执行 pg。proxy 保真 method/path/query/body/Cookie/Authorization/Content-Type/response status+body/Set-Cookie；upstream 不可达返回 API_UPSTREAM_UNAVAILABLE。
+- Regression: tests/api-proxy.test.ts（5：DB route→Node upstream；query/body/header 保留；200 原样；4xx/5xx 不篡改；auth cookie/Authorization 不丢；edge-safe auth 不错误代理；upstream 不可达明确错误）+ tests/backend-server.test.ts（11）PASS。
+- Real E2E: browser localhost:3000 → /api/signals → workerd proxy → Node :8080 → pg → Agent。HTTP 200，auth PASS，PostgreSQL PASS，无 Connection terminated，进入 source_selection/retrieval，Node 日志出现 DB-backed request（requestId signals-80fac072-07b3-4f5c-a1b2-b13b7fc0927a），workerd 日志无 postgres_pool_error。
+- Status: LOCKED
+
+## 2026-09-21 — Zero-Evidence Deadline Graceful Degradation
+
+- Date: 2026-09-21
+- Fix Commit: 16ad8f9fd0c4fbb7b832c88172411ae5a2b3230e
+- Layer: Agent / deadline budget / evidence accounting
+- Symptom / Failure: RESEARCH 在 deadline 耗尽且无 evidence 时以 WORKER_DEADLINE 硬失败，无法给出可恢复的 needs_more_evidence 状态。
+- Root Cause: runAgent 对 WORKER_DEADLINE 统一走失败路径，缺少"零证据 deadline"的正常降级分支。
+- Fix: 当 errorCode=WORKER_DEADLINE 且存在 preservedResponse 时，返回 status=needs_more_evidence、reason=deadline_exhausted_no_evidence（HTTP 200 经 research-service 映射）；unexpected exception 仍失败；Evidence>0 的 deadline 保持原 graceful completion。
+- Regression: tests/agent-runner.test.ts（33）+ tests/public-alpha-research.test.ts（11）PASS。
+- Real E2E: /api/signals 在零证据 deadline 下返回 HTTP 200、needs_more_evidence、reason=deadline_exhausted_no_evidence（而非硬失败）。
+- Status: LOCKED
