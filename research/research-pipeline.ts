@@ -36,6 +36,22 @@ import type { FusionEvidence } from "../signal-fusion/types.ts";
 import { enrichDetail, maxDetailFetchesPerRound, shouldEnrichDetail, sourceCapability } from "../source-enrichment/index.ts";
 import type { DetailEnrichmentSummary } from "../source-enrichment/types.ts";
 import { discardResponseBody, throwAfterDiscardingBody } from "../lib/http-response.ts";
+
+// Budget allocation reserves, derived from measured costs rather than a fixed
+// percentage:
+// - a real canonical detail fetch takes ~3-5s, so reserving ~4s per attempt lets
+//   up to 2 eligible canonical URLs be completed within the worker deadline.
+// - post-enrichment work (aggregation / evidence / response) measures ~30ms; a
+//   2.5s floor gives safe headroom without demanding the old 7s reserve that
+//   starved enrichment to zero on tight budgets.
+const DETAIL_FETCH_RESERVE_MS = 8000;
+const POST_PROCESSING_RESERVE_MS = 2500;
+// Luxury web tiers (general web / community) only start new expensive requests
+// while this much of the deadline remains, so enrichment + response are
+// preserved even after model planning consumes a large share of the 25s budget:
+// 2 realistic detail fetches (~4s each) + post-processing floor + planning margin.
+const PLANNING_MARGIN_MS = 2500;
+const RETRIEVAL_RESERVATION_MS = DETAIL_FETCH_RESERVE_MS + POST_PROCESSING_RESERVE_MS + PLANNING_MARGIN_MS;
 import { recordsFromSignal, type EvidenceRecord } from "../information/rag-records.ts";
 import { assessTopicRelevance } from "./topic-relevance.ts";
 import { isGenericQuestionTerm } from "./topic-relevance.ts";
@@ -1143,6 +1159,10 @@ async function enrichDiscoveryCandidates(
         title: candidate.title,
         snippet: candidate.snippet,
         potentialScore: usefulness(candidate, plan),
+        url: candidate.url,
+        // Admitted EVIDENCE candidates already passed topic relevance at
+        // admission; DISCOVERY providers bypass relevance in the existing path.
+        isRelevant: true,
       }),
     );
   const eligibleByProvider: Record<string, number> = {};
@@ -1440,20 +1460,20 @@ export async function runResearchPipeline(
   };
 
   const generalWebQueries = providerQueries(plan, "public-web", plan.searchCombinations.slice(0, 4), 4);
-  const generalWebResult = canExecute("public-web")
+  const generalWebResult = canExecute("public-web") && remainingMs() > RETRIEVAL_RESERVATION_MS
     ? await searchQueries(generalWebQueries, "other", plan, failures, windowDays, true)
     : emptySearchResult();
   sourceOutcomes.push(webSearchOutcome("General Web", generalWebResult));
   scanned += generalWebResult.scanned;
 
   const [productHuntResult, hackerNewsResult, huggingFaceResult, arxivResult] = await Promise.all([
-    canExecute("product-hunt")
+    canExecute("product-hunt") && remainingMs() > RETRIEVAL_RESERVATION_MS
       ? searchDirectProvider("Product Hunt", () => productHuntSearch(providerQuery(plan, "product-hunt", plan.searchCombinations[0])), "social", plan, failures, "product-hunt")
       : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "Product Hunt", execution: "not_searched" as const, searched: false, resultCount: 0 } }),
     canExecute("hacker-news")
       ? searchDirectProvider("Hacker News", () => hackerNewsSearch(providerQuery(plan, "hacker-news", plan.searchCombinations[0])), "social", plan, failures, "hacker-news")
       : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "Hacker News", execution: "not_searched" as const, searched: false, resultCount: 0 } }),
-    canExecute("huggingface")
+    canExecute("huggingface") && remainingMs() > RETRIEVAL_RESERVATION_MS
       ? searchDirectProvider("Hugging Face", () => huggingFaceSearch(providerQuery(plan, "huggingface", plan.searchCombinations[0])), "industry_media", plan, failures, "huggingface")
       : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "Hugging Face", execution: "not_searched" as const, searched: false, resultCount: 0 } }),
     canExecute("arxiv")
@@ -1474,7 +1494,7 @@ export async function runResearchPipeline(
     (query) =>
       `${query} (site:reddit.com OR site:github.com OR site:news.ycombinator.com OR site:stackoverflow.com OR site:dev.to)`,
   ), 3);
-  const communityWebResult = canExecute("public-web") && (!sourceConstrained || plan.selectedSourceType === "SOCIAL_SIGNAL")
+  const communityWebResult = canExecute("public-web") && remainingMs() > RETRIEVAL_RESERVATION_MS && (!sourceConstrained || plan.selectedSourceType === "SOCIAL_SIGNAL")
     ? await searchQueries(communityWebQueries, "social", plan, failures, windowDays, true)
     : emptySearchResult();
   sourceOutcomes.push(webSearchOutcome("Public Web Community", communityWebResult));
@@ -1701,7 +1721,7 @@ export async function runResearchPipeline(
     discoveredCandidates,
     plan,
     failures,
-    Math.min(12000, Math.max(0, remainingMs() - 7000)),
+    Math.min(12000, Math.max(0, remainingMs() - POST_PROCESSING_RESERVE_MS)),
   );
   markPhase("detail_fetch_finished", true, detailEnrichment.detailSucceeded, undefined, {
     detailAttempted: detailEnrichment.detailAttempted,
