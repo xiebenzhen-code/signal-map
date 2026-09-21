@@ -62,6 +62,7 @@ export type ProviderSearchFailureCode =
   | "invalid_query"
   | "timeout"
   | "rate_limited"
+  | "forbidden"
   | "upstream_error";
 
 export type ProviderSearchOutcome = {

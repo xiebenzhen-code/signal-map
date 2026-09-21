@@ -28,6 +28,8 @@ export type SourceExecutionOutcome = {
   candidateAdmissionRejectedSamples?: ProviderRejectionSample[];
   requestCount?: number;
   failureCode?: ProviderSearchFailureCode;
+  engine?: string;
+  fallbackAttempted?: boolean;
 };
 
 export type SourceCoverage = {

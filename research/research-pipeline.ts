@@ -275,6 +275,67 @@ async function googleNews(query: string): Promise<LiveItem[]> {
     .filter((item) => item.title && item.url);
 }
 
+async function duckDuckGoSearch(query: string): Promise<LiveItem[]> {
+  const retrievedAt = new Date().toISOString();
+  const response = await fetch(
+    `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
+    {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; SignalMapResearch/0.4)" },
+      signal: AbortSignal.timeout(10000),
+    },
+  );
+  if (!response.ok) await throwAfterDiscardingBody(response, new Error(`DuckDuckGo returned ${response.status}`));
+  const html = await response.text();
+  const seen = new Set<string>();
+  return [...html.matchAll(/<a[^>]+class=["']?[^"']*result__a[^"']*["']?[^>]+href=["']([^"']+?)["'][^>]*>([\s\S]*?)<\/a>/gi)]
+    .flatMap((match) => {
+      const rawUrl = (match[1] || "").trim();
+      const uddg = rawUrl.match(/[?&]uddg=([^&]+)/)?.[1];
+      const url = uddg ? decodeURIComponent(uddg) : rawUrl;
+      if (!/^https?:\/\//i.test(url) || seen.has(url)) return [];
+      seen.add(url);
+      const title = decodeXml(match[2] || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+      if (!title) return [];
+      return [{
+        id: `ddg-${encodeURIComponent(url).slice(0, 48)}`,
+        title,
+        url,
+        snippet: title,
+        source: "DuckDuckGo",
+        firstSeenAt: retrievedAt,
+        retrievedAt,
+        dataOrigin: "live",
+        channel: "混合",
+        authority: 60,
+        origin: "news",
+      } satisfies LiveItem];
+    })
+    .slice(0, 12);
+}
+
+type WebSearchWithFallbackResult = { items: LiveItem[]; engine: "google_news" | "duckduckgo"; fallbackTried: boolean; failed?: boolean };
+
+async function webSearchWithFallback(query: string): Promise<WebSearchWithFallbackResult> {
+  let googleError: unknown;
+  let googleItems: LiveItem[] = [];
+  try {
+    googleItems = await googleNews(query);
+  } catch (error) {
+    googleError = error;
+  }
+  if (!googleError && googleItems.length) {
+    return { items: googleItems, engine: "google_news", fallbackTried: false };
+  }
+  try {
+    return { items: await duckDuckGoSearch(query), engine: "duckduckgo", fallbackTried: true };
+  } catch {
+    // Both engines failed for this query. Keep the result on the fulfilled path so
+    // the caller can still record that the fallback was attempted, while flagging
+    // the query as failed rather than silently treating it as zero results.
+    return { items: [], engine: "duckduckgo", fallbackTried: true, failed: true };
+  }
+}
+
 async function redditSearch(query: string): Promise<LiveItem[]> {
   const retrievedAt = new Date().toISOString();
   const params = new URLSearchParams({
@@ -653,7 +714,9 @@ async function searchDirectProvider(
         requestCount: 1,
       },
     };
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const status = Number((message.match(/returned (\d+)/) || [])[1] || 0);
     failures.push(`${source}: 请求失败或超时。`);
     return {
       items: [] as ResearchCandidate[],
@@ -664,7 +727,7 @@ async function searchDirectProvider(
         searched: true,
         resultCount: 0,
         requestCount: 1,
-        failureCode: "upstream_error" as const,
+        failureCode: status === 403 ? "forbidden" as const : "upstream_error" as const,
       },
     };
   }
@@ -723,7 +786,26 @@ function retrievalTopicKeywords(plan: QueryPlan) {
     });
 }
 
-function providerQuery(plan: QueryPlan, providerId: string, fallbackQuery?: string) {
+function shortQueryFor(plan: QueryPlan, providerId: string, limit = 3): string {
+  // Very long natural-language prompts translate to poor full-text matches on
+  // Hacker News / Hugging Face. Use a few short topic concepts instead.
+  const keywords = retrievalTopicKeywords(plan);
+  const short = keywords.filter((value) => value.split(/\s+/).length <= 3);
+  const pool = short.length ? short : keywords.slice(0, limit);
+  const picked = pool.slice(0, limit).join(" ");
+  const modifier = (
+    {
+      "hacker-news": "workflow tool",
+      huggingface: "model",
+    } as Record<string, string>
+  )[providerId] || "";
+  return [...new Set([picked, modifier].filter(Boolean))].join(" ").trim();
+}
+
+export function providerQuery(plan: QueryPlan, providerId: string, fallbackQuery?: string) {
+  if (providerId === "hacker-news" || providerId === "huggingface") {
+    return shortQueryFor(plan, providerId, 2);
+  }
   const topics = retrievalTopicKeywords(plan).slice(0, 4);
   const topic = topics.join(" ");
   const queryIntent = fallbackQuery
@@ -839,6 +921,7 @@ async function searchQueries(
   plan: QueryPlan,
   failures: string[],
   requestedFreshnessDays: number,
+  allowWebFallback = false,
 ) {
   const candidateSourceType: SourceType = expected === "other" ? "industry_media" : expected;
   const windows = [requestedFreshnessDays];
@@ -846,14 +929,33 @@ async function searchQueries(
   let failed = 0;
   let attempted = 0;
   let successful = 0;
+  let fallbackTried = false;
+  let engine: "google_news" | "duckduckgo" | undefined;
   for (const days of windows) {
     attempted += queries.length;
     const settled = await Promise.allSettled(
-      queries.map((query) => googleNews(`${query} when:${days}d`)),
+      queries.map((query) =>
+        allowWebFallback
+          ? webSearchWithFallback(`${query} when:${days}d`)
+          : googleNews(`${query} when:${days}d`).then((items) => ({
+              items,
+              engine: "google_news" as const,
+              fallbackTried: false,
+              failed: false,
+            })),
+      ),
     );
-    successful += settled.filter((result) => result.status === "fulfilled").length;
-    failed += settled.filter((result) => result.status === "rejected").length;
-    discovered.push(...settled.flatMap((result) => result.status === "fulfilled" ? result.value : []));
+    for (const result of settled) {
+      if (result.status === "rejected") {
+        failed += 1;
+        continue;
+      }
+      discovered.push(...result.value.items);
+      if (result.value.fallbackTried) fallbackTried = true;
+      if (engine === undefined) engine = result.value.engine;
+      if (result.value.failed) failed += 1;
+      else successful += 1;
+    }
     const verifiedRecent = unique(
       discovered
         .filter((item) => {
@@ -870,6 +972,8 @@ async function searchQueries(
     attempted,
     successful,
     failed,
+    engine,
+    fallbackTried,
     items: unique(
       discovered
       .filter((item) => {
@@ -890,7 +994,7 @@ async function searchQueries(
 
 function webSearchOutcome(
   source: string,
-  result: { items: ResearchCandidate[]; attempted: number; successful: number },
+  result: { items: ResearchCandidate[]; attempted: number; successful: number; engine?: string; fallbackTried?: boolean },
 ): SourceExecutionOutcome {
   if (!result.attempted) {
     return { source, execution: "not_searched", searched: false, resultCount: 0, requestCount: 0 };
@@ -903,6 +1007,7 @@ function webSearchOutcome(
       resultCount: 0,
       requestCount: result.attempted,
       failureCode: "upstream_error",
+      fallbackAttempted: result.fallbackTried ?? undefined,
     };
   }
   return {
@@ -911,6 +1016,8 @@ function webSearchOutcome(
     searched: true,
     resultCount: result.items.length,
     requestCount: result.attempted,
+    engine: result.engine ?? undefined,
+    fallbackAttempted: result.fallbackTried ?? undefined,
   };
 }
 
@@ -1334,7 +1441,7 @@ export async function runResearchPipeline(
 
   const generalWebQueries = providerQueries(plan, "public-web", plan.searchCombinations.slice(0, 4), 4);
   const generalWebResult = canExecute("public-web")
-    ? await searchQueries(generalWebQueries, "other", plan, failures, windowDays)
+    ? await searchQueries(generalWebQueries, "other", plan, failures, windowDays, true)
     : emptySearchResult();
   sourceOutcomes.push(webSearchOutcome("General Web", generalWebResult));
   scanned += generalWebResult.scanned;
@@ -1368,7 +1475,7 @@ export async function runResearchPipeline(
       `${query} (site:reddit.com OR site:github.com OR site:news.ycombinator.com OR site:stackoverflow.com OR site:dev.to)`,
   ), 3);
   const communityWebResult = canExecute("public-web") && (!sourceConstrained || plan.selectedSourceType === "SOCIAL_SIGNAL")
-    ? await searchQueries(communityWebQueries, "social", plan, failures, windowDays)
+    ? await searchQueries(communityWebQueries, "social", plan, failures, windowDays, true)
     : emptySearchResult();
   sourceOutcomes.push(webSearchOutcome("Public Web Community", communityWebResult));
   scanned += communityWebResult.scanned;
@@ -1518,7 +1625,7 @@ export async function runResearchPipeline(
   });
 
   markPhase("detail_fetch_started");
-  const discoveredCandidates = unique([
+  let discoveredCandidates = unique([
     ...allPrimary,
     ...arxivResult.items,
     ...trustedMedia,
@@ -1529,6 +1636,67 @@ export async function runResearchPipeline(
     ...hackerNewsResult.items,
     ...social.representatives,
   ]);
+  if (discoveredCandidates.length === 0) {
+    // Execution-level technical fallback: when discovery yields no candidate,
+    // give gated OFFICIAL / PRIMARY / technical sources a chance to contribute.
+    // This is not a re-classification and entity-only providers still need an
+    // entity match; it only runs when the primary discovery round came up empty.
+    const technicalFallback: ResearchCandidate[] = [];
+    const recordOutcome = (outcome: SourceExecutionOutcome) => {
+      const index = sourceOutcomes.findIndex((entry) =>
+        outcome.providerId
+          ? entry.providerId === outcome.providerId || (!entry.providerId && entry.source === outcome.source)
+          : entry.source === outcome.source,
+      );
+      if (index >= 0) sourceOutcomes[index] = outcome;
+      else sourceOutcomes.push(outcome);
+    };
+    if (!canExecute("arxiv")) {
+      const arxivFall = await searchDirectProvider(
+        "arXiv",
+        () => arxivSearch(providerQuery(plan, "arxiv", plan.searchCombinations[0])),
+        "primary",
+        plan,
+        failures,
+        "arxiv",
+      );
+      technicalFallback.push(...arxivFall.items);
+      recordOutcome(arxivFall.outcome);
+    }
+    if (!canExecute("github-releases")) {
+      const gh = await discoverOfficialGithubReleases(plan.entities);
+      technicalFallback.push(...gh.items.map((item) => ({ ...item, sourceType: "primary" as const })));
+      recordOutcome(gh.outcome);
+      if (gh.failure) failures.push(gh.failure);
+    }
+    if (!canExecute("official-update-pages")) {
+      const op = await discoverOfficialUpdatePages(plan.entities);
+      technicalFallback.push(...op.items.map((item) => ({ ...item, sourceType: "primary" as const })));
+      recordOutcome(op.outcome);
+      if (op.failure) failures.push(op.failure);
+    }
+    if (!canExecute("company-registry")) {
+      const cr = await searchDirectProvider(
+        "Company Source Registry",
+        () => companyRegistrySearch(plan),
+        "primary",
+        plan,
+        failures,
+        "company-registry",
+      );
+      technicalFallback.push(...cr.items);
+      recordOutcome(cr.outcome);
+    }
+    if (technicalFallback.length) {
+      discoveredCandidates = unique([...discoveredCandidates, ...technicalFallback]);
+      scanned += technicalFallback.length;
+      counts = {
+        ...counts,
+        candidates: counts.candidates + technicalFallback.length,
+        primary: counts.primary + technicalFallback.length,
+      };
+    }
+  }
   const { candidates, summary: detailEnrichment, eligibleByProvider } = await enrichDiscoveryCandidates(
     discoveredCandidates,
     plan,
