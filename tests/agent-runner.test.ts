@@ -768,6 +768,46 @@ test("a conflicting claim about stored knowledge is classified as CONTRADICTS an
   assert.equal(repository.listPersonalKnowledge(runContext).filter((record) => record.text === known).length, 1);
 });
 
+test("a later material state change is stored as UPDATES and does not supersede the earlier fact", async () => {
+  const repository = new InMemorySignalRepository();
+  const runContext = { ...context, filterId: "filter-knowledge-major-change" };
+  const oldClaim = "Palmier Pro is available as an open-source macOS AI video editor.";
+  const nextClaim = "Palmier Pro has discontinued its open-source edition and moved the product to a hosted paid service.";
+  const makeEvidence = (claimText: string) => evidenceSignal({
+    id: `signal-${claimText}`,
+    title: claimText,
+    summary: claimText,
+    sourceUrl: "https://example.com/palmier-pro",
+    claims: [{
+      claimText,
+      sourceUrl: "https://example.com/palmier-pro",
+      publisher: "Official",
+      sourceType: "primary",
+      sourceTier: "S",
+      evidenceSnippet: claimText,
+      verificationStatus: "verified",
+      contentType: "FACT",
+      independentEvidenceCount: 1,
+      evidenceSources: [],
+    }],
+  });
+
+  await runAgent({
+    input, context: runContext, repository, maxRounds: 1,
+    research: async () => response([makeEvidence(oldClaim)]),
+  });
+  const second = await runAgent({
+    input, context: runContext, repository,
+    research: async () => response([makeEvidence(nextClaim)]),
+  });
+  const stored = repository.listPersonalKnowledge(runContext).map((record) => record.text);
+  assert.match(String(second.steps.find((step) => step.state === "RETRIEVE")?.output), /open-source macOS AI video editor/);
+  assert.equal(second.response?.signals[0]?.informationGainStatus, "UPDATED_INFORMATION");
+  assert.equal(second.knowledgeChanges[0]?.classification, "UPDATES");
+  assert.equal(stored.filter((text) => text === oldClaim).length, 1);
+  assert.equal(stored.filter((text) => text === nextClaim).length, 1);
+});
+
 test("CONFIRMS updates provenance without duplicate knowledge or revision", async () => {
   const repository = new InMemorySignalRepository();
   repository.addPersonalKnowledge(context, {

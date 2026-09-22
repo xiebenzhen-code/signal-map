@@ -171,7 +171,9 @@ Second run retrieves the old record, sets `UPDATED_INFORMATION`, emits `UPDATES`
 
 **Conflict = FORMAL FIXTURE PASS** as a non-overwrite, local only. The runtime does not infer contradiction from opposite wording. `compareKnowledge` can label `CONTRADICTS` only when the incoming signal already has `verificationStatus: "conflicting"`. `updateKnowledgeFromChanges` then drops that change because `canWriteKnowledge` rejects `CONTRADICTS`, so `runAgent.knowledgeChanges` does not contain it and the denial is not stored. The Palmier fixture checks retrieval, `conflictDetected`, and that the original launch fact remains the only record. Returning the `CONTRADICTS` label itself is not part of the current persisted-change contract.
 
-**Major Change = PENDING.**
+**Major Change = PRODUCT CAPABILITY GAP.** There is no `MAJOR_CHANGE` classification. A later verified fact that reverses an earlier state (open-source edition discontinued, product moved to a hosted paid service) takes the same path as an ordinary supplement: same source URL, claims not equivalent, `UPDATED_INFORMATION` / `UPDATES`, old record kept, new record appended. Nothing marks the old fact as superseded. The fixture locks that current behavior. It is not a bug against the existing enum, and it is not a lock of a major-change product concept.
+
+Knowledge Comparison is therefore **PARTIALLY CALIBRATED**, not formal-fixture locked.
 
 Not locked, because Conflict and Major Change are still open. Do not read this as “Knowledge Comparison = LOCKED.”
 
@@ -238,7 +240,7 @@ Knowledge Comparison
   Duplicate      formal fixture pass
   Supplement     formal fixture pass as UPDATES (local only)
   Conflict       formal fixture pass as CONTRADICTS (local only; status is an input)
-  Major Change   pending
+  Major Change   capability gap: same UPDATES path, old fact not superseded
 → Attention Decision
 → Personal Alpha 10-query
 → Proactive / Scheduler
