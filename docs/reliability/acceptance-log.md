@@ -346,3 +346,15 @@ Rules:
   - Mosaic（mosaic.so）：**INSUFFICIENT_CONTENT**（claim 契约：落地页缺动作动词）——符合 Content Quality Contract。
 - 判定: Canonical Detail Fetch = LOCKED（真实 canonical fetch SUCCESS、regression 全绿、fail-soft 保持）。Content Enrichment 升级：content-quality 不再错误杀死相关候选（Palmier 越过 content-insufficient），但 displayed 仍 0 因合法 freshness/claim。Budget Allocation 需 full suite + commit + ledger + push 后才正式工程 LOCKED。
 - Status: Canonical Detail Fetch LOCKED；Content Enrichment content-layer LOCKED（displayed 受合法 freshness/claim 限制）。
+
+## 2026-09-21 — Evidence Entry Calibration
+
+- Date: 2026-09-21
+- Commit: PENDING
+- Layer: Evidence Entry / evidence record construction / pipeline entry
+- Status: LOCAL PASS / FORMAL REGRESSION LOCKED（仅机制锁定，非 Evidence Quality 总闭环）
+- Formal regression: tests/evidence-entry.test.ts（1 PASS，已注册进 npm test）
+- Verified behavior: fresh（30 天窗口内）+ canonical content VALID + claim VALID → EvidenceRecord constructed（evidenceRecords>=1）→ Evidence Evaluation reached（evaluatedEvidenceCount>=1），且 insufficientContent=0、stale=0。
+- Fixture downstream: 候选最终在 Reliability / Verification 被拒（单条未验证 HN social/tier C 源）→ 判定 contract-consistent，**不是 Evidence Entry 失败**。未修改 Reliability / Verification。
+- 明确: REAL E2E EVIDENCE ENTRY NOT YET AVAILABLE；REAL E2E RE-TEST PENDING。不写 "Evidence Quality = LOCKED"，不写 "Reliability = bug"/"Verification = bug"（除非后续直接证据）。
+- Prior chain: Canonical Detail Fetch = LOCKED；Claim Construction = LOCKED（TRUE POSITIVE = fresh claim-VALID fixture；TRUE NEGATIVE = Mosaic CORRECT_REJECTION）。
