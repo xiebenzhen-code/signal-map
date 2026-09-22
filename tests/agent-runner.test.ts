@@ -648,6 +648,47 @@ test("an equivalent claim from a different URL does not create a duplicate Knowl
   assert.equal(repository.listPersonalKnowledge(runContext).length, 1);
 });
 
+test("an accepted synonym of an existing fact is retrieved and classified as no information gain", async () => {
+  const repository = new InMemorySignalRepository();
+  const runContext = { ...context, filterId: "filter-knowledge-duplicate-synonym" };
+  const makeEvidence = (claimText: string) => evidenceSignal({
+    id: `signal-${claimText}`,
+    title: claimText,
+    summary: claimText,
+    sourceUrl: "https://example.com/palmier-pro",
+    claims: [{
+      claimText,
+      sourceUrl: "https://example.com/palmier-pro",
+      publisher: "Official",
+      sourceType: "primary",
+      sourceTier: "S",
+      evidenceSnippet: claimText,
+      verificationStatus: "verified",
+      contentType: "FACT",
+      independentEvidenceCount: 1,
+      evidenceSources: [],
+    }],
+  });
+
+  const first = await runAgent({
+    input, context: runContext, repository, maxRounds: 1,
+    research: async () => response([makeEvidence("Palmier Pro launched an open-source AI video editor for macOS.")]),
+  });
+  assert.equal(first.response?.signals[0]?.informationGainStatus, "NEW_INFORMATION");
+  assert.equal(first.knowledgeChanges[0]?.classification, "NEW");
+  assert.equal(repository.listPersonalKnowledge(runContext).length, 1);
+
+  const second = await runAgent({
+    input, context: runContext, repository, maxRounds: 1,
+    research: async () => response([makeEvidence("Palmier Pro launches an open-source AI video editor for macOS.")]),
+  });
+  const retrieved = second.steps.find((step) => step.state === "RETRIEVE")?.output;
+  assert.match(String(retrieved), /Palmier Pro launched an open-source AI video editor for macOS/);
+  assert.equal(second.response?.signals[0]?.informationGainStatus, "NO_INFORMATION_GAIN");
+  assert.equal(second.knowledgeChanges.length, 0);
+  assert.equal(repository.listPersonalKnowledge(runContext).length, 1);
+});
+
 test("CONFIRMS updates provenance without duplicate knowledge or revision", async () => {
   const repository = new InMemorySignalRepository();
   repository.addPersonalKnowledge(context, {
