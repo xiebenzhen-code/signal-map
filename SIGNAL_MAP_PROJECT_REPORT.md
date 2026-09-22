@@ -156,7 +156,24 @@ Trace:
 
 **Knowledge Comparison Entry = FORMAL REGRESSION PASS.** **Duplicate Classification = FORMAL FIXTURE PASS.**
 
-Not locked, because these are still pending: Supplement, Conflict, Major Change. Do not read this as “Knowledge Comparison = LOCKED.”
+There is no `SUPPLEMENT` enum. The runtime equivalent for “same source, old fact still true, new clause added” is `UPDATED_INFORMATION` / classification `UPDATES`.
+
+Formal fixture in `tests/agent-runner.test.ts` (local, not real E2E):
+
+```text
+existing: Palmier Pro launched an open-source AI video editor for macOS.
+incoming: Palmier Pro launched an open-source AI video editor for macOS and now supports automated rough cut and shot selection.
+```
+
+Second run retrieves the old record, sets `UPDATED_INFORMATION`, emits `UPDATES`, and keeps both statements. It does not collapse to `NO_INFORMATION_GAIN` and it is not `CONTRADICTS`. The write creates a second knowledge record rather than editing the first in place. That matches the current upsert contract; it is not treated as a bug in this round.
+
+**Supplement = FORMAL FIXTURE PASS** (`UPDATES`, local only).
+
+**Conflict = FORMAL FIXTURE PASS** as a non-overwrite, local only. The runtime does not infer contradiction from opposite wording. `compareKnowledge` can label `CONTRADICTS` only when the incoming signal already has `verificationStatus: "conflicting"`. `updateKnowledgeFromChanges` then drops that change because `canWriteKnowledge` rejects `CONTRADICTS`, so `runAgent.knowledgeChanges` does not contain it and the denial is not stored. The Palmier fixture checks retrieval, `conflictDetected`, and that the original launch fact remains the only record. Returning the `CONTRADICTS` label itself is not part of the current persisted-change contract.
+
+**Major Change = PENDING.**
+
+Not locked, because Conflict and Major Change are still open. Do not read this as “Knowledge Comparison = LOCKED.”
 
 ## 12. Data and Repository Layer
 
@@ -208,7 +225,7 @@ Commands used for the gates in this cycle: `npm test`, `npm run typecheck`, `npm
 | Evidence entry | Formal regression lock | `tests/evidence-entry.test.ts` | pending | reaches evaluation |
 | Reliability | Formal fixture lock | negative + `tests/reliability-positive.test.ts` | pending | threshold unchanged |
 | Verification | Formal fixture lock | same pair | pending | not auto-closed by reliability |
-| Knowledge compare | Entry + duplicate pass | `tests/agent-runner.test.ts` | pending | supplement / conflict / major change open |
+| Knowledge compare | Entry, duplicate, supplement, conflict fixture pass | `tests/agent-runner.test.ts` | pending | conflict requires incoming `conflicting` status; major change open |
 | Information gain | Used by compare | agent-runner dedup tests | pending | `NO_INFORMATION_GAIN` blocks writes |
 | Attention | Implemented | not calibrated here | pending | out of scope |
 | Knowledge update | Wired | duplicate does not double-write | pending | in-memory fixture |
@@ -219,8 +236,8 @@ Commands used for the gates in this cycle: `npm test`, `npm run typecheck`, `npm
 ```text
 Knowledge Comparison
   Duplicate      formal fixture pass
-  Supplement     pending
-  Conflict       pending
+  Supplement     formal fixture pass as UPDATES (local only)
+  Conflict       formal fixture pass as CONTRADICTS (local only; status is an input)
   Major Change   pending
 → Attention Decision
 → Personal Alpha 10-query
@@ -266,6 +283,6 @@ Role to describe honestly: product direction, system rules, architecture choices
 ## Known pending sections
 
 - Real E2E evidence entry, reliability, and verification.
-- Supplement, conflict, and major-change comparison.
+- Major-change comparison. Conflict is only a local fixture that consumes an already conflicting verification status.
 - Attention calibration.
 - Proof that long-term learning changes later plans beyond the current duplicate block.

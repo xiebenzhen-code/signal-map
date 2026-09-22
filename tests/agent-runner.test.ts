@@ -689,6 +689,85 @@ test("an accepted synonym of an existing fact is retrieved and classified as no 
   assert.equal(repository.listPersonalKnowledge(runContext).length, 1);
 });
 
+test("an accepted same-source claim that adds a new capability updates knowledge without replacing the old fact", async () => {
+  const repository = new InMemorySignalRepository();
+  const runContext = { ...context, filterId: "filter-knowledge-supplement" };
+  const oldClaim = "Palmier Pro launched an open-source AI video editor for macOS.";
+  const newClaim = "Palmier Pro launched an open-source AI video editor for macOS and now supports automated rough cut and shot selection.";
+  const makeEvidence = (claimText: string) => evidenceSignal({
+    id: `signal-${claimText}`,
+    title: claimText,
+    summary: claimText,
+    sourceUrl: "https://example.com/palmier-pro",
+    claims: [{
+      claimText,
+      sourceUrl: "https://example.com/palmier-pro",
+      publisher: "Official",
+      sourceType: "primary",
+      sourceTier: "S",
+      evidenceSnippet: claimText,
+      verificationStatus: "verified",
+      contentType: "FACT",
+      independentEvidenceCount: 1,
+      evidenceSources: [],
+    }],
+  });
+
+  const first = await runAgent({
+    input, context: runContext, repository, maxRounds: 1,
+    research: async () => response([makeEvidence(oldClaim)]),
+  });
+  assert.equal(first.knowledgeChanges[0]?.classification, "NEW");
+
+  const second = await runAgent({
+    input, context: runContext, repository, maxRounds: 1,
+    research: async () => response([makeEvidence(newClaim)]),
+  });
+  const retrieved = second.steps.find((step) => step.state === "RETRIEVE")?.output;
+  const stored = repository.listPersonalKnowledge(runContext).map((record) => record.text);
+  assert.match(String(retrieved), new RegExp(oldClaim.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.equal(second.response?.signals[0]?.informationGainStatus, "UPDATED_INFORMATION");
+  assert.equal(second.knowledgeChanges[0]?.classification, "UPDATES");
+  assert.equal(stored.filter((text) => text === oldClaim).length, 1);
+  assert.equal(stored.filter((text) => text === newClaim).length, 1);
+});
+
+test("a conflicting claim about stored knowledge is classified as CONTRADICTS and does not replace it", async () => {
+  const repository = new InMemorySignalRepository();
+  const runContext = { ...context, filterId: "filter-knowledge-conflict" };
+  const known = "Palmier Pro launched an open-source AI video editor for macOS.";
+  const contradiction = "Palmier Pro did not launch an open-source AI video editor for macOS.";
+  const first = await runAgent({
+    input, context: runContext, repository, maxRounds: 1,
+    research: async () => response([evidenceSignal({
+      id: "palmier-known",
+      title: known,
+      summary: known,
+      sourceUrl: "https://example.com/palmier-pro",
+    })]),
+  });
+  assert.equal(first.knowledgeChanges[0]?.classification, "NEW");
+
+  const second = await runAgent({
+    input, context: runContext, repository,
+    research: async () => response([evidenceSignal({
+      id: "palmier-conflict",
+      title: contradiction,
+      summary: contradiction,
+      sourceUrl: "https://news.example.com/palmier-denial",
+      verificationStatus: "conflicting",
+      reliabilityScore: 42,
+    })]),
+  });
+  const retrieved = second.steps.find((step) => step.state === "RETRIEVE")?.output;
+  assert.match(String(retrieved), /Palmier Pro launched/);
+  assert.equal(second.response?.signals[0]?.verificationStatus, "conflicting");
+  assert.equal(second.evaluation.conflictDetected, true);
+  assert.equal(second.knowledgeChanges.some((change) => change.classification === "CONTRADICTS"), false);
+  assert.equal(repository.listPersonalKnowledge(runContext).some((record) => record.text === contradiction), false);
+  assert.equal(repository.listPersonalKnowledge(runContext).filter((record) => record.text === known).length, 1);
+});
+
 test("CONFIRMS updates provenance without duplicate knowledge or revision", async () => {
   const repository = new InMemorySignalRepository();
   repository.addPersonalKnowledge(context, {
