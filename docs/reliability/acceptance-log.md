@@ -358,3 +358,15 @@ Rules:
 - Fixture downstream: 候选最终在 Reliability / Verification 被拒（单条未验证 HN social/tier C 源）→ 判定 contract-consistent，**不是 Evidence Entry 失败**。未修改 Reliability / Verification。
 - 明确: REAL E2E EVIDENCE ENTRY NOT YET AVAILABLE；REAL E2E RE-TEST PENDING。不写 "Evidence Quality = LOCKED"，不写 "Reliability = bug"/"Verification = bug"（除非后续直接证据）。
 - Prior chain: Canonical Detail Fetch = LOCKED；Claim Construction = LOCKED（TRUE POSITIVE = fresh claim-VALID fixture；TRUE NEGATIVE = Mosaic CORRECT_REJECTION）。
+
+## 2026-09-21 — Reliability / Verification Calibration
+
+- Date: 2026-09-21
+- Commit: PENDING
+- Layer: Evidence Quality / Reliability / Verification
+- Status: FORMAL FIXTURE LOCKED / REAL E2E PENDING（不写 REAL E2E CLOSED）
+- Formal regression: tests/reliability-positive.test.ts（1 PASS）
+- TRUE NEGATIVE（evidence-entry.test.ts）: single HN social/discovery → verificationStatus=unverified → reliability=30 → LOW_RELIABILITY → CORRECT_REJECTION。
+- TRUE POSITIVE（reliability-positive.test.ts）: HN social + independent arXiv primary（related()=true）→ verificationStatus=verified → independentEvidenceCount=2 → reliability=94 ≥ 55 → lowReliability=0 / insufficientVerification=0 → PASS。
+- 边界: canonical 首方目标 ≠ independent corroboration；single unverified source → low reliability 是产品 contract，非 implementation bug。未改 Reliability/Verification threshold。
+- 明确: REAL E2E Evidence Entry / Reliability / Verification 仍 PENDING（真实 E2E 尚未有候选进入 Evidence）。
