@@ -774,6 +774,100 @@ test("an accepted knowledge update reaches attention without recomputing the dec
   assert.equal(second.steps.some((step) => step.state === "ATTENTION"), true);
 });
 
+test("attention TRUE POSITIVE: a fresh verified high-judgement new fact reaches MUST_READ", async () => {
+  const repository = new InMemorySignalRepository();
+  const runContext = { ...context, filterId: "filter-attention-tp" };
+  const claim = "Palmier Pro released a new AI video editor for macOS with automated rough cut.";
+  const result = await runAgent({
+    input, context: runContext, repository, maxRounds: 1,
+    research: async () => response([evidenceSignal({
+      id: "palmier-fresh",
+      title: claim,
+      summary: claim,
+      sourceUrl: "https://example.com/palmier-pro",
+      verificationStatus: "verified",
+      reliabilityScore: 92,
+      relevanceScore: 90,
+      noveltyScore: 86,
+      judgementImpactScore: 60,
+      actionabilityStatus: "TEST_NOW",
+      informationGainStatus: "NEW_INFORMATION",
+      attentionDecision: "MUST_READ",
+    })]),
+  });
+  assert.equal(result.response?.signals[0]?.informationGainStatus, "NEW_INFORMATION");
+  assert.equal(result.response?.signals[0]?.attentionDecision, "MUST_READ");
+  assert.deepEqual(result.attention, ["MUST_READ"]);
+  assert.equal(result.knowledgeChanges[0]?.classification, "NEW");
+  assert.equal(repository.listPersonalKnowledge(runContext).length, 1);
+});
+
+test("attention TRUE NEGATIVE: an already-known fact is not elevated to high attention", async () => {
+  const repository = new InMemorySignalRepository();
+  const runContext = { ...context, filterId: "filter-attention-tn" };
+  repository.addPersonalKnowledge(runContext, {
+    type: "KNOWN_INFORMATION",
+    text: "Palmier Pro launched an open-source AI video editor for macOS.",
+  }, "2026-09-05T00:00:00.000Z");
+  const beforeRevision = repository.getResearchContextRevision(runContext);
+  const result = await runAgent({
+    input, context: runContext, repository, maxRounds: 1,
+    research: async () => response([evidenceSignal({
+      id: "palmier-known-again",
+      title: "Palmier Pro launched an open-source AI video editor for macOS.",
+      summary: "The same release fact is already known.",
+      sourceUrl: "https://example.com/palmier-pro",
+      verificationStatus: "verified",
+      reliabilityScore: 92,
+      informationGainStatus: "NO_INFORMATION_GAIN",
+      knowledgeStatus: "KNOWN",
+      attentionDecision: "LIBRARY_ONLY",
+    })]),
+  });
+  assert.equal(result.response?.signals[0]?.informationGainStatus, "NO_INFORMATION_GAIN");
+  assert.equal(result.knowledgeChanges.length, 0);
+  assert.equal(result.attention.includes("MUST_READ"), false);
+  assert.equal(result.attention.includes("WORTH_WATCHING"), false);
+  assert.equal(repository.getResearchContextRevision(runContext), beforeRevision);
+  assert.equal(repository.listPersonalKnowledge(runContext).length, 1);
+});
+
+test("attention disconnect: a research-stage synonym duplicate keeps precomputed MUST_READ despite reconcile NO_INFORMATION_GAIN", async () => {
+  const repository = new InMemorySignalRepository();
+  const runContext = { ...context, filterId: "filter-attention-tn-synonym" };
+  const claim = "Palmier Pro launched an open-source AI video editor for macOS.";
+  const synonym = "Palmier Pro launches an open-source AI video editor for macOS.";
+  const makeEvidence = (id: string, title: string, attention: ResearchSignal["attentionDecision"]) => evidenceSignal({
+    id,
+    title,
+    summary: title,
+    sourceUrl: "https://example.com/palmier-pro",
+    verificationStatus: "verified",
+    reliabilityScore: 92,
+    relevanceScore: 90,
+    noveltyScore: 86,
+    judgementImpactScore: 60,
+    actionabilityStatus: "TEST_NOW",
+    informationGainStatus: "NEW_INFORMATION",
+    knowledgeStatus: "NOVEL",
+    attentionDecision: attention,
+  });
+
+  await runAgent({
+    input, context: runContext, repository, maxRounds: 1,
+    research: async () => response([makeEvidence("palmier-first", claim, "MUST_READ")]),
+  });
+  const second = await runAgent({
+    input, context: runContext, repository, maxRounds: 1,
+    research: async () => response([makeEvidence("palmier-synonym", synonym, "MUST_READ")]),
+  });
+  assert.equal(second.response?.signals[0]?.informationGainStatus, "NO_INFORMATION_GAIN");
+  assert.equal(second.knowledgeChanges.length, 0);
+  assert.equal(repository.listPersonalKnowledge(runContext).length, 1);
+  // reconcile correctly blocked the write, but the precomputed attention was never revised.
+  assert.deepEqual(second.attention, ["MUST_READ"]);
+});
+
 test("a conflicting claim about stored knowledge is classified as CONTRADICTS and does not replace it", async () => {
   const repository = new InMemorySignalRepository();
   const runContext = { ...context, filterId: "filter-knowledge-conflict" };

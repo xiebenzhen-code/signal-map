@@ -183,6 +183,21 @@ Taxonomy on a signal, set in `research/research-pipeline.ts` before `runAgent` c
 
 Pipeline attention does consult its own earlier `informationGainStatus` when choosing `MUST_READ`. It does not read the later `compareKnowledge` classification. Whether a knowledge update should raise attention above `LIBRARY_ONLY` is still open. Real E2E is pending.
 
+## Attention disconnect (calibrated)
+
+Two layers compute information gain independently, and they can diverge:
+
+- Research stage sets `signal.informationGainStatus` in `research/actionability.ts` from `novelty-attribution` (an exact claim-variant match) before attention is computed.
+- `reconcileInformationGain` in `agent/evaluation.ts` later recomputes it from a fuzzy claim fingerprint / token overlap against stored knowledge.
+
+For a synonym duplicate, `novelty-attribution` does not see a match, so research stage reports `NEW_INFORMATION` and can set `MUST_READ`. `reconcileInformationGain` does match and sets `NO_INFORMATION_GAIN` and blocks the knowledge write, but `runAgent` never revises the already-precomputed attention. Verified by `tests/agent-runner.test.ts`:
+
+- Attention TRUE POSITIVE (fresh, verified, high judgement, `TEST_NOW`, `NEW_INFORMATION`): carries `MUST_READ` and writes knowledge.
+- Attention TRUE NEGATIVE (already-known, `NO_INFORMATION_GAIN`): stays below `MUST_READ`/`WORTH_WATCHING` and does not write.
+- Attention disconnect: synonym duplicate yields `NO_INFORMATION_GAIN` and no write, yet `runAgent.attention` still carries the precomputed `["MUST_READ"]`.
+
+So the orchestration gap does produce a real wrong decision: a duplicate the user already knows can be pushed as `MUST_READ`. **Attention = PARTIALLY CALIBRATED.** The wiring that should let the reconciled knowledge comparison revise attention is not implemented. It is recorded here as an architecture gap, not fixed in this round.
+
 Not locked, because Conflict and Major Change are still open. Do not read this as “Knowledge Comparison = LOCKED.”
 
 ## 12. Data and Repository Layer
@@ -237,7 +252,7 @@ Commands used for the gates in this cycle: `npm test`, `npm run typecheck`, `npm
 | Verification | Formal fixture lock | same pair | pending | not auto-closed by reliability |
 | Knowledge compare | Entry, duplicate, supplement, conflict fixture pass | `tests/agent-runner.test.ts` | pending | conflict requires incoming `conflicting` status; major change open |
 | Information gain | Used by compare | agent-runner dedup tests | pending | `NO_INFORMATION_GAIN` blocks writes |
-| Attention | Entry fixture pass | `tests/agent-runner.test.ts` | pending | `runAgent` records the decision already on the signal; it does not recompute it from the comparison |
+| Attention | Partially calibrated | `tests/agent-runner.test.ts` | pending | TP/TN fixtures pass; synonym-duplicate disconnect is a recorded architecture gap, not fixed |
 | Knowledge update | Wired | duplicate does not double-write | pending | in-memory fixture |
 | Scheduler | Present | scheduler tests exist | not closed | out of scope |
 
