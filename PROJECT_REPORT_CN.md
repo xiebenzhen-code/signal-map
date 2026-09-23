@@ -98,6 +98,34 @@ Signal Map 是一个**个人信息认知系统**（Personal Intelligence Agent�
 
 以上 ⑨ 之前已有模块编号；此处 Feedback 学习闭环为新增能力，实现在本报告较晚阶段完成，放在这里以便与"已实现能力"整体对照。
 
+### ⑨-ter Personal Alpha 10-query 真实 E2E（只读检查结果，未执行）
+
+本轮对"真实 10 连查 E2E"做了只读检查而非直接执行。分类：**C —— 当前配置下无法形成真实跨轮状态回路**。未执行，未伪造结果。
+
+检查发现：
+
+- **知识**：生产或设了 `DATABASE_URL` 时，`backend/handlers.ts` 的 `agentRepository()` 每次调用都新包一个 `PostgresSignalRepository`（共享连接池，知识跨 run）；无 DB 时用进程单例 `InMemorySignalRepository`。
+- **偏好（preference）**：`PreferenceRepository`（`savePreference`/`listPreferences`）**只在** `InMemorySignalRepository` 实现；`PostgresSignalRepository` 未实现。因此真实 Postgres 路径下 `runAgent` 读不到偏好，偏好→注意力闭环仅内存、**进程重启即丢**。
+- **仓库复用**：Postgres 路径复用共享连接池（知识跨 run），InMemory 路径复用进程单例。决定因素是偏好持久化，不是仓库身份。
+- **真实 provider E2E harness**：不存在。所有当前测试要么 mock `fetch`、要么用 stub `research:` 注入预成型 signal。没有"跑真实 provider 检索、跨 10 个顺序 query"的 harness。
+- **四项隔离性**（反馈不改事实真值/可靠性/验证、无跨 scope 偏好污染、重复降级不被误归因于偏好）已在 `tests/agent-runner.test.ts` fixture 级锁定，但未对真实数据演示。
+
+显式状态：
+
+```text
+REAL SAME-PROCESS PERSONAL LOOP  = NOT EXECUTED
+DURABLE LONG-TERM PREFERENCE LOOP = PENDING
+```
+
+不写 "REAL WORLD LONG-TERM LOOP CLOSED"。
+
+阻塞点在两项，需按序确认：
+
+1. 是否接受**持久化偏好路径**（Postgres `PreferenceRepository` 迁移）——若闭环必须跨重启，就需要它。本轮未实现，仅报告方案，未擅自扩 scope。
+2. 是否把**真实网络 provider harness**（以及哪些 provider 当前可达）纳入范围。此前真实检索对若干 query 返回 0 候选，是 Evidence E2E 保持 PENDING 的原因。
+
+这不是"永远无法做 E2E"，而是今天 harness 的真实状态；如实报告而非伪造。
+
 ### ⑨-bis 数据层、运行时与部署（Data / Runtime / Deployment）
 
 - **数据层（Data / Repository）**：`InMemorySignalRepository`（内存仓库，供测试）、PostgreSQL 仓库与 pgvector 迁移（有独立测试）。注意：pgvector 检索**不是**当前 fixture 比较所走的路径——那是内存指纹 + 词重叠。

@@ -217,6 +217,27 @@ A user preference is persisted and actually changes the next run's decision.
 
 Status: **Feedback learning loop = FORMAL FIXTURE PASS / LOCAL**. Long-term real-world loop is not closed.
 
+## Personal Alpha 10-query real E2E (inspection result — not executed)
+
+A read-only inspection was done in place of a real 10-query run. Classification: **C — a real cross-round state loop is not reachable as configured today.** Not executed, no fabricated results.
+
+Findings:
+
+- **Knowledge**: In production (`NODE_ENV=production`) or when `DATABASE_URL` is set, `backend/handlers.ts` `agentRepository()` builds a new `PostgresSignalRepository` wrapper around a shared pool each call (state lives in the shared Postgres connection pool, so knowledge is cross-run). Without a database it uses a process-singleton `InMemorySignalRepository`.
+- **Preference**: `PreferenceRepository` (`savePreference`/`listPreferences`) is implemented **only** in `InMemorySignalRepository`. `PostgresSignalRepository` does not implement it, so in the real Postgres-backed path `runAgent` reads no preferences; the preference → attention loop is in-memory only and is **not durable across a process restart**.
+- **Repository reuse**: Postgres path reuses the shared connection pool (cross-run knowledge); InMemory path reuses a process singleton. Preference durability is the limiting factor, not repository identity.
+- **Real provider E2E harness**: none exists. Every current test either mocks `fetch` or drives `runAgent` with a stubbed `research:` callback that injects pre-formed signals. There is no harness that runs genuine provider retrieval across ten sequential queries.
+- **Isolation checks** (feedback does not rewrite fact truth/reliability/verification, no cross-scope preference pollution, duplicate downgrade not misattributed to preference) are locked at the fixture level in `tests/agent-runner.test.ts`, but were not demonstrated against live data.
+
+Explicit status: **REAL SAME-PROCESS PERSONAL LOOP = NOT EXECUTED; DURABLE LONG-TERM PREFERENCE LOOP = PENDING**. Not written as "REAL WORLD LONG-TERM LOOP CLOSED".
+
+Blocked on two decisions, in order:
+
+1. Whether to accept a durable preference path (Postgres `PreferenceRepository` migration) — required if the loop must survive restart. Not implemented this round; migration proposed, not applied.
+2. Whether a real-network provider harness (and which providers are reachable) is in scope. Current real retrieval between processes earlier returned 0 candidates for several queries, which was the reason Evidence E2E stayed PENDING.
+
+Do not read this as "cannot ever do E2E"; it is the honest state of the harness today, reported instead of fabricated.
+
 Not locked, because Conflict and Major Change are still open. Do not read this as “Knowledge Comparison = LOCKED.”
 
 ## 12. Data and Repository Layer
