@@ -175,6 +175,14 @@ Second run retrieves the old record, sets `UPDATED_INFORMATION`, emits `UPDATES`
 
 Knowledge Comparison is therefore **PARTIALLY CALIBRATED**, not formal-fixture locked.
 
+## Attention entry
+
+Taxonomy on a signal, set in `research/research-pipeline.ts` before `runAgent` compares knowledge: `MUST_READ`, `WORTH_WATCHING`, `LIBRARY_ONLY`, `IGNORE`. `MUST_READ` requires reliability at least 70, relevance, novelty, judgement impact, `TEST_NOW`, information gain that is not `NO_INFORMATION_GAIN`, verified content, and a recent-change description. `WORTH_WATCHING` is the signal-tier branch. Everything else that is not ignored stays `LIBRARY_ONLY`. These are internal decisions. This calibration does not send a notification.
+
+`runAgent` does not rebuild that decision from `UPDATES` or `DUPLICATE`. On STOP, and only when evidence is sufficient and there is no conflict, it copies `signal.attentionDecision` into the run result and records an `ATTENTION` step. The supplement fixture reaches that step with `UPDATED_INFORMATION` / `UPDATES` and keeps the incoming `LIBRARY_ONLY`. That is **ATTENTION ENTRY PASS**, local only, not a true-positive attention calibration. `LIBRARY_ONLY` is not a failure.
+
+Pipeline attention does consult its own earlier `informationGainStatus` when choosing `MUST_READ`. It does not read the later `compareKnowledge` classification. Whether a knowledge update should raise attention above `LIBRARY_ONLY` is still open. Real E2E is pending.
+
 Not locked, because Conflict and Major Change are still open. Do not read this as “Knowledge Comparison = LOCKED.”
 
 ## 12. Data and Repository Layer
@@ -229,7 +237,7 @@ Commands used for the gates in this cycle: `npm test`, `npm run typecheck`, `npm
 | Verification | Formal fixture lock | same pair | pending | not auto-closed by reliability |
 | Knowledge compare | Entry, duplicate, supplement, conflict fixture pass | `tests/agent-runner.test.ts` | pending | conflict requires incoming `conflicting` status; major change open |
 | Information gain | Used by compare | agent-runner dedup tests | pending | `NO_INFORMATION_GAIN` blocks writes |
-| Attention | Implemented | not calibrated here | pending | out of scope |
+| Attention | Entry fixture pass | `tests/agent-runner.test.ts` | pending | `runAgent` records the decision already on the signal; it does not recompute it from the comparison |
 | Knowledge update | Wired | duplicate does not double-write | pending | in-memory fixture |
 | Scheduler | Present | scheduler tests exist | not closed | out of scope |
 

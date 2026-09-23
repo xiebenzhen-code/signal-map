@@ -732,6 +732,48 @@ test("an accepted same-source claim that adds a new capability updates knowledge
   assert.equal(stored.filter((text) => text === newClaim).length, 1);
 });
 
+test("an accepted knowledge update reaches attention without recomputing the decision", async () => {
+  const repository = new InMemorySignalRepository();
+  const runContext = { ...context, filterId: "filter-attention-entry" };
+  const oldClaim = "Palmier Pro launched an open-source AI video editor for macOS.";
+  const newClaim = "Palmier Pro launched an open-source AI video editor for macOS and now supports automated rough cut and shot selection.";
+  const makeEvidence = (claimText: string) => evidenceSignal({
+    id: `signal-${claimText}`,
+    title: claimText,
+    summary: claimText,
+    sourceUrl: "https://example.com/palmier-pro",
+    attentionDecision: "LIBRARY_ONLY",
+    actionabilityStatus: "TEST_NOW",
+    informationGainStatus: "NEW_INFORMATION",
+    claims: [{
+      claimText,
+      sourceUrl: "https://example.com/palmier-pro",
+      publisher: "Official",
+      sourceType: "primary",
+      sourceTier: "S",
+      evidenceSnippet: claimText,
+      verificationStatus: "verified",
+      contentType: "FACT",
+      independentEvidenceCount: 1,
+      evidenceSources: [],
+    }],
+  });
+
+  await runAgent({
+    input, context: runContext, repository, maxRounds: 1,
+    research: async () => response([makeEvidence(oldClaim)]),
+  });
+  const second = await runAgent({
+    input, context: runContext, repository,
+    research: async () => response([makeEvidence(newClaim)]),
+  });
+  assert.equal(second.response?.signals[0]?.informationGainStatus, "UPDATED_INFORMATION");
+  assert.equal(second.knowledgeChanges[0]?.classification, "UPDATES");
+  assert.equal(second.response?.signals[0]?.attentionDecision, "LIBRARY_ONLY");
+  assert.deepEqual(second.attention, ["LIBRARY_ONLY"]);
+  assert.equal(second.steps.some((step) => step.state === "ATTENTION"), true);
+});
+
 test("a conflicting claim about stored knowledge is classified as CONTRADICTS and does not replace it", async () => {
   const repository = new InMemorySignalRepository();
   const runContext = { ...context, filterId: "filter-knowledge-conflict" };
