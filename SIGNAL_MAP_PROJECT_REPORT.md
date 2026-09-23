@@ -204,6 +204,19 @@ Verified by `tests/agent-runner.test.ts`:
 
 **Attention = FORMAL FIXTURE LOCKED / REAL E2E PENDING.** `reconcileAttentionDecision` only handles the reconciled `NO_INFORMATION_GAIN` case; it does not rewrite the whole attention policy, does not map `UPDATES` to `MUST_READ`, and does not touch Conflict or Major Change semantics.
 
+## Feedback learning loop (calibrated)
+
+A user preference is persisted and actually changes the next run's decision.
+
+- **Model**: `UserPreferenceRecord` (`scopeType` entity/topic/category, `scopeValue`, `feedbackType` = `LOWER_ATTENTION`, timestamps). Prior to this round only `FeedbackRecord`/`ExperienceFeedback` types existed with no write path or consumer.
+- **Persistence**: new `PreferenceRepository` (`savePreference`, `listPreferences`), implemented in `InMemorySignalRepository`, tenant-scoped by user + filter. Postgres was not forced to migrate this round and does not yet implement it.
+- **Consumption**: `runAgent` loads preferences each run and applies `applyAttentionPreferences` after knowledge reconciliation, before the final attention result is assembled.
+- **Loop fixture** (`tests/agent-runner.test.ts`): run 1 with no preference, a fresh verified high-value signal → `MUST_READ`; user persists `LOWER_ATTENTION` for entity "Palmier Pro"; run 2 uses a distinct new fact about the same entity (not a duplicate) → preference is read from the repository and attention drops to `LIBRARY_ONLY`.
+- **Attribution is clean**: the second case is a real information-gain fact (`UPDATED_INFORMATION`, not `NO_INFORMATION_GAIN`), so reconcile would not downgrade it; the downgrade comes solely from the persisted preference.
+- **Principle**: user feedback changes "whether I should be bothered" (personalized Attention), not "whether the fact is true" (epistemic state). Knowledge, evidence, reliability and verification are not rewritten by feedback.
+
+Status: **Feedback learning loop = FORMAL FIXTURE PASS / LOCAL**. Long-term real-world loop is not closed.
+
 Not locked, because Conflict and Major Change are still open. Do not read this as “Knowledge Comparison = LOCKED.”
 
 ## 12. Data and Repository Layer
@@ -260,6 +273,7 @@ Commands used for the gates in this cycle: `npm test`, `npm run typecheck`, `npm
 | Information gain | Used by compare | agent-runner dedup tests | pending | `NO_INFORMATION_GAIN` blocks writes |
 | Attention | Formal fixture lock | `tests/agent-runner.test.ts` | pending | TP/TN/semantic-duplicate fixtures; reconcile corrects provisional attention |
 | Knowledge update | Wired | duplicate does not double-write | pending | in-memory fixture |
+| Feedback loop | Formal fixture pass (local) | `tests/agent-runner.test.ts` | pending | preference lowers attention; postgres preferences not migrated |
 | Scheduler | Present | scheduler tests exist | not closed | out of scope |
 
 ## 17. Remaining Roadmap

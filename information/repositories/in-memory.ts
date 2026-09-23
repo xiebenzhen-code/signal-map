@@ -8,6 +8,8 @@ import {
   type PersonalKnowledgeRecord,
   type PersonalKnowledgeRecordInput,
   type ResearchRunMetadata,
+  type UserPreferenceInput,
+  type UserPreferenceRecord,
 } from "../rag-records.ts";
 import type {
   AuthenticatedFilterContext,
@@ -19,6 +21,7 @@ import type {
   NotificationRepository,
   OwnedFilterRecord,
   PersonalKnowledgeRepository,
+  PreferenceRepository,
   ResearchContextRepository,
 } from "./types.ts";
 import type { Goal } from "../../agent/goal-types.ts";
@@ -50,12 +53,14 @@ export class InMemorySignalRepository implements
   GoalRepository,
   NotificationRepository,
   PersonalKnowledgeRepository,
+  PreferenceRepository,
   ResearchContextRepository {
   private events = new Map<string, EventRecord>();
   private eventKeys = new Map<string, string>();
   private claims = new Map<string, ClaimRecord>();
   private evidence = new Map<string, EvidenceRecord>();
   private knowledge = new Map<string, PersonalKnowledgeRecord[]>();
+  private preferences = new Map<string, UserPreferenceRecord[]>();
   private revisions = new Map<string, number>();
   private runMetadata = new Map<string, ResearchRunMetadata[]>();
   private goals = new Map<string, Goal>();
@@ -215,6 +220,26 @@ export class InMemorySignalRepository implements
 
   filterBelongsTo(context: AuthenticatedFilterContext) {
     return this.getFilter(context) !== null;
+  }
+
+  savePreference(context: AuthenticatedFilterContext, input: UserPreferenceInput, now: string) {
+    const id = stableRecordId([tenantKey(context), input.scopeType, input.scopeValue, input.feedbackType]);
+    const existing = (this.preferences.get(tenantKey(context)) ?? []).find((pref) => pref.id === id);
+    const record: UserPreferenceRecord = {
+      id,
+      scopeType: input.scopeType,
+      scopeValue: input.scopeValue,
+      feedbackType: input.feedbackType,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    const list = (this.preferences.get(tenantKey(context)) ?? []).filter((pref) => pref.id !== id);
+    this.preferences.set(tenantKey(context), [...list, record]);
+    return record;
+  }
+
+  listPreferences(context: AuthenticatedFilterContext) {
+    return [...(this.preferences.get(tenantKey(context)) ?? [])];
   }
 
   saveGoal(context: AuthenticatedFilterContext, goal: Goal) {

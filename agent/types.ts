@@ -6,6 +6,7 @@ import type {
   EventRepository,
   EvidenceRepository,
   PersonalKnowledgeRepository,
+  PreferenceRepository,
   ResearchContextRepository,
 } from "../information/repositories/types.ts";
 
@@ -180,7 +181,8 @@ export type AgentRunOptions = {
     ClaimRepository &
     EvidenceRepository &
     PersonalKnowledgeRepository &
-    ResearchContextRepository;
+    ResearchContextRepository &
+    Partial<PreferenceRepository>;
   runId?: string;
   userQuery?: string;
   maxRounds?: number;

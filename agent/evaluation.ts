@@ -156,6 +156,33 @@ export function reconcileAttentionDecision(signal: ResearchSignal): void {
   }
 }
 
+// A user preference (e.g. "don't actively notify me about this entity") is a
+// personal-attention modifier: it lowers how loudly a matching signal is surfaced,
+// but it never rewrites whether the underlying fact is true. Factual knowledge,
+// evidence and verification are untouched.
+export function applyAttentionPreferences(
+  response: ResearchResponse,
+  preferences: Array<{ scopeType: string; scopeValue: string; feedbackType: string }>,
+): void {
+  if (!preferences.length) return;
+  const lowerAttention = preferences.filter((pref) => pref.feedbackType === "LOWER_ATTENTION");
+  if (!lowerAttention.length) return;
+  for (const signal of response.signals) {
+    const matches = lowerAttention.some((pref) =>
+      pref.scopeType === "entity"
+        ? signal.entityMatches.some((entity) => entity.toLowerCase() === pref.scopeValue.toLowerCase())
+        : pref.scopeType === "topic"
+          ? `${signal.originalTitle || signal.title} ${signal.originalSummary || signal.summary}`
+            .toLowerCase()
+            .includes(pref.scopeValue.toLowerCase())
+          : false,
+    );
+    if (matches && (signal.attentionDecision === "MUST_READ" || signal.attentionDecision === "WORTH_WATCHING")) {
+      signal.attentionDecision = "LIBRARY_ONLY";
+    }
+  }
+}
+
 export function evaluateEvidence(response: ResearchResponse, round: number, maxRounds: number): EvidenceEvaluation {
   const signals = response.signals;
   const topicRelevant = signals.filter((signal) => signal.topicRelevance?.decision !== "TOPIC_MISMATCH");

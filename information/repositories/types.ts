@@ -5,6 +5,8 @@ import type {
   PersonalKnowledgeRecord,
   PersonalKnowledgeRecordInput,
   ResearchRunMetadata,
+  UserPreferenceInput,
+  UserPreferenceRecord,
 } from "../rag-records.ts";
 import type { Goal } from "../../agent/goal-types.ts";
 import type { NotificationRecord } from "../../notification/types.ts";
@@ -92,4 +94,9 @@ export interface NotificationRepository {
   listNotifications(context: AuthenticatedFilterContext): MaybePromise<NotificationRecord[]>;
   claimNotification(context: AuthenticatedFilterContext, notificationId: string, leaseOwner: string, leaseExpiresAt: string, now: string): MaybePromise<NotificationRecord | null>;
   markNotificationRead(context: AuthenticatedFilterContext, notificationId: string, now: string): MaybePromise<NotificationRecord | null>;
+}
+
+export interface PreferenceRepository {
+  savePreference(context: AuthenticatedFilterContext, input: UserPreferenceInput, now: string): MaybePromise<UserPreferenceRecord>;
+  listPreferences(context: AuthenticatedFilterContext): MaybePromise<UserPreferenceRecord[]>;
 }

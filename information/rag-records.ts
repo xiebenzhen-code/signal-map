@@ -122,6 +122,25 @@ export type SignalRecords = {
   evidence: EvidenceRecord[];
 };
 
+export type UserPreferenceScopeType = "entity" | "topic" | "category";
+
+export type UserPreferenceType = "LOWER_ATTENTION";
+
+export type UserPreferenceRecord = {
+  id: string;
+  scopeType: UserPreferenceScopeType;
+  scopeValue: string;
+  feedbackType: UserPreferenceType;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type UserPreferenceInput = {
+  scopeType: UserPreferenceScopeType;
+  scopeValue: string;
+  feedbackType: UserPreferenceType;
+};
+
 export const RESEARCH_CONTEXT_KNOWLEDGE_TYPES = new Set<PersonalKnowledgeType>([
   "KNOWN_INFORMATION",
   "QUESTION",

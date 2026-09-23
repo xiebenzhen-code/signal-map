@@ -81,7 +81,24 @@ Signal Map 是一个**个人信息认知系统**（Personal Intelligence Agent�
 - 本轮**修复**了一个真实架构 gap：研究阶段先用启发式算一个"预注意力"（provisional attention），之后知识比较（reconcile）才能确认信息增益。修复前，一个用户已知的同义重复（launched/launches）会以 `MUST_READ` 被推送。
 - **最小修复**：新增 `reconcileAttentionDecision`，在 reconcile 之后把 `NO_INFORMATION_GAIN` 的信号从 `MUST_READ`/`WORTH_WATCHING` 降为 `LIBRARY_ONLY`。已用正/反/语义重复三个 fixture 锁定，不误伤真正的新信息。
 
-### ⑨ 其他
+### ⑨ 用户反馈学习闭环（Feedback / Learning Loop）—— 已实现（本地 fixture）
+
+这条是"个人认知"真正区别于普通 RAG 的关键：**用户的反馈被持久化，并在下一次运行时实际改变系统判断**。
+
+- **数据模型**：`UserPreferenceRecord`（用户偏好记录），字段为 `scopeType`（作用域：实体/主题/类别）、`scopeValue`（作用域值，如 "Palmier Pro"）、`feedbackType`（反馈类型，本轮为 `LOWER_ATTENTION` 即"降低注意力"）、`createdAt`/`updatedAt`。
+- **持久化**：新增 `PreferenceRepository` 接口（`savePreference` / `listPreferences`），`InMemorySignalRepository` 已实现；按用户 + filter 作用域隔离。postgres 本轮不强做迁移，未强制实现该接口。
+- **消费点**：`runAgent` 每次运行加载已保存的 preferences，在知识协调之后、最终注意力组装之前应用 `applyAttentionPreferences`。
+- **行为闭环**：运行 1 无偏好时，一条新鲜 verified 高价值信号 → `MUST_READ`；用户反馈"这类信息以后不用提醒我"（`LOWER_ATTENTION` for entity "Palmier Pro"）；运行 2 用同一实体的**新事实**（并非重复）→ 加载偏好 → 从 `MUST_READ` 降为 `LIBRARY_ONLY`。
+- **关键产品原则**：用户反馈改变的是**"是否值得打扰我"（personalized Attention）**，**不是**"事实是否成立"（epistemic state）。知识记录、证据、reliability、verification 均不被反馈改写。
+- **归因干净**：第二个用例特意用"非重复的新事实"，从而证明降级唯一来自持久化的偏好，而不是由于 reconcile 判重（reconcile 只降 `NO_INFORMATION_GAIN`，此处是 `UPDATED_INFORMATION`）。
+
+（关于反馈与整体系统位置，见第一部分 1.2 与第二部分 2.3。）
+
+### ⑨-bis 补充说明
+
+以上 ⑨ 之前已有模块编号；此处 Feedback 学习闭环为新增能力，实现在本报告较晚阶段完成，放在这里以便与"已实现能力"整体对照。
+
+### ⑨-bis 数据层、运行时与部署（Data / Runtime / Deployment）
 
 - **数据层（Data / Repository）**：`InMemorySignalRepository`（内存仓库，供测试）、PostgreSQL 仓库与 pgvector 迁移（有独立测试）。注意：pgvector 检索**不是**当前 fixture 比较所走的路径——那是内存指纹 + 词重叠。
 - **运行时与预算（Runtime / Budget）**：`BudgetManager`、约 25s 的 worker deadline、post-processing 预算预留。**不靠无限加超时来掩盖质量问题**。
@@ -201,6 +218,7 @@ FIRST LOSS（第一个失败点）
 | 信息增益 Information Gain | 被比较使用 | 去重测试 | 待定 |
 | 注意力 Attention | 正式 fixture 锁 | 正+负+语义重复 | 待定 |
 | 知识更新 Knowledge Update | 已接 | 重复不双写 | 内存 fixture |
+| 反馈学习反馈 Feedback Loop | 正式 fixture pass（本地） | agent-runner 测试 | 未闭环 | 偏好降低注意力；postgres 偏好未迁移 |
 | 调度 Scheduler | 存在 | 测试存在 | 未关闭 |
 | 主动发现 Proactive | 未校准 | — | — |
 

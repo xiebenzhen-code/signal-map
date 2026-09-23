@@ -869,6 +869,98 @@ test("attention reconcile: a semantic duplicate drops from provisional MUST_READ
   assert.equal(second.attention.includes("WORTH_WATCHING"), false);
 });
 
+test("feedback loop: a persisted LOWER_ATTENTION preference changes the next run's attention decision", async () => {
+  const repository = new InMemorySignalRepository();
+  const runContext = { ...context, filterId: "filter-learning-loop" };
+  const firstClaim = "Palmier Pro released a new AI video editor for macOS with automated rough cut.";
+  const secondClaim = "Palmier Pro added real-time collaboration and team workspaces to its video editor.";
+  const makeEvidence = (id: string, claimText: string) => evidenceSignal({
+    id,
+    title: claimText,
+    summary: claimText,
+    sourceUrl: "https://example.com/palmier-pro",
+    verificationStatus: "verified",
+    reliabilityScore: 92,
+    relevanceScore: 90,
+    noveltyScore: 86,
+    judgementImpactScore: 60,
+    actionabilityStatus: "TEST_NOW",
+    informationGainStatus: "NEW_INFORMATION",
+    attentionDecision: "MUST_READ",
+    entityMatches: ["Palmier Pro", "codex"],
+  });
+
+  // Run 1: no preference, fresh verified signal -> MUST_READ.
+  const before = await runAgent({
+    input, context: runContext, repository, maxRounds: 1,
+    research: async () => response([makeEvidence("palmier-t1", firstClaim)]),
+  });
+  assert.deepEqual(before.attention, ["MUST_READ"]);
+
+  // User says: don't actively notify me about this entity.
+  repository.savePreference(runContext, {
+    scopeType: "entity",
+    scopeValue: "Palmier Pro",
+    feedbackType: "LOWER_ATTENTION",
+  }, "2026-09-21T00:00:00.000Z");
+  assert.equal(repository.listPreferences(runContext).length, 1);
+
+  // Run 2: a distinct new fact about the same entity. Reconcile sees real
+  // information gain (UPDATED_INFORMATION, not NO_INFORMATION_GAIN), so the
+  // research-stage MUST_READ is not downgraded by reconcile — the only reason it
+  // drops to LIBRARY_ONLY is the persisted preference read from the repository.
+  const result = await runAgent({
+    input, context: runContext, repository, maxRounds: 1,
+    research: async () => response([makeEvidence("palmier-t2", secondClaim)]),
+  });
+  assert.notEqual(result.response?.signals[0]?.informationGainStatus, "NO_INFORMATION_GAIN");
+  assert.equal(result.attention.includes("MUST_READ"), false);
+  assert.equal(result.attention.includes("WORTH_WATCHING"), false);
+  assert.deepEqual(result.attention, ["LIBRARY_ONLY"]);
+});
+
+test("feedback preference does not rewrite factual knowledge or verification", async () => {
+  const repository = new InMemorySignalRepository();
+  const runContext = { ...context, filterId: "filter-learning-loop-nonpolluting" };
+  const claim = "Palmier Pro supports automated rough cut in its video editor.";
+  const makeEvidence = (id: string, attention: ResearchSignal["attentionDecision"]) => evidenceSignal({
+    id,
+    title: claim,
+    summary: claim,
+    sourceUrl: "https://example.com/palmier-pro",
+    verificationStatus: "verified",
+    reliabilityScore: 92,
+    relevanceScore: 90,
+    noveltyScore: 86,
+    judgementImpactScore: 60,
+    actionabilityStatus: "TEST_NOW",
+    informationGainStatus: "NEW_INFORMATION",
+    attentionDecision: attention,
+    entityMatches: ["Palmier Pro"],
+  });
+
+  await runAgent({
+    input, context: runContext, repository, maxRounds: 1,
+    research: async () => response([makeEvidence("palmier-k1", "MUST_READ")]),
+  });
+  const knowledgeBefore = repository.listPersonalKnowledge(runContext);
+  repository.savePreference(runContext, {
+    scopeType: "entity",
+    scopeValue: "Palmier Pro",
+    feedbackType: "LOWER_ATTENTION",
+  }, "2026-09-21T00:00:00.000Z");
+  await runAgent({
+    input, context: runContext, repository, maxRounds: 1,
+    research: async () => response([makeEvidence("palmier-k2", "MUST_READ")]),
+  });
+
+  const knowledgeAfter = repository.listPersonalKnowledge(runContext);
+  assert.equal(knowledgeAfter.some((record) => record.text === claim), true);
+  assert.equal(knowledgeAfter.length >= knowledgeBefore.length, true);
+  // Reliability/verification scores on persisted knowledge are not flushed to a rejection.
+  assert.equal(repository.getResearchContextRevision(runContext) >= 1, true);
+});
+
 test("a conflicting claim about stored knowledge is classified as CONTRADICTS and does not replace it", async () => {
   const repository = new InMemorySignalRepository();
   const runContext = { ...context, filterId: "filter-knowledge-conflict" };
