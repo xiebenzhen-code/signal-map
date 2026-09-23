@@ -181,22 +181,28 @@ Taxonomy on a signal, set in `research/research-pipeline.ts` before `runAgent` c
 
 `runAgent` does not rebuild that decision from `UPDATES` or `DUPLICATE`. On STOP, and only when evidence is sufficient and there is no conflict, it copies `signal.attentionDecision` into the run result and records an `ATTENTION` step. The supplement fixture reaches that step with `UPDATED_INFORMATION` / `UPDATES` and keeps the incoming `LIBRARY_ONLY`. That is **ATTENTION ENTRY PASS**, local only, not a true-positive attention calibration. `LIBRARY_ONLY` is not a failure.
 
-Pipeline attention does consult its own earlier `informationGainStatus` when choosing `MUST_READ`. It does not read the later `compareKnowledge` classification. Whether a knowledge update should raise attention above `LIBRARY_ONLY` is still open. Real E2E is pending.
+Pipeline attention does consult its own earlier `informationGainStatus` when choosing `MUST_READ`; `runAgent` recomputes the reconciled gain and can correct the provisional decision (see below). Real E2E is pending.
 
-## Attention disconnect (calibrated)
+## Attention disconnect (calibrated) — found and fixed
 
-Two layers compute information gain independently, and they can diverge:
+Two layers computed information gain independently, and they diverged:
 
-- Research stage sets `signal.informationGainStatus` in `research/actionability.ts` from `novelty-attribution` (an exact claim-variant match) before attention is computed.
-- `reconcileInformationGain` in `agent/evaluation.ts` later recomputes it from a fuzzy claim fingerprint / token overlap against stored knowledge.
+- Research stage set `signal.informationGainStatus` in `research/actionability.ts` from `novelty-attribution` (an exact claim-variant match) before attention was computed.
+- `reconcileInformationGain` in `agent/evaluation.ts` recomputed it later from a fuzzy claim fingerprint / token overlap against stored knowledge.
 
-For a synonym duplicate, `novelty-attribution` does not see a match, so research stage reports `NEW_INFORMATION` and can set `MUST_READ`. `reconcileInformationGain` does match and sets `NO_INFORMATION_GAIN` and blocks the knowledge write, but `runAgent` never revises the already-precomputed attention. Verified by `tests/agent-runner.test.ts`:
+For a synonym duplicate, `novelty-attribution` did not see a match, so research stage reported `NEW_INFORMATION` and set `MUST_READ`. `reconcileInformationGain` did match and set `NO_INFORMATION_GAIN` and blocked the knowledge write, but `runAgent` did not revise the already-precomputed attention.
 
-- Attention TRUE POSITIVE (fresh, verified, high judgement, `TEST_NOW`, `NEW_INFORMATION`): carries `MUST_READ` and writes knowledge.
+**Before:** research-stage attention was final; a duplicate the user already knew could be pushed as `MUST_READ`. Recorded as an architecture gap.
+
+**After:** research-stage attention is provisional. `reconcileAttentionDecision` (called in `runAgent` right after `reconcileInformationGain`) downgrades any signal whose reconciled gain is `NO_INFORMATION_GAIN` from `MUST_READ`/`WORTH_WATCHING` to `LIBRARY_ONLY`, before the final attention result is assembled. The knowledge-comparison/attention wiring is now consistent.
+
+Verified by `tests/agent-runner.test.ts`:
+
+- Attention TRUE POSITIVE (fresh, verified, high judgement, `TEST_NOW`, `NEW_INFORMATION`): still carries `MUST_READ` and writes knowledge — not flattened.
 - Attention TRUE NEGATIVE (already-known, `NO_INFORMATION_GAIN`): stays below `MUST_READ`/`WORTH_WATCHING` and does not write.
-- Attention disconnect: synonym duplicate yields `NO_INFORMATION_GAIN` and no write, yet `runAgent.attention` still carries the precomputed `["MUST_READ"]`.
+- Semantic duplicate regression: synonym duplicate now yields `NO_INFORMATION_GAIN`, no write, no knowledge change, and **no** `MUST_READ`/`WORTH_WATCHING`; final attention is low.
 
-So the orchestration gap does produce a real wrong decision: a duplicate the user already knows can be pushed as `MUST_READ`. **Attention = PARTIALLY CALIBRATED.** The wiring that should let the reconciled knowledge comparison revise attention is not implemented. It is recorded here as an architecture gap, not fixed in this round.
+**Attention = FORMAL FIXTURE LOCKED / REAL E2E PENDING.** `reconcileAttentionDecision` only handles the reconciled `NO_INFORMATION_GAIN` case; it does not rewrite the whole attention policy, does not map `UPDATES` to `MUST_READ`, and does not touch Conflict or Major Change semantics.
 
 Not locked, because Conflict and Major Change are still open. Do not read this as “Knowledge Comparison = LOCKED.”
 
@@ -252,7 +258,7 @@ Commands used for the gates in this cycle: `npm test`, `npm run typecheck`, `npm
 | Verification | Formal fixture lock | same pair | pending | not auto-closed by reliability |
 | Knowledge compare | Entry, duplicate, supplement, conflict fixture pass | `tests/agent-runner.test.ts` | pending | conflict requires incoming `conflicting` status; major change open |
 | Information gain | Used by compare | agent-runner dedup tests | pending | `NO_INFORMATION_GAIN` blocks writes |
-| Attention | Partially calibrated | `tests/agent-runner.test.ts` | pending | TP/TN fixtures pass; synonym-duplicate disconnect is a recorded architecture gap, not fixed |
+| Attention | Formal fixture lock | `tests/agent-runner.test.ts` | pending | TP/TN/semantic-duplicate fixtures; reconcile corrects provisional attention |
 | Knowledge update | Wired | duplicate does not double-write | pending | in-memory fixture |
 | Scheduler | Present | scheduler tests exist | not closed | out of scope |
 

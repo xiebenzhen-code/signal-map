@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { runResearchPipeline } from "../research/research-pipeline.ts";
 import type { ResearchResponse } from "../research/types.ts";
 import { BudgetManager, type BudgetSnapshot } from "./budget-manager.ts";
-import { compareKnowledge, evaluateEvidence, reconcileInformationGain } from "./evaluation.ts";
+import { compareKnowledge, evaluateEvidence, reconcileAttentionDecision, reconcileInformationGain } from "./evaluation.ts";
 import { persistResearchRecords, updateKnowledgeFromChanges } from "./knowledge-updater.ts";
 import { createResearchPlan } from "./query-planner.ts";
 import { ResearchRunState, mergeRoundAttempts, type EvidencePreservationSnapshot } from "./research-run-state.ts";
@@ -387,6 +387,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     cumulativeResponse.intentOutput = mapIntentOutput(cumulativeResponse, sourceProfile);
     response = cumulativeResponse;
     reconcileInformationGain(response, persistedKnowledge, persistedEvidence);
+    for (const signal of response.signals) reconcileAttentionDecision(signal);
     add("RESEARCH", "completed", { round }, {
       signals: response.signals.length,
       dataMode: response.dataMode,

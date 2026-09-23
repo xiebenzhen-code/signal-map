@@ -832,7 +832,7 @@ test("attention TRUE NEGATIVE: an already-known fact is not elevated to high att
   assert.equal(repository.listPersonalKnowledge(runContext).length, 1);
 });
 
-test("attention disconnect: a research-stage synonym duplicate keeps precomputed MUST_READ despite reconcile NO_INFORMATION_GAIN", async () => {
+test("attention reconcile: a semantic duplicate drops from provisional MUST_READ to low attention", async () => {
   const repository = new InMemorySignalRepository();
   const runContext = { ...context, filterId: "filter-attention-tn-synonym" };
   const claim = "Palmier Pro launched an open-source AI video editor for macOS.";
@@ -864,8 +864,9 @@ test("attention disconnect: a research-stage synonym duplicate keeps precomputed
   assert.equal(second.response?.signals[0]?.informationGainStatus, "NO_INFORMATION_GAIN");
   assert.equal(second.knowledgeChanges.length, 0);
   assert.equal(repository.listPersonalKnowledge(runContext).length, 1);
-  // reconcile correctly blocked the write, but the precomputed attention was never revised.
-  assert.deepEqual(second.attention, ["MUST_READ"]);
+  // The reconciled result must correct the stale research-stage decision.
+  assert.equal(second.attention.includes("MUST_READ"), false);
+  assert.equal(second.attention.includes("WORTH_WATCHING"), false);
 });
 
 test("a conflicting claim about stored knowledge is classified as CONTRADICTS and does not replace it", async () => {

@@ -144,6 +144,18 @@ export function reconcileInformationGain(
   return response;
 }
 
+// Provisional research-stage attention may be stale once knowledge reconciliation
+// has determined the signal carries no new information. Downgrade high-priority
+// attention for such signals instead of surfacing an already-known fact as urgent.
+export function reconcileAttentionDecision(signal: ResearchSignal): void {
+  if (
+    signal.informationGainStatus === "NO_INFORMATION_GAIN" &&
+    (signal.attentionDecision === "MUST_READ" || signal.attentionDecision === "WORTH_WATCHING")
+  ) {
+    signal.attentionDecision = "LIBRARY_ONLY";
+  }
+}
+
 export function evaluateEvidence(response: ResearchResponse, round: number, maxRounds: number): EvidenceEvaluation {
   const signals = response.signals;
   const topicRelevant = signals.filter((signal) => signal.topicRelevance?.decision !== "TOPIC_MISMATCH");
