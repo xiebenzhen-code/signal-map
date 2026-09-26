@@ -8,6 +8,8 @@ import {
   type PersonalKnowledgeRecord,
   type PersonalKnowledgeRecordInput,
   type ResearchRunMetadata,
+  type UserPreferenceInput,
+  type UserPreferenceRecord,
 } from "../rag-records.ts";
 import type {
   AuthenticatedFilterContext,
@@ -19,6 +21,7 @@ import type {
   NotificationRepository,
   OwnedFilterRecord,
   PersonalKnowledgeRepository,
+  PreferenceRepository,
   ResearchContextRepository,
 } from "./types.ts";
 import type { Goal, GoalTaskMetadata, GoalTransition, GoalWatchMetadata } from "../../agent/goal-types.ts";
@@ -259,6 +262,28 @@ function filterFromRow(row: FilterRow): OwnedFilterRecord {
   };
 }
 
+type UserPreferenceRow = {
+  id: string;
+  user_id: string;
+  filter_id: string;
+  scope_type: string;
+  scope_value: string;
+  feedback_type: string;
+  created_at: string;
+  updated_at: string;
+};
+
+function userPreferenceFromRow(row: UserPreferenceRow): UserPreferenceRecord {
+  return {
+    id: row.id,
+    scopeType: row.scope_type as UserPreferenceRecord["scopeType"],
+    scopeValue: row.scope_value,
+    feedbackType: row.feedback_type as UserPreferenceRecord["feedbackType"],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 export class PostgresSignalRepository implements
   EventRepository,
   ClaimRepository,
@@ -267,6 +292,7 @@ export class PostgresSignalRepository implements
   GoalRepository,
   NotificationRepository,
   PersonalKnowledgeRepository,
+  PreferenceRepository,
   ResearchContextRepository {
   private client: PostgresClient;
   private recoverReadClient?: RecoverPostgresReadClient;
@@ -516,6 +542,40 @@ export class PostgresSignalRepository implements
       [context.authenticatedUserId, context.filterId],
     );
     return result.rows.map(knowledgeFromRow);
+  }
+
+  async savePreference(context: AuthenticatedFilterContext, input: UserPreferenceInput, now: string) {
+    const tenant = `${context.authenticatedUserId}:${context.filterId}`;
+    const id = stableRecordId([tenant, input.scopeType, input.scopeValue, input.feedbackType]);
+    const result = await this.client.query<UserPreferenceRow>(
+      `INSERT INTO user_preferences (
+        id, user_id, filter_id, scope_type, scope_value, feedback_type, created_at, updated_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      ON CONFLICT (user_id, filter_id, scope_type, scope_value, feedback_type) DO UPDATE SET
+        updated_at = EXCLUDED.updated_at,
+        id = EXCLUDED.id
+      RETURNING *`,
+      [
+        id,
+        context.authenticatedUserId,
+        context.filterId,
+        input.scopeType,
+        input.scopeValue,
+        input.feedbackType,
+        now,
+        now,
+      ],
+    );
+    return userPreferenceFromRow(result.rows[0]);
+  }
+
+  async listPreferences(context: AuthenticatedFilterContext) {
+    const result = await this.readOnlyQuery<UserPreferenceRow>(
+      "listPreferences",
+      "SELECT * FROM user_preferences WHERE user_id = $1 AND filter_id = $2 ORDER BY created_at ASC",
+      [context.authenticatedUserId, context.filterId],
+    );
+    return result.rows.map(userPreferenceFromRow);
   }
 
   async getResearchContextRevision(context: AuthenticatedFilterContext) {

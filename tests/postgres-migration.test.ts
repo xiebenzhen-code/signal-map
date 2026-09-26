@@ -8,6 +8,21 @@ const migration = readFileSync(
   "utf8",
 );
 
+const preferenceMigration = readFileSync(
+  join(process.cwd(), "migrations", "0002_user_preferences.sql"),
+  "utf8",
+);
+
+test("preference migration persists user-scoped LOWER_ATTENTION preferences", () => {
+  assert.match(preferenceMigration, /CREATE TABLE IF NOT EXISTS user_preferences/);
+  assert.match(preferenceMigration, /user_id TEXT NOT NULL/);
+  assert.match(preferenceMigration, /filter_id TEXT NOT NULL/);
+  assert.match(preferenceMigration, /scope_type TEXT NOT NULL/);
+  assert.match(preferenceMigration, /scope_value TEXT NOT NULL/);
+  assert.match(preferenceMigration, /feedback_type TEXT NOT NULL/);
+  assert.match(preferenceMigration, /UNIQUE \(user_id, filter_id, scope_type, scope_value, feedback_type\)/);
+});
+
 test("RAG migration models Event, Claim, Evidence, and Personal Knowledge", () => {
   assert.match(migration, /CREATE TABLE IF NOT EXISTS events/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS claims/);

@@ -82,8 +82,10 @@ export async function readMigration(name: string) {
 }
 
 export async function runRagCoreMigration(pool = getPostgresPool()) {
-  const sql = await readMigration("0001_rag_core.sql");
-  await pool.query(sql);
+  for (const name of ["0001_rag_core.sql", "0002_user_preferences.sql"]) {
+    const sql = await readMigration(name);
+    await pool.query(sql);
+  }
 }
 
 export async function closePostgresPool() {
