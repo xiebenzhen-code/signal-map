@@ -16,6 +16,7 @@ import {
   handleControlKnowledge,
   handleControlNotificationRead,
   handleControlNotifications,
+  handlePreference,
   handleResearchAgent,
   handleResearchPlan,
   handleResearchStream,
@@ -92,6 +93,8 @@ export async function handleBackendRequest(request: Request) {
     response = await handleControlNotifications(request);
   } else if (url.pathname === "/api/control/knowledge") {
     response = await handleControlKnowledge(request);
+  } else if (url.pathname === "/api/preferences") {
+    response = await handlePreference(request);
   } else if (url.pathname === "/api/control/agent-runs") {
     response = await handleControlAgentRuns(request);
   } else {

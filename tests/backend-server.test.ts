@@ -193,3 +193,24 @@ test("standalone backend rejects unknown routes and providers", async () => {
   );
   assert.equal(unknownProvider.status, 404);
 });
+
+test("preference endpoint exists and rejects unauthenticated access", async () => {
+  const post = await handleBackendRequest(
+    new Request("http://localhost/api/preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scopeType: "entity", scopeValue: "Palmier Pro", feedbackType: "LOWER_ATTENTION" }),
+    }),
+  );
+  assert.equal(post.status, 401);
+
+  const get = await handleBackendRequest(
+    new Request("http://localhost/api/preferences"),
+  );
+  assert.equal(get.status, 401);
+
+  const method = await handleBackendRequest(
+    new Request("http://localhost/api/preferences", { method: "DELETE" }),
+  );
+  assert.equal(method.status, 405);
+});

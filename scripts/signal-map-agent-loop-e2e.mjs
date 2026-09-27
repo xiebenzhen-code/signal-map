@@ -36,6 +36,7 @@ const phaseReports = {
   persistence: section("Persistence"),
   realResearch: section("Real Research"),
   statefulSecondRun: section("Stateful Second Run"),
+  tenQuery: section("Real Provider 10-Query"),
 };
 
 let qualityReport = null;
@@ -1698,6 +1699,211 @@ async function latestAgentRuns(session, filterId) {
   return response.data?.agentRuns || [];
 }
 
+const TEN_QUERY_SEQUENCE = [
+  { q: "Palmier Pro launch news for macOS AI video editing", entity: "Palmier Pro", phase: "NEW_BASELINE" },
+  { q: "Palmier Pro launch news for macOS AI video editing", entity: "Palmier Pro", phase: "DUPLICATE_SAME_FACT" },
+  { q: "Palmier Pro shipped team workspace collaboration", entity: "Palmier Pro", phase: "UPDATE_PROBE" },
+  { q: "unverified rumor claims Palmier Pro will pivot to hardware", entity: "Palmier Pro", phase: "RELIABILITY_DIFF" },
+  { q: "Acme agent coding tool official release", entity: "Acme", phase: "NEW_ENTITY_B" },
+  { q: "Acme agent coding tool official release", entity: "Acme", phase: "DUPLICATE_ENTITY_B" },
+  { q: "Palmier Pro collaboration rollout details", entity: "Palmier Pro", phase: "SAVE_PREFERENCE_RESTART" },
+  { q: "Palmier Pro pricing and plan changes", entity: "Palmier Pro", phase: "PREFERENCE_ATTRIBUTION" },
+  { q: "Acme agent tool new benchmark results", entity: "Acme", phase: "ISOLATION_CONTROL" },
+  { q: "Palmier Pro high-value launch follow-up", entity: "Palmier Pro", phase: "PREFERENCE_STABILITY" },
+];
+
+function runAgentStatesFromTrace(trace) {
+  const states = Array.isArray(trace) ? trace.map((entry) => entry?.state).filter(Boolean) : [];
+  const required = ["UNDERSTAND", "RETRIEVE", "INTENT", "EVALUATE", "UPDATE_KNOWLEDGE"];
+  return {
+    present: required.filter((state) => states.includes(state)),
+    proven: required.every((state) => states.includes(state)),
+  };
+}
+
+function classifyQueryFailure(httpStatus, data) {
+  if (httpStatus >= 500 || data?.errorCode === "DB_TIMEOUT") return "BUSINESS_FAILURE";
+  const accounting = data?.evidenceAccounting || null;
+  const discovered = Number(accounting?.discoveredCandidateCount ?? 0);
+  const accepted = Number(accounting?.acceptedEvidenceCount ?? 0);
+  const reasons = accounting?.rejectionReasons || null;
+  const hasRejectionReasons = Boolean(reasons) && Object.values(reasons).some((value) => Number(value) > 0);
+  const failuresText = (Array.isArray(data?.failures) ? data.failures : [])
+    .map((item) => JSON.stringify(item)).join(" ");
+  const providerFailure = /upstream_error|timeout|forbidden|failed_to_fetch|unreachable|econn/i.test(failuresText);
+  if (discovered === 0 && providerFailure) return "PROVIDER_FAILURE";
+  if (discovered > 0 && accepted === 0 && hasRejectionReasons) return "CORRECT_REJECTION";
+  if (discovered === 0 && !providerFailure) return "CORRECT_EMPTY";
+  return "PRODUCED";
+}
+
+function hasHighAttention(value) {
+  return /MUST_READ|WORTH_WATCHING/i.test(String(value || ""));
+}
+
+function hasLowAttention(value) {
+  return /LIBRARY_ONLY|IGNORE/i.test(String(value || ""));
+}
+
+async function scopedKnowledgeCount(session, filterId) {
+  const response = await session.request(`/api/control/knowledge?filterId=${encodeURIComponent(filterId)}`);
+  if (response.status !== 200) return null;
+  const list = Array.isArray(response.data?.knowledge) ? response.data.knowledge : [];
+  return list.length;
+}
+
+async function runTenQuerySequence(session, filterId) {
+  const report = phaseReports.tenQuery;
+  const rows = [];
+  let preferenceSavedStatus = null;
+
+  for (let i = 0; i < TEN_QUERY_SEQUENCE.length; i += 1) {
+    const item = TEN_QUERY_SEQUENCE[i];
+    const requestId = `${runId}-tq-${i + 1}`;
+    const knowledgeBefore = await scopedKnowledgeCount(session, filterId);
+    const response = await session.request(`/api/signals?filterId=${encodeURIComponent(filterId)}`, {
+      method: "POST",
+      requestId,
+      body: {
+        filterId,
+        identity: "Signal Map E2E ten-query",
+        industry: item.q,
+        focusAreas: item.q,
+        currentQuestions: item.q,
+        knownInformation: "Use only the authenticated test account state and live public evidence. Do not use fixtures.",
+        informationGaps: "What evidence-backed changes or opportunities should a user pay attention to?",
+        trackedEntities: "",
+        trackedEvents: "",
+        userJudgements: "",
+        evidenceHistory: "",
+        freshnessWindow: "30d",
+        sourceScope: "hybrid",
+      },
+    });
+    await delay(200);
+
+    const runs = await latestAgentRuns(session, filterId);
+    const latest = runs[0] || null;
+    const attention = Array.isArray(latest?.finalAttention) ? latest.finalAttention
+      : Array.isArray(latest?.attentionResult) ? latest.attentionResult : [];
+    const attentionText = attention.join(",") || "none";
+    const agentPath = runAgentStatesFromTrace(latest?.trace);
+    const accounting = response.data?.evidenceAccounting || null;
+    let classification = "NO_RUN";
+    const changes = Array.isArray(latest?.knowledgeChanges) ? latest.knowledgeChanges : [];
+    const changeLabels = changes.map((change) => change?.classification).filter(Boolean);
+    if (/duplicate|no_information_gain/i.test(changeLabels.join("|"))) classification = "DUPLICATE";
+    else if (/updates?/i.test(changeLabels.join("|"))) classification = "UPDATED";
+    else if (changeLabels.length) classification = "NEW";
+    const knowledgeAfter = await scopedKnowledgeCount(session, filterId);
+
+    // After the Q6 duplicate probe, persist a LOWER_ATTENTION preference for the
+    // Palmier Pro entity, then restart the server to prove the preference is
+    // durable (Postgres-backed, not process memory) before preference-sensitive queries.
+    if (item.phase === "SAVE_PREFERENCE_RESTART" && preferenceSavedStatus === null) {
+      const saved = await session.request(`/api/preferences?filterId=${encodeURIComponent(filterId)}`, {
+        method: "POST",
+        body: { filterId, scopeType: "entity", scopeValue: "Palmier Pro", feedbackType: "LOWER_ATTENTION" },
+      });
+      preferenceSavedStatus = saved.status;
+      stopServer();
+      startServer();
+      await waitForHealth();
+      const persisted = await session.request(`/api/preferences?filterId=${encodeURIComponent(filterId)}`);
+      const list = Array.isArray(persisted.data?.preferences) ? persisted.data.preferences : [];
+      const match = list.find((pref) => pref.scopeValue === "Palmier Pro" && pref.feedbackType === "LOWER_ATTENTION");
+      addEvidence(report, `Q${i + 1} preference save HTTP ${saved.status}; after restart list HTTP ${persisted.status} matches=${Boolean(match)}`);
+      if (!match) {
+        fail(report, "LOWER_ATTENTION preference for Palmier Pro was not durable across restart", { requestId });
+        return;
+      }
+    }
+
+    const row = {
+      index: i + 1,
+      phase: item.phase,
+      entity: item.entity,
+      query: item.q,
+      httpStatus: response.status,
+      requestId,
+      failureClass: classifyQueryFailure(response.status, response.data),
+      classification,
+      discovered: Number(accounting?.discoveredCandidateCount ?? 0),
+      produced: Number(accounting?.producedEvidenceCount ?? 0),
+      accepted: Number(accounting?.acceptedEvidenceCount ?? 0),
+      rejectionReasons: accounting?.rejectionReasons || null,
+      evidenceCount: latest?.evidenceCount ?? 0,
+      attention: attentionText,
+      knowledgeChanges: changeLabels.join("|") || "none",
+      knowledgeBefore,
+      knowledgeAfter,
+      knowledgeUnchanged: knowledgeBefore !== null && knowledgeAfter !== null && knowledgeBefore === knowledgeAfter,
+      runAgentStates: agentPath.present.join("|") || "none",
+      runAgentPath: agentPath.proven,
+    };
+    rows.push(row);
+    addEvidence(report, `Q${row.index} [${item.phase}] ${row.entity} http=${row.httpStatus} fail=${row.failureClass} class=${row.classification} attn=${row.attention} kb:${row.knowledgeBefore}->${row.knowledgeAfter} evidence=${row.evidenceCount} agent=${row.runAgentPath}`);
+  }
+
+  const businessFailures = rows.filter((row) => row.failureClass === "BUSINESS_FAILURE");
+  const agentPathProven = rows.some((row) => row.runAgentPath);
+  const baseline = rows.find((row) => row.phase === "NEW_BASELINE");
+  const duplicateRow = rows.find((row) => row.phase === "DUPLICATE_SAME_FACT");
+  const preferenceRow = rows.find((row) => row.phase === "PREFERENCE_ATTRIBUTION");
+  const isolationRow = rows.find((row) => row.phase === "ISOLATION_CONTROL");
+
+  // Duplicate attribution: same fact, no knowledge growth, classification DUPLICATE,
+  // and attention dropped from the NEW baseline (when the baseline produced attention).
+  const duplicateObserved = Boolean(duplicateRow) && duplicateRow.classification === "DUPLICATE";
+  const duplicateNoWrite = Boolean(duplicateRow?.knowledgeUnchanged);
+  const duplicateAttentionDropped = Boolean(baseline && duplicateRow)
+    && hasHighAttention(baseline.attention)
+    && !hasHighAttention(duplicateRow.attention);
+  const duplicateCaseClosed = duplicateObserved && duplicateNoWrite && duplicateAttentionDropped;
+
+  // Preference attribution: non-duplicate real-gain fact, attention lowered anyway,
+  // while the no-preference entity in the same sequence keeps high attention.
+  const preferenceNonDuplicate = Boolean(preferenceRow) && preferenceRow.classification !== "DUPLICATE" && preferenceRow.classification !== "NO_RUN";
+  const preferenceLowered = Boolean(preferenceRow) && !hasHighAttention(preferenceRow.attention) && hasLowAttention(preferenceRow.attention);
+  const isolationHeld = Boolean(isolationRow)
+    ? !hasLowAttention(isolationRow.attention) || hasHighAttention(isolationRow.attention)
+    : false;
+  const preferenceCaseClosed = preferenceNonDuplicate && preferenceLowered && isolationHeld;
+
+  if (businessFailures.length) {
+    fail(report, `BUSINESS_FAILURE at ${businessFailures.map((row) => `Q${row.index}(${row.failureClass}:http${row.httpStatus})`).join(", ")}`, {
+      requestId: businessFailures[0].requestId,
+      rows,
+    });
+    return;
+  }
+
+  const closedCases = [duplicateCaseClosed, preferenceCaseClosed].filter(Boolean).length;
+  if (agentPathProven && closedCases === 2) {
+    pass(report, {
+      requestId: `${runId}-tq`,
+      rows,
+      duplicateCaseClosed,
+      preferenceCaseClosed,
+      isolationHeld,
+      agentPathProven,
+    });
+  } else {
+    const missing = [];
+    if (!agentPathProven) missing.push("runAgent trace chain not observed");
+    if (!duplicateCaseClosed) missing.push(`duplicate case closed=${duplicateCaseClosed} (observed=${duplicateObserved}, noWrite=${duplicateNoWrite}, attentionDropped=${duplicateAttentionDropped})`);
+    if (!preferenceCaseClosed) missing.push(`preference case closed=${preferenceCaseClosed} (nonDuplicate=${preferenceNonDuplicate}, lowered=${preferenceLowered}, isolation=${isolationHeld})`);
+    partial(report, `real provider sequence completed with ${rows.length} queries; not all acceptance cases closed: ${missing.join("; ")}`, {
+      requestId: `${runId}-tq`,
+      rows,
+      duplicateCaseClosed,
+      preferenceCaseClosed,
+      isolationHeld,
+      agentPathProven,
+    });
+  }
+}
+
 function includesResearchChain(phases) {
   const required = [
     "research_started",
@@ -1743,6 +1949,7 @@ async function cleanup() {
     const eventIds = [...new Set(claimRows.rows.map((row) => row.event_id).filter(Boolean))];
     await query("DELETE FROM notifications WHERE user_id = ANY($1::text[]) AND filter_id = ANY($2::text[])", [userIds, filterIds]);
     await query("DELETE FROM goals WHERE user_id = ANY($1::text[]) AND filter_id = ANY($2::text[])", [userIds, filterIds]);
+    await query("DELETE FROM user_preferences WHERE user_id = ANY($1::text[]) AND filter_id = ANY($2::text[])", [userIds, filterIds]);
     await query("DELETE FROM personal_knowledge WHERE user_id = ANY($1::text[]) AND filter_id = ANY($2::text[])", [userIds, filterIds]);
     await query("DELETE FROM research_context_revisions WHERE user_id = ANY($1::text[]) AND filter_id = ANY($2::text[])", [userIds, filterIds]);
     await query("DELETE FROM research_run_metadata WHERE user_id = ANY($1::text[]) AND filter_id = ANY($2::text[])", [userIds, filterIds]);
@@ -1993,6 +2200,14 @@ async function main() {
       addEvidence(phaseReports.authTenant, `Logout A HTTP ${logoutA.status}; Logout B HTTP ${logoutB.status}`);
     } catch (error) {
       fail(phaseReports.statefulSecondRun, sanitize(error instanceof Error ? error.message : error), { lastPhase: "stateful_second_run" });
+    }
+
+    try {
+      const harnessSession = new HttpSession("Account A (ten-query)");
+      await login(harnessSession, process.env.TEST_ACCOUNT_A_EMAIL, process.env.TEST_ACCOUNT_A_PASSWORD);
+      await runTenQuerySequence(harnessSession, filterA);
+    } catch (error) {
+      fail(phaseReports.tenQuery, sanitize(error instanceof Error ? error.message : error), { lastPhase: "ten_query_sequence" });
     }
   } finally {
     await cleanup();

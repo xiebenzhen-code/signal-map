@@ -22,6 +22,7 @@ import {
 import { createPostgresRepository, databaseConfigured } from "./postgres.ts";
 import { InMemorySignalRepository } from "../information/repositories/in-memory.ts";
 import type { AgentRunOptions } from "../agent/types.ts";
+import type { UserPreferenceInput } from "../information/rag-records.ts";
 import { socialAccessLayer, type SocialProvider } from "../social/providers/index.ts";
 import { toPublicConnectionStatus } from "../social/access/public-connection.ts";
 
@@ -461,6 +462,29 @@ export const handleControlNotificationRead = withSession(async (request: Request
   const result = await markControlNotificationRead({ context: auth.context, repository, notificationId });
   if (!result.notification) return Response.json({ error: "Notification not found" }, { status: 404 });
   return Response.json(result, { headers: { "Cache-Control": "no-store" } });
+});
+
+// Minimal preference endpoint: persists a user preference via the existing
+// PreferenceRepository. No business logic — v1.1 E2E validation entry point only.
+export const handlePreference = withSession(async (request: Request) => {
+  const repository = agentRepository();
+  const auth = await authorizedContext(request, repository, { createFilterIfMissing: request.method === "POST" });
+  if (auth.response) return auth.response;
+  if (request.method === "GET") {
+    const preferences = await Promise.resolve(repository.listPreferences?.(auth.context) ?? []);
+    return Response.json({ preferences }, { headers: { "Cache-Control": "no-store" } });
+  }
+  if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
+  const body = await bodyRecord(request);
+  const scopeType = body.scopeType === "entity" || body.scopeType === "topic" || body.scopeType === "category" ? body.scopeType : undefined;
+  const scopeValue = typeof body.scopeValue === "string" ? body.scopeValue.trim() : "";
+  if (body.feedbackType !== "LOWER_ATTENTION" || !scopeType || !scopeValue) {
+    return Response.json({ error: "Invalid preference" }, { status: 400 });
+  }
+  const input: UserPreferenceInput = { scopeType, scopeValue, feedbackType: "LOWER_ATTENTION" };
+  const saved = await Promise.resolve(repository.savePreference?.(auth.context, input, new Date().toISOString()));
+  if (!saved) return Response.json({ error: "Preference repository unavailable" }, { status: 503 });
+  return Response.json({ preference: saved }, { headers: { "Cache-Control": "no-store" } });
 });
 
 export const handleAuthLogin = withSession(async (request: Request) => {
