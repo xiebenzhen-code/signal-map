@@ -22,6 +22,7 @@ jobs:
       CI: "true"
       PORT: "18080"
       SIGNAL_MAP_ALLOWED_ORIGIN: http://127.0.0.1:18080
+      SIGNAL_MAP_SCENARIO_CONFIG: ${{ github.workspace }}/docs/verification-scenarios.example.json
       DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
       POSTGRES_SSL: ${{ secrets.POSTGRES_SSL }}
       NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
