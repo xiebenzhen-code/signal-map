@@ -60,7 +60,10 @@ export async function handleBackendRequest(request: Request) {
   let response: Response;
 
   if (url.pathname === "/health") {
-    response = Response.json({ status: "ok" }, { headers: { "Cache-Control": "no-store" } });
+    response = Response.json({
+      status: "ok",
+      instanceId: process.env.SIGNAL_MAP_SERVER_INSTANCE_ID ?? null,
+    }, { headers: { "Cache-Control": "no-store" } });
   } else if (url.pathname === "/api/signals") {
     response = await handleSignals(request);
   } else if (url.pathname === "/api/auth/login") {

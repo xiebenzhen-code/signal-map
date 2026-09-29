@@ -1,8 +1,12 @@
-import { randomUUID } from "node:crypto";
-import { writeFile } from "node:fs/promises";
-import { spawn } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { spawn, execSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import pg from "pg";
+// Real production attention-preference modifier: replay evidence is re-derived
+// by executing this, never by trusting caller-declared outcome booleans.
+import { applyAttentionPreferences } from "../agent/evaluation.ts";
 
 const { Client } = pg;
 
@@ -21,6 +25,8 @@ const qualityReportPathJson = "signal-map-agent-quality-report.json";
 const qualityReportPathMd = "signal-map-agent-quality-report.md";
 const signalsDeadlineBudgetMs = 25_000;
 const minimumRetrievalBudgetMs = 4_000;
+const captureDir = process.env.SIGNAL_MAP_CAPTURE_DIR || join("captures", runId);
+const scenarioConfigPath = process.env.SIGNAL_MAP_SCENARIO_CONFIG || null;
 
 const statuses = {
   pass: "PASS",
@@ -49,7 +55,9 @@ const created = {
 };
 
 let serverProcess = null;
+let serverInstance = null;
 let dbClient = null;
+let acceptanceSessions = [];
 let statefulSecondRunForQuality = null;
 
 function section(name) {
@@ -202,6 +210,18 @@ async function query(sql, values = []) {
   return dbClient.query(sql, values);
 }
 
+// Apply the repository's idempotent migrations to the connected test database.
+// Called ONLY after phase0SafetyCheck has validated the database identity and
+// safety configuration, so a misconfigured target receives zero writes.
+async function applyMigrations() {
+  const migrationsDir = join(process.cwd(), "migrations");
+  const files = (await readdir(migrationsDir)).filter((file) => file.endsWith(".sql")).sort();
+  for (const file of files) {
+    await query(await readFile(join(migrationsDir, file), "utf8"));
+  }
+  return files;
+}
+
 async function verifySchemaReady() {
   const expectedTables = [
     "filters",
@@ -210,6 +230,7 @@ async function verifySchemaReady() {
     "research_run_metadata",
     "goals",
     "notifications",
+    "user_preferences",
   ];
   const result = await query(
     `SELECT table_name FROM information_schema.tables
@@ -241,15 +262,18 @@ async function waitForHealth(timeoutMs = 15_000) {
 function startServer(envOverrides = {}) {
   if (serverProcess) throw new Error("Server already running");
   serverLogs.length = 0;
+  const instanceId = randomUUID();
   serverProcess = spawn(process.execPath, ["dist-api/server.mjs"], {
     env: {
       ...process.env,
       PORT: String(port),
       SIGNAL_MAP_ALLOWED_ORIGIN: origin,
+      SIGNAL_MAP_SERVER_INSTANCE_ID: instanceId,
       ...envOverrides,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
+  serverInstance = { instanceId, pid: serverProcess.pid };
   serverProcess.stdout.setEncoding("utf8");
   serverProcess.stderr.setEncoding("utf8");
   const capture = (chunk) => {
@@ -263,20 +287,75 @@ function startServer(envOverrides = {}) {
   serverProcess.on("exit", (code, signal) => {
     serverLogs.push(`server_exit code=${code ?? "null"} signal=${signal ?? "null"}`);
   });
+  return { instanceId, pid: serverProcess.pid };
+}
+
+// A child counts as alive only while it is actually running: no recorded exit
+// code, no terminating signal, and a real pid (a failed spawn has no pid).
+function isProcessAlive(child) {
+  if (!child || typeof child !== "object") return false;
+  if (typeof child.pid !== "number") return false;
+  if (child.exitCode !== null && child.exitCode !== undefined) return false;
+  if (child.signalCode !== null && child.signalCode !== undefined) return false;
+  return true;
+}
+
+// The served process must confirm its own identity through its health
+// response. A 200 from any listener is not proof: the reported instance id
+// must equal the instance this harness started. Identity is diagnostics-only.
+async function confirmServerIdentity({ baseUrl: base = baseUrl, expectedInstanceId, fetchImpl = globalThis.fetch } = {}) {
+  try {
+    const response = await fetchImpl(`${base}/health`, { cache: "no-store" });
+    if (!response.ok) return { confirmed: false, reason: `health-http-${response.status}` };
+    const data = await response.json().catch(() => null);
+    const instanceId = data?.instanceId ?? null;
+    if (!instanceId) return { confirmed: false, reason: "health-response-missing-instance-id", instanceId };
+    if (instanceId !== expectedInstanceId) return { confirmed: false, reason: "health-response-instance-mismatch", instanceId };
+    return { confirmed: true, instanceId };
+  } catch (error) {
+    return { confirmed: false, reason: "health-check-unreachable", error: sanitize(error instanceof Error ? error.message : error) };
+  }
+}
+
+// Stop a child-like process and only report stopped:true when the exit event
+// was actually observed. SIGTERM escalates to SIGKILL, but even after SIGKILL
+// the caller waits for the exit confirmation instead of assuming it.
+function stopProcessLike(child, { termTimeoutMs = 3_000, killTimeoutMs = 2_000 } = {}) {
+  return new Promise((resolve) => {
+    if (!child) {
+      resolve({ stopped: false, reason: "not-running", exitCode: null, signal: null });
+      return;
+    }
+    if (child.exitCode !== null && child.exitCode !== undefined) {
+      resolve({ stopped: true, alreadyExited: true, exitCode: child.exitCode, signal: null });
+      return;
+    }
+    let settled = false;
+    const finish = (result) => {
+      if (!settled) {
+        settled = true;
+        resolve(result);
+      }
+    };
+    child.once("exit", (code, signal) => finish({ stopped: true, exitCode: code, signal: signal || null }));
+    child.kill("SIGTERM");
+    delay(termTimeoutMs).then(() => {
+      if (settled) return;
+      child.kill("SIGKILL");
+      delay(killTimeoutMs).then(() => {
+        if (!settled) finish({ stopped: false, reason: "exit-unconfirmed", exitCode: child.exitCode ?? null, signal: null });
+      });
+    });
+  });
 }
 
 async function stopServer() {
-  if (!serverProcess) return;
+  if (!serverProcess) return { stopped: false, reason: "not-running", exitCode: null, signal: null };
   const child = serverProcess;
+  const result = await stopProcessLike(child);
   serverProcess = null;
-  if (child.exitCode !== null) return;
-  child.kill("SIGTERM");
-  await Promise.race([
-    new Promise((resolve) => child.once("exit", resolve)),
-    delay(3_000).then(() => {
-      if (child.exitCode === null) child.kill("SIGKILL");
-    }),
-  ]);
+  serverInstance = null;
+  return result;
 }
 
 function delay(ms) {
@@ -1699,6 +1778,58 @@ async function latestAgentRuns(session, filterId) {
   return response.data?.agentRuns || [];
 }
 
+// Actual binding sequence for one acceptance query:
+// 1. snapshot every run id that already exists for this user/filter
+// 2. issue the research request
+// 3. fetch the runs again and bind against the window, excluding the snapshot
+// A snapshot read failure aborts binding BEFORE the request is issued, so a
+// binding claim can never rest on an unverified run universe.
+async function executeAndBindQuery(session, filterId, requestId, body, priorRunIds = []) {
+  let snapshotIds;
+  try {
+    const preRuns = await latestAgentRuns(session, filterId);
+    snapshotIds = [...new Set([...(priorRunIds || []), ...preRuns.map((run) => run?.id).filter(Boolean)])];
+  } catch (error) {
+    return {
+      ok: false,
+      bindingStatus: "SNAPSHOT_UNAVAILABLE",
+      reason: sanitize(error instanceof Error ? error.message : error),
+      response: null,
+    };
+  }
+  const requestStartedAt = Date.now();
+  const response = await session.request(`/api/signals?filterId=${encodeURIComponent(filterId)}`, {
+    method: "POST",
+    requestId,
+    body,
+  });
+  const requestCompletedAt = Date.now();
+  let runs;
+  try {
+    runs = await latestAgentRuns(session, filterId);
+  } catch (error) {
+    return {
+      ok: false,
+      bindingStatus: "RUNS_UNAVAILABLE",
+      reason: sanitize(error instanceof Error ? error.message : error),
+      response,
+    };
+  }
+  const binding = selectRunForRequest(runs, {
+    requestStartedAt,
+    requestCompletedAt,
+    excludeRunIds: snapshotIds,
+  });
+  return {
+    ok: true,
+    response,
+    binding,
+    requestStartedAt,
+    requestCompletedAt,
+    snapshotSize: snapshotIds.length,
+  };
+}
+
 const TEN_QUERY_SEQUENCE = [
   { q: "Palmier Pro launch news for macOS AI video editing", entity: "Palmier Pro", phase: "NEW_BASELINE" },
   { q: "Palmier Pro launch news for macOS AI video editing", entity: "Palmier Pro", phase: "DUPLICATE_SAME_FACT" },
@@ -1721,20 +1852,116 @@ function runAgentStatesFromTrace(trace) {
   };
 }
 
-function classifyQueryFailure(httpStatus, data) {
+// Outcome classification. Auth, rate-limit and business failures are decided
+// BEFORE evidence accounting so an auth error body can never be read as a
+// zero-evidence success. Evidence-based outcomes require HTTP 200 AND a
+// response matching the research contract: a signals array plus an evidence
+// accounting whose counts all exist, are finite numbers and are non-negative.
+// Missing fields are never defaulted to zero.
+function classifyQueryOutcome(httpStatus, data) {
+  if (httpStatus === 401 || httpStatus === 403) return "AUTH_FAILURE";
+  if (httpStatus === 429) return "RATE_LIMITED";
   if (httpStatus >= 500 || data?.errorCode === "DB_TIMEOUT") return "BUSINESS_FAILURE";
-  const accounting = data?.evidenceAccounting || null;
-  const discovered = Number(accounting?.discoveredCandidateCount ?? 0);
-  const accepted = Number(accounting?.acceptedEvidenceCount ?? 0);
-  const reasons = accounting?.rejectionReasons || null;
+  if (httpStatus !== 200) return "INVALID_RESPONSE";
+  const validShape = Boolean(data) && typeof data === "object"
+    && Array.isArray(data.signals)
+    && Boolean(data.evidenceAccounting) && typeof data.evidenceAccounting === "object";
+  if (!validShape) return "INVALID_RESPONSE";
+  const accounting = data.evidenceAccounting;
+  const counts = {
+    discovered: accounting.discoveredCandidateCount,
+    produced: accounting.producedEvidenceCount,
+    accepted: accounting.acceptedEvidenceCount,
+  };
+  const countsValid = Object.values(counts).every((value) =>
+    typeof value === "number" && Number.isFinite(value) && value >= 0);
+  if (!countsValid) return "INVALID_RESPONSE";
+  const reasons = accounting.rejectionReasons || null;
   const hasRejectionReasons = Boolean(reasons) && Object.values(reasons).some((value) => Number(value) > 0);
   const failuresText = (Array.isArray(data?.failures) ? data.failures : [])
     .map((item) => JSON.stringify(item)).join(" ");
   const providerFailure = /upstream_error|timeout|forbidden|failed_to_fetch|unreachable|econn/i.test(failuresText);
-  if (discovered === 0 && providerFailure) return "PROVIDER_FAILURE";
-  if (discovered > 0 && accepted === 0 && hasRejectionReasons) return "CORRECT_REJECTION";
-  if (discovered === 0 && !providerFailure) return "CORRECT_EMPTY";
+  if (counts.discovered === 0 && providerFailure) return "PROVIDER_FAILURE";
+  if (counts.discovered > 0 && counts.accepted === 0 && hasRejectionReasons) return "CORRECT_REJECTION";
+  if (counts.discovered === 0 && !providerFailure) return "CORRECT_EMPTY";
   return "PRODUCED";
+}
+
+// A run record belongs to the current request only if it started at or after
+// the request was issued (small skew allowance). This prevents a failed
+// request from inheriting a previous run's evidence, knowledge or attention.
+// A run record belongs to the current request only when all of these hold:
+// - its id is not one of the runs already observed before the request
+// - it started inside [requestStartedAt - skew, requestCompletedAt + skew]
+// - it matches the requesting user/filter when the record exposes them
+// Several candidates inside the window are reported as AMBIGUOUS instead of
+// silently binding the newest one.
+function selectRunForRequest(runs, {
+  requestStartedAt,
+  requestCompletedAt,
+  skewMs = 2000,
+  excludeRunIds = [],
+  authenticatedUserId,
+  filterId,
+} = {}) {
+  const list = Array.isArray(runs) ? runs : [];
+  const excluded = new Set(excludeRunIds || []);
+  const lowerBound = requestStartedAt - skewMs;
+  const upperBound = (requestCompletedAt ?? Number.POSITIVE_INFINITY) + skewMs;
+  const candidates = list.filter((run) => {
+    if (!run || excluded.has(run.id)) return false;
+    if (authenticatedUserId && run.userId && run.userId !== authenticatedUserId) return false;
+    if (filterId && run.filterId && run.filterId !== filterId) return false;
+    const started = Date.parse(run?.startedAt || "");
+    return Number.isFinite(started) && started >= lowerBound && started <= upperBound;
+  });
+  if (!candidates.length) return { status: "NOT_FOUND", run: null, candidateIds: [] };
+  if (candidates.length > 1) {
+    return { status: "AMBIGUOUS", run: null, candidateIds: candidates.map((run) => run.id) };
+  }
+  return { status: "BOUND", run: candidates[0], candidateIds: [candidates[0].id] };
+}
+
+// Knowledge-comparison level classification, derived from the reconciled
+// information-gain status on the response signals (NOT from the persisted
+// knowledgeChanges list, which by contract excludes DUPLICATE entries).
+function deriveGainClassification(gainStatuses) {
+  const list = Array.isArray(gainStatuses) ? gainStatuses.filter(Boolean) : [];
+  if (!list.length) return "NO_RUN";
+  if (list.includes("UPDATED_INFORMATION")) return "UPDATED";
+  if (list.includes("NEW_INFORMATION")) return "NEW";
+  return "DUPLICATE";
+}
+
+// Stable identity fingerprint of the factual payload the preference layer must
+// never touch. Identity is per claim: normalized claim text, its verification
+// status, the owning signal's reliability, and the sorted evidence identities
+// (canonical URL preferred). Entries are sorted so reordering never creates a
+// false difference; attention decisions and timestamps are excluded.
+function normalizeIdentityText(value) {
+  return String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function factFingerprint(signals) {
+  const list = Array.isArray(signals) ? signals : [];
+  const claims = list.flatMap((signal) => (Array.isArray(signal?.claims) ? signal.claims : []).map((claim) => {
+    const reliability = Number(signal?.reliabilityScore);
+    return {
+      claim: normalizeIdentityText(claim?.canonicalClaimFingerprint || claim?.claimText),
+      verification: claim?.verificationStatus || null,
+      reliability: Number.isFinite(reliability) ? reliability : null,
+      evidence: (Array.isArray(claim?.evidenceSources) ? claim.evidenceSources : [])
+        .map((source) => normalizeIdentityText(source?.canonicalUrl || source?.sourceUrl))
+        .filter(Boolean)
+        .sort(),
+    };
+  })).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+  return { claims };
+}
+
+function factStateUnchanged(left, right) {
+  if (!left || !right) return false;
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function hasHighAttention(value) {
@@ -1745,6 +1972,529 @@ function hasLowAttention(value) {
   return /LIBRARY_ONLY|IGNORE/i.test(String(value || ""));
 }
 
+// Duplicate acceptance closes only when all levels agree:
+// 1. comparison level — the reconciled result identified the same fact
+//    (an empty second round classifies as NO_RUN and never as DUPLICATE)
+// 2. fact identity level — the two rounds carry the same fact fingerprint
+// 3. persistence level — knowledge count did not grow
+// 4. attention level — the duplicate was not surfaced as high attention
+function evaluateDuplicateCase({ baseline, duplicate }) {
+  const baselineBound = Boolean(baseline?.bound);
+  const duplicateBound = Boolean(duplicate?.bound);
+  const duplicateIdentified = duplicate?.classification === "DUPLICATE";
+  const sameFact = factStateUnchanged(baseline?.fact, duplicate?.fact);
+  const noNewKnowledge = duplicate?.knowledgeUnchanged === true;
+  const noUnreasonableAttention = !hasHighAttention(duplicate?.attention);
+  const closed = baselineBound && duplicateBound && duplicateIdentified && sameFact && noNewKnowledge && noUnreasonableAttention;
+  return { closed, baselineBound, duplicateBound, duplicateIdentified, sameFact, noNewKnowledge, noUnreasonableAttention };
+}
+
+// A replay material is independently re-derivable proof. It must carry BOTH
+// arms' evidence inputs and knowledge initial state, the preference condition,
+// and the declared outputs; the validator recomputes both arms with the real
+// applyAttentionPreferences and rejects the material when the declared outputs
+// contradict the recomputed ones, when the arms' inputs differ, or when the
+// knowledge initial states differ. CAPTURED_REPLAY additionally requires
+// capture provenance (commit, request id, run id, source material reference).
+// FIXTURE_REPLAY proves only the function contract and can never close a
+// real-data acceptance.
+function replayEvidenceMaterialValid(material) {
+  const invalid = (reason) => ({ valid: false, reason });
+  if (!material || typeof material !== "object" || Array.isArray(material)) return invalid("not-an-object");
+  if (material.mode !== "FIXTURE_REPLAY" && material.mode !== "CAPTURED_REPLAY") return invalid("unknown-mode");
+  if (material.mode === "CAPTURED_REPLAY") {
+    const capture = material.capture || {};
+    if (!capture.commitSha || !capture.requestId || !capture.runId || !capture.sourceMaterial) {
+      return invalid("capture-provenance-missing");
+    }
+  }
+  const arms = material.arms;
+  if (!arms?.withoutPreference || !arms?.withPreference) return invalid("arm-inputs-missing");
+  // Knowledge initial state must be EXPLICITLY present on both arms. An absent
+  // state is not the same as an empty state: missing → rejected, while an
+  // explicit { knownFacts: [] } is a valid empty initial state.
+  if (!arms.withoutPreference.signals || !("knowledgeState" in arms.withoutPreference)
+    || !arms.withPreference.signals || !("knowledgeState" in arms.withPreference)) {
+    return invalid("knowledge-state-missing");
+  }
+  const withoutSignals = arms.withoutPreference.signals;
+  const withSignals = arms.withPreference.signals;
+  if (!Array.isArray(withoutSignals) || !Array.isArray(withSignals)) return invalid("arm-inputs-missing");
+  if (!factStateUnchanged(factFingerprint(withoutSignals), factFingerprint(withSignals))) {
+    return invalid("arm-inputs-differ");
+  }
+  if (JSON.stringify(arms.withoutPreference.knowledgeState ?? null) !== JSON.stringify(arms.withPreference.knowledgeState ?? null)) {
+    return invalid("knowledge-initial-state-differs");
+  }
+  const preference = material.preference;
+  if (!preference?.scopeType || !preference?.scopeValue || preference.feedbackType !== "LOWER_ATTENTION") {
+    return invalid("preference-condition-missing");
+  }
+  const withoutArm = { signals: structuredClone(withoutSignals) };
+  const withArm = { signals: structuredClone(withSignals) };
+  applyAttentionPreferences(withoutArm, []);
+  applyAttentionPreferences(withArm, [preference]);
+  const recomputedWithout = (withoutArm.signals || []).map((signal) => signal.attentionDecision).join(",");
+  const recomputedWith = (withArm.signals || []).map((signal) => signal.attentionDecision).join(",");
+  const declaredWithout = material.outputs?.withoutPreferenceAttention;
+  const declaredWith = material.outputs?.withPreferenceAttention;
+  if (declaredWithout !== recomputedWithout || declaredWith !== recomputedWith) {
+    return invalid("declared-outputs-mismatch-recomputed");
+  }
+  if (!factStateUnchanged(factFingerprint(withArm.signals || []), factFingerprint(withoutArm.signals || []))) {
+    return invalid("replay-changed-fact");
+  }
+  if (!hasHighAttention(recomputedWithout) || !hasLowAttention(recomputedWith)) {
+    return invalid("attention-outcome-not-demonstrated");
+  }
+  return {
+    valid: true,
+    mode: material.mode,
+    withoutPreferenceAttention: recomputedWithout,
+    withPreferenceAttention: recomputedWith,
+  };
+}
+
+// Preference attribution. Causality closes ONLY through a valid CAPTURED_REPLAY
+// material (FIXTURE_REPLAY proves the function contract and is reported but can
+// never close real-data acceptance). The pre-preference arm must have been
+// explicitly high attention and the post-preference arm explicitly lowered; the
+// control must be a bound run with real evidence AND an explicit high decision.
+// Preference isolation (owner scope, sibling filter, other user, unmatched
+// entity) is verified directly by evaluatePreferenceIsolation and reported
+// separately from generic auth/tenant isolation; it must be observed for closure.
+function evaluatePreferenceAttribution({
+  baseline,
+  preference,
+  control,
+  preferencePersisted,
+  replayEvidence,
+  preferenceIsolationObserved,
+}) {
+  const baselineBound = Boolean(baseline?.bound);
+  const prefBound = Boolean(preference?.bound);
+  const nonDuplicateGain = preference?.classification === "NEW" || preference?.classification === "UPDATED";
+  const baselineWasHigh = hasHighAttention(baseline?.attention);
+  const attentionLowered = hasLowAttention(preference?.attention) && !hasHighAttention(preference?.attention);
+  const controlPresent = Boolean(control);
+  const controlValid = controlPresent && Boolean(control?.bound)
+    && (Number(control?.evidenceCount) > 0 || Number(control?.accepted) > 0);
+  const isolationHeld = controlValid && hasHighAttention(control?.attention);
+  const material = replayEvidenceMaterialValid(replayEvidence);
+  const replayMaterialValid = material.valid;
+  const causalityProven = replayMaterialValid && material.mode === "CAPTURED_REPLAY";
+  const closed = preferencePersisted === true
+    && baselineBound
+    && prefBound
+    && nonDuplicateGain
+    && baselineWasHigh
+    && attentionLowered
+    && controlValid
+    && isolationHeld
+    && causalityProven
+    && preferenceIsolationObserved === true;
+  return {
+    closed,
+    baselineBound,
+    prefBound,
+    nonDuplicateGain,
+    baselineWasHigh,
+    attentionLowered,
+    controlPresent,
+    controlValid,
+    isolationHeld,
+    replayMaterialValid,
+    replayMaterialReason: material.reason,
+    replayMaterialMode: material.mode,
+    causalityProven,
+    preferenceIsolationObserved: preferenceIsolationObserved === true,
+  };
+}
+
+// Direct preference-isolation scenario over a scoped persistence store (the
+// real InMemorySignalRepository serves as the test double). Verifies, separately
+// from generic auth/tenant isolation:
+// - the owner sees the saved preference
+// - a sibling filter of the same user has none
+// - another user's own filter has none
+// - consumption downgrades a matching entity ONLY inside the saved scope
+// - an unmatched entity inside the scope is not downgraded
+// - an empty result set can never count as isolation success
+const PREFERENCE = { scopeType: "entity", scopeValue: "Palmier Pro", feedbackType: "LOWER_ATTENTION" };
+
+function evaluatePreferenceIsolation({ store, signals, now = "2026-09-27T00:00:00.000Z" }) {
+  const ownerScope = { authenticatedUserId: "user-a", filterId: "filter-a" };
+  const siblingScope = { authenticatedUserId: "user-a", filterId: "filter-b" };
+  const otherUserScope = { authenticatedUserId: "user-b", filterId: "filter-b-user-b" };
+  store.savePreference(ownerScope, PREFERENCE, now);
+  const savedVisibleToOwner = store.listPreferences(ownerScope).some((pref) =>
+    pref.scopeValue === PREFERENCE.scopeValue && pref.feedbackType === PREFERENCE.feedbackType);
+  const siblingFilterUnaffected = store.listPreferences(siblingScope).length === 0;
+  const otherUserUnaffected = store.listPreferences(otherUserScope).length === 0;
+
+  const armSignals = signals ?? [
+    signalTemplateFor("Palmier Pro"),
+    signalTemplateFor("Acme"),
+  ];
+  const inScope = { signals: structuredClone(armSignals) };
+  applyAttentionPreferences(inScope, store.listPreferences(ownerScope));
+  const siblingArm = { signals: structuredClone(armSignals) };
+  applyAttentionPreferences(siblingArm, store.listPreferences(siblingScope));
+  const otherUserArm = { signals: structuredClone(armSignals) };
+  applyAttentionPreferences(otherUserArm, store.listPreferences(otherUserScope));
+
+  const decisions = (response) => (response.signals || []).map((signal) => signal.attentionDecision);
+  // Control validity: the arms must actually contain an explicit high decision
+  // to lower; an empty result can never demonstrate isolation.
+  const hasExplicitHigh = decisions(inScope).some((decision) => hasHighAttention(decision));
+  const matchedEntityLowered = (inScope.signals || []).every((signal) =>
+    signal.entityMatches?.includes(PREFERENCE.scopeValue)
+      ? signal.attentionDecision === "LIBRARY_ONLY"
+      : true);
+  const unmatchedEntityUnaffected = (inScope.signals || []).every((signal) =>
+    signal.entityMatches?.includes(PREFERENCE.scopeValue)
+      ? true
+      : hasHighAttention(signal.attentionDecision));
+  const siblingFilterConsumptionUnaffected = decisions(siblingArm).every((decision) => hasHighAttention(decision));
+  const otherUserConsumptionUnaffected = decisions(otherUserArm).every((decision) => hasHighAttention(decision));
+
+  const passed = Boolean(armSignals.length)
+    && savedVisibleToOwner
+    && siblingFilterUnaffected
+    && otherUserUnaffected
+    && hasExplicitHigh
+    && matchedEntityLowered
+    && unmatchedEntityUnaffected
+    && siblingFilterConsumptionUnaffected
+    && otherUserConsumptionUnaffected;
+  return {
+    passed,
+    savedVisibleToOwner,
+    siblingFilterUnaffected,
+    otherUserUnaffected,
+    hasExplicitHigh,
+    matchedEntityLowered,
+    unmatchedEntityUnaffected,
+    siblingFilterConsumptionUnaffected,
+    otherUserConsumptionUnaffected,
+  };
+}
+
+function signalTemplateFor(entity) {
+  return {
+    id: `signal-${entity}`,
+    title: `${entity} ships a new capability`,
+    summary: `${entity} ships a new capability`,
+    entityMatches: [entity],
+    attentionDecision: "MUST_READ",
+    informationGainStatus: "NEW_INFORMATION",
+    verificationStatus: "verified",
+    reliabilityScore: 92,
+    claims: [{
+      claimText: `${entity} ships a new capability`,
+      sourceUrl: `https://example.com/${entity.toLowerCase()}`,
+      verificationStatus: "verified",
+      evidenceSources: [{ sourceUrl: `https://example.com/${entity.toLowerCase()}` }],
+    }],
+    sources: [{ sourceUrl: `https://example.com/${entity.toLowerCase()}` }],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// P1-A unit 1: capture file contract, loader, association and replay building
+// ---------------------------------------------------------------------------
+
+function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+function sha256Canonical(value) {
+  return createHash("sha256").update(stableStringify(value)).digest("hex");
+}
+
+// Digest over the captured evidence inputs; recomputed by the loader to detect
+// any post-capture tampering of the recorded response.
+// Digest over the FULL acceptance-relevant capture state: the evidence inputs
+// plus the knowledge initial state and the association fields. The recomputed
+// digest proves internal consistency of the artifact; it does not authenticate
+// the real-network origin — that rests on the controlled capture process, the
+// run records and the artifact itself.
+function computeCaptureDigest({ requestId, runId, entity, commitSha, response, knowledgeState }) {
+  return sha256Canonical({ requestId, runId, entity, commitSha, response, knowledgeState });
+}
+
+// Live capture: persist a sanitized research response plus the EXPLICIT
+// knowledge initial state for later offline replay. The input digest lets the
+// loader detect any post-capture tampering of the recorded evidence.
+// Deep sanitization for capture payloads: every string in the research content
+// is passed through the redaction filter so a hostile page cannot plant
+// credential-looking material inside a capture artifact.
+function sanitizeCaptureStrings(value) {
+  if (typeof value === "string") return sanitize(value);
+  if (Array.isArray(value)) return value.map((item) => sanitizeCaptureStrings(item));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, sanitizeCaptureStrings(item)]));
+  }
+  return value;
+}
+
+async function writeRunCapture({ captureDir, requestId, runId, commitSha, entity, response, knowledgeState }) {
+  const signals = Array.isArray(response?.signals) ? response.signals : [];
+  const payload = sanitizeCaptureStrings({
+    captureVersion: 1,
+    kind: "SIGNAL_RUN_CAPTURE",
+    commitSha: commitSha || "unknown",
+    requestId,
+    runId,
+    entity: entity || null,
+    capturedAt: new Date().toISOString(),
+    response: { signals, evidenceAccounting: response?.evidenceAccounting || null },
+    // available:false is preserved on purpose: an unknown knowledge state is
+    // NEVER rewritten into an empty one.
+    knowledgeState: knowledgeState || { knownFacts: [], available: false },
+  });
+  payload.inputDigest = computeCaptureDigest(payload);
+  await mkdir(captureDir, { recursive: true });
+  const path = join(captureDir, `${requestId}.capture.json`);
+  await writeFile(path, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  return { path, payload };
+}
+
+async function loadCaptureMaterial(capturePath) {
+  let raw;
+  try {
+    raw = await readFile(capturePath, "utf8");
+  } catch {
+    return { ok: false, reason: "capture-file-missing" };
+  }
+  let material;
+  try {
+    material = JSON.parse(raw);
+  } catch {
+    return { ok: false, reason: "capture-parse-failed" };
+  }
+  if (material?.kind !== "SIGNAL_RUN_CAPTURE" || material.captureVersion !== 1) {
+    return { ok: false, reason: "unsupported-capture-kind" };
+  }
+  if (!material.requestId || !material.runId || !material.commitSha || !material.entity) {
+    return { ok: false, reason: "capture-identity-missing" };
+  }
+  if (!Array.isArray(material.response?.signals)) return { ok: false, reason: "capture-response-shape" };
+  if (!material.knowledgeState || typeof material.knowledgeState !== "object") {
+    return { ok: false, reason: "knowledge-state-missing" };
+  }
+  if (material.inputDigest && material.inputDigest !== computeCaptureDigest(material)) {
+    return { ok: false, reason: "capture-input-tampered" };
+  }
+  if (!material.inputDigest) return { ok: false, reason: "capture-digest-missing" };
+  return { ok: true, material, digest: material.inputDigest };
+}
+
+function captureAssociatesWithQuery(material, { requestId, runId, entity } = {}) {
+  if (!material) return false;
+  if (requestId && material.requestId !== requestId) return false;
+  if (runId && material.runId !== runId) return false;
+  if (entity && material.entity !== entity) return false;
+  return true;
+}
+
+// Build replay evidence from a LOADED capture artifact: both arms clone the
+// same captured input and the same knowledge initial state, differing only by
+// the preference condition; outputs are recomputed with the real production
+// modifier and re-validated by replayEvidenceMaterialValid.
+function buildReplayEvidenceFromCapture(capture, { preference = PREFERENCE, sourceMaterial, entity } = {}) {
+  if (!capture?.ok) return { ok: false, reason: capture?.reason || "capture-not-loaded" };
+  const captured = capture.material;
+  if (entity && captured.entity !== entity) return { ok: false, reason: "unrelated-capture" };
+  // An unknown knowledge initial state (read failure) can never prove that
+  // both arms started from the same state.
+  if (captured.knowledgeState?.available === false) {
+    return { ok: false, reason: "knowledge-state-unavailable" };
+  }
+  const capturedSignals = structuredClone(captured.response.signals);
+  const capturedKnowledgeState = structuredClone(captured.knowledgeState);
+  const arms = {
+    withoutPreference: { signals: structuredClone(capturedSignals), knowledgeState: structuredClone(capturedKnowledgeState) },
+    withPreference: { signals: structuredClone(capturedSignals), knowledgeState: structuredClone(capturedKnowledgeState) },
+  };
+  const withoutArm = { signals: structuredClone(arms.withoutPreference.signals) };
+  const withArm = { signals: structuredClone(arms.withPreference.signals) };
+  applyAttentionPreferences(withoutArm, []);
+  applyAttentionPreferences(withArm, [preference]);
+  const replayEvidence = {
+    mode: "CAPTURED_REPLAY",
+    capture: {
+      commitSha: captured.commitSha,
+      requestId: captured.requestId,
+      runId: captured.runId,
+      sourceMaterial: sourceMaterial || `capture:${captured.requestId}`,
+    },
+    arms,
+    preference,
+    outputs: {
+      withoutPreferenceAttention: (withoutArm.signals || []).map((signal) => signal.attentionDecision).join(","),
+      withPreferenceAttention: (withArm.signals || []).map((signal) => signal.attentionDecision).join(","),
+    },
+  };
+  const validation = replayEvidenceMaterialValid(replayEvidence);
+  return { ok: validation.valid, replayEvidence, validation, reason: validation.reason };
+}
+
+// The ONE validation path for acceptance replay, shared by LIVE and offline:
+// re-load the capture artifact from disk (integrity + provenance), verify it
+// is associated with the run being evaluated, then build and validate the
+// replay material. No caller may construct a capture-looking object by hand.
+async function buildReplayEvidenceForAcceptance({ capturePath, expected = {}, preference = PREFERENCE }) {
+  const capture = await loadCaptureMaterial(capturePath);
+  if (!capture.ok) return { ok: false, reason: capture.reason };
+  if (!captureAssociatesWithQuery(capture.material, expected)) {
+    return { ok: false, reason: "unrelated-capture" };
+  }
+  return buildReplayEvidenceFromCapture(capture, { preference, sourceMaterial: capturePath, entity: expected.entity });
+}
+
+// Offline replay entry: load a capture artifact from disk, verify association
+// and integrity, re-derive both arms, and report whether the acceptance
+// causality closes. Pure file operations — no providers, no database.
+async function runOfflineReplay({ capturePath, preference = PREFERENCE, entity, sourceMaterial } = {}) {
+  const capture = await loadCaptureMaterial(capturePath);
+  if (!capture.ok) return { closed: false, materialValid: false, mode: null, reason: capture.reason };
+  if (entity && !captureAssociatesWithQuery(capture.material, { entity })) {
+    return { closed: false, materialValid: false, mode: null, reason: "unrelated-capture" };
+  }
+  const built = buildReplayEvidenceFromCapture(capture, { preference, entity, sourceMaterial: sourceMaterial || capturePath });
+  if (!built.ok) return { closed: false, materialValid: false, mode: null, reason: built.reason };
+  return { closed: true, materialValid: true, mode: built.validation.mode, validation: built.validation };
+}
+
+// Four-scenario configuration for the acceptance sequence. Entities, queries
+// and candidate sources are operator inputs; the example entities are never
+// assumed to produce new facts. `candidateSources` is surfaced for the P1-B
+// operator and the report — it does not alter the research contract.
+const SCENARIO_KEYS = ["newFact", "duplicate", "preferenceRestart", "isolation"];
+
+async function loadScenarioConfig(path) {
+  if (!path) return { ok: true, config: null };
+  let raw;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch {
+    return { ok: false, reason: "scenario-config-missing" };
+  }
+  let config;
+  try {
+    config = JSON.parse(raw);
+  } catch {
+    return { ok: false, reason: "scenario-config-parse-failed" };
+  }
+  const missing = SCENARIO_KEYS.filter((key) => !config?.[key]?.entity || typeof config?.[key]?.queries !== "object");
+  if (missing.length) return { ok: false, reason: `scenario-config-invalid: ${missing.join(",")}` };
+  return { ok: true, config };
+}
+
+function buildQuerySequence(config) {
+  if (!config) return TEN_QUERY_SEQUENCE;
+  const defaults = TEN_QUERY_SEQUENCE;
+  const override = (phase, scenario) => {
+    const entry = defaults.find((item) => item.phase === phase);
+    const query = scenario?.queries?.[phase] ?? entry.q;
+    return { phase, entity: scenario?.entity ?? entry.entity, q: query };
+  };
+  return [
+    override("NEW_BASELINE", config.newFact),
+    override("DUPLICATE_SAME_FACT", config.duplicate),
+    override("UPDATE_PROBE", config.newFact),
+    override("RELIABILITY_DIFF", config.newFact),
+    override("NEW_ENTITY_B", config.isolation),
+    override("DUPLICATE_ENTITY_B", config.isolation),
+    override("SAVE_PREFERENCE_RESTART", config.preferenceRestart),
+    override("PREFERENCE_ATTRIBUTION", config.preferenceRestart),
+    override("ISOLATION_CONTROL", config.isolation),
+    override("PREFERENCE_STABILITY", config.preferenceRestart),
+  ];
+}
+
+// Real preference-isolation execution entry (HTTP). Storage isolation and auth
+// rejection are observed through the actual preference API; consumption
+// isolation is computed by the caller from the live acceptance rows. The
+// returned `observed` is always computed from these results — never hardcoded.
+// Empty reads and empty controls can never constitute isolation success.
+async function runPreferenceIsolationScenarios({
+  ownerSession,
+  ownerFilterId,
+  siblingFilterId,
+  otherUserSession,
+  otherUserFilterId,
+  preference = PREFERENCE,
+  consumptionIsolation = { matchedLowered: false, unmatchedHigh: false },
+}) {
+  const readPreferences = async (session, filterId) => {
+    const response = await session.request(`/api/preferences?filterId=${encodeURIComponent(filterId)}`);
+    const list = Array.isArray(response.data?.preferences) ? response.data.preferences : [];
+    return { response, list };
+  };
+
+  // 1. Owner saves and reads back the preference in its own scope.
+  const save = await ownerSession.request(`/api/preferences?filterId=${encodeURIComponent(ownerFilterId)}`, {
+    method: "POST",
+    body: { filterId: ownerFilterId, ...preference },
+  });
+  const ownerRead = await readPreferences(ownerSession, ownerFilterId);
+  const ownerReadBack = save.status === 200 && ownerRead.response.status === 200
+    && ownerRead.list.some((pref) => pref.scopeValue === preference.scopeValue && pref.feedbackType === preference.feedbackType);
+
+  // 2. A sibling filter of the same user must hold no preference.
+  const siblingRead = await readPreferences(ownerSession, siblingFilterId);
+  const siblingFilterEmpty = siblingRead.response.status === 200 && siblingRead.list.length === 0;
+
+  // 3. Another user's own filter must hold no preference. A 401 here means the
+  // other-user session is invalid — distinct from "logged in, own scope,
+  // simply no preference" (200 + empty list).
+  const otherRead = await readPreferences(otherUserSession, otherUserFilterId);
+  const otherUserEmpty = otherRead.response.status === 200 && otherRead.list.length === 0;
+
+  // 4. Cross-user access to the other user's scope must be rejected.
+  const cross = await ownerSession.request(`/api/preferences?filterId=${encodeURIComponent(otherUserFilterId)}`);
+  const authRejected = [401, 403].includes(cross.status);
+
+  const otherUserSessionValid = otherRead.response.status === 200;
+  const storageIsolation = { ownerReadBack, siblingFilterEmpty, otherUserEmpty, otherUserSessionValid };
+  const authRejection = { attempted: true, rejected: authRejected, httpStatus: cross.status };
+  const isolationStatus = !otherUserSessionValid ? "OTHER_USER_SESSION_INVALID" : "EXECUTED";
+  const observed = isolationStatus === "EXECUTED"
+    && storageIsolation.ownerReadBack
+    && storageIsolation.siblingFilterEmpty
+    && storageIsolation.otherUserEmpty
+    && authRejected
+    && consumptionIsolation.matchedLowered === true
+    && consumptionIsolation.unmatchedHigh === true;
+  return {
+    observed,
+    isolationStatus,
+    storageIsolation,
+    authRejection,
+    consumptionIsolation,
+    details: [
+      `save HTTP ${save.status}`,
+      `owner read HTTP ${ownerRead.response.status} preferences=${ownerRead.list.length}`,
+      `sibling read HTTP ${siblingRead.response.status} preferences=${siblingRead.list.length}`,
+      `other-user read HTTP ${otherRead.response.status} preferences=${otherRead.list.length}`,
+      `cross-user HTTP ${cross.status}`,
+    ],
+  };
+}
+
+async function scopedKnowledgeState(session, filterId) {
+  const response = await session.request(`/api/control/knowledge?filterId=${encodeURIComponent(filterId)}`);
+  if (response.status !== 200) return { knownFacts: [], available: false };
+  const list = Array.isArray(response.data?.knowledge) ? response.data.knowledge : [];
+  return { knownFacts: list.map((record) => record?.text).filter(Boolean), available: true };
+}
+
 async function scopedKnowledgeCount(session, filterId) {
   const response = await session.request(`/api/control/knowledge?filterId=${encodeURIComponent(filterId)}`);
   if (response.status !== 200) return null;
@@ -1752,50 +2502,183 @@ async function scopedKnowledgeCount(session, filterId) {
   return list.length;
 }
 
-async function runTenQuerySequence(session, filterId) {
+// Session lifecycle for the acceptance phase: BOTH accounts log in before any
+// isolation scenario runs, and logout happens only after every session-bound
+// scenario has completed. This keeps "B not logged in" from being confused
+// with "B logged in but holds no preference".
+async function prepareAcceptanceSessions({ createSession, login, accountAEmail, accountAPassword, accountBEmail, accountBPassword }) {
+  const harnessSession = createSession("Account A (ten-query)");
+  await login(harnessSession, accountAEmail, accountAPassword);
+  const otherUserSession = createSession("Account B (ten-query)");
+  await login(otherUserSession, accountBEmail, accountBPassword);
+  return { harnessSession, otherUserSession };
+}
+
+// Real acceptance orchestration used by main: both accounts must be
+// authenticated before the ten-query sequence and the preference-isolation
+// scenario run. Lazy re-login is NOT performed here; main guarantees login
+// before calling this, and logout is handled once in main's final cleanup.
+async function runAuthenticatedAcceptance({ ownerSession, otherUserSession, runDependent }) {
+  if (!ownerSession?.user) throw new Error("owner session not authenticated before acceptance");
+  if (!otherUserSession?.user) throw new Error("other-user session not authenticated before acceptance");
+  await runDependent({ ownerSession, otherUserSession });
+}
+
+// Log every session out, tolerating an individual failure so one backend error
+// cannot stop the remaining sessions from being cleaned up. Never throws, so
+// it can never mask a preceding business error. The caller reports the
+// returned failures in its own phase/evidence record.
+async function logoutAllSessions(sessions, { logout }) {
+  const loggedOut = [];
+  const failures = [];
+  for (const session of sessions) {
+    try {
+      const response = await logout(session);
+      loggedOut.push({ label: session?.label ?? "session", httpStatus: response?.status ?? null });
+    } catch {
+      failures.push(session?.label ?? "session");
+    }
+  }
+  return { loggedOut, failures };
+}
+
+// Distinguishing the three knowledge-read outcomes: a successful read with a
+// real empty list (available: true), a failed read (available: false → count
+// is null and can never participate in an unchanged-knowledge claim).
+function knowledgeCountFromState(state) {
+  if (!state || state.available !== true || !Array.isArray(state.knownFacts)) return null;
+  return state.knownFacts.length;
+}
+
+// Budget accounting for the acceptance run. Research HTTP requests are the
+// unit that maps to provider fan-out and model calls downstream; provider
+// requests per research run are multiple and NOT hard-capped here (provider
+// side quota on the test accounts is the external cost control).
+const ACCEPTANCE_SEQUENCE_LENGTH = TEN_QUERY_SEQUENCE.length;
+const ACCEPTANCE_RESEARCH_REQUEST_COUNT = 2 + ACCEPTANCE_SEQUENCE_LENGTH;
+const ACCEPTANCE_QUALITY_REQUEST_COUNT = 1;
+
+async function runTenQuerySequence(session, filterId, {
+  captureDir = join("captures", runId),
+  commitSha = gitInfo().commitSha,
+  siblingFilterId = null,
+  otherUserSession = null,
+  otherUserFilterId = null,
+  scenarioConfig = null,
+} = {}) {
   const report = phaseReports.tenQuery;
   const rows = [];
   let preferenceSavedStatus = null;
+  let restartEvidence = null;
+  let baselineCapture = null;
+  const sequence = buildQuerySequence(scenarioConfig);
 
-  for (let i = 0; i < TEN_QUERY_SEQUENCE.length; i += 1) {
-    const item = TEN_QUERY_SEQUENCE[i];
+  const seenRunIds = new Set();
+  for (let i = 0; i < sequence.length; i += 1) {
+    const item = sequence[i];
     const requestId = `${runId}-tq-${i + 1}`;
-    const knowledgeBefore = await scopedKnowledgeCount(session, filterId);
-    const response = await session.request(`/api/signals?filterId=${encodeURIComponent(filterId)}`, {
-      method: "POST",
-      requestId,
-      body: {
-        filterId,
-        identity: "Signal Map E2E ten-query",
-        industry: item.q,
-        focusAreas: item.q,
-        currentQuestions: item.q,
-        knownInformation: "Use only the authenticated test account state and live public evidence. Do not use fixtures.",
-        informationGaps: "What evidence-backed changes or opportunities should a user pay attention to?",
-        trackedEntities: "",
-        trackedEvents: "",
-        userJudgements: "",
-        evidenceHistory: "",
-        freshnessWindow: "30d",
-        sourceScope: "hybrid",
-      },
-    });
+    const knowledgeStateBefore = await scopedKnowledgeState(session, filterId);
+    const knowledgeBefore = knowledgeCountFromState(knowledgeStateBefore);
+    const bound = await executeAndBindQuery(session, filterId, requestId, {
+      filterId,
+      identity: "Signal Map E2E ten-query",
+      industry: item.q,
+      focusAreas: item.q,
+      currentQuestions: item.q,
+      knownInformation: "Use only the authenticated test account state and live public evidence. Do not use fixtures.",
+      informationGaps: "What evidence-backed changes or opportunities should a user pay attention to?",
+      trackedEntities: "",
+      trackedEvents: "",
+      userJudgements: "",
+      evidenceHistory: "",
+      freshnessWindow: "30d",
+      sourceScope: "hybrid",
+    }, [...seenRunIds]);
+    if (!bound.ok) {
+      rows.push({
+        index: i + 1,
+        phase: item.phase,
+        entity: item.entity,
+        query: item.q,
+        mode: "LIVE",
+        httpStatus: null,
+        requestId,
+        failureClass: "BUSINESS_FAILURE",
+        runBound: false,
+        runBinding: bound.bindingStatus,
+        bindingCandidates: [],
+        selectedRunId: null,
+        classification: "NO_RUN_FOR_REQUEST",
+        gainStatuses: "none",
+        fact: { claims: [] },
+        discovered: 0,
+        produced: 0,
+        accepted: 0,
+        rejectionReasons: null,
+        evidenceCount: 0,
+        attention: "none",
+        knowledgeChanges: "none",
+        knowledgeBefore,
+        knowledgeAfter: null,
+        knowledgeUnchanged: false,
+        runAgentStates: "none",
+        runAgentPath: false,
+      });
+      fail(report, `${bound.bindingStatus} at Q${i + 1}: ${bound.reason || "run universe could not be verified"}`, {
+        requestId,
+        rows,
+        underTest: gitInfo(),
+      });
+      return;
+    }
+    const requestStartedAt = bound.requestStartedAt;
+    const requestCompletedAt = bound.requestCompletedAt;
+    const response = bound.response;
     await delay(200);
 
-    const runs = await latestAgentRuns(session, filterId);
-    const latest = runs[0] || null;
+    const binding = bound.binding;
+    seenRunIds.add(binding.run?.id ?? `${requestId}-unbound`);
+    const latest = binding.run;
+    const runBound = binding.status === "BOUND";
     const attention = Array.isArray(latest?.finalAttention) ? latest.finalAttention
       : Array.isArray(latest?.attentionResult) ? latest.attentionResult : [];
     const attentionText = attention.join(",") || "none";
     const agentPath = runAgentStatesFromTrace(latest?.trace);
     const accounting = response.data?.evidenceAccounting || null;
-    let classification = "NO_RUN";
-    const changes = Array.isArray(latest?.knowledgeChanges) ? latest.knowledgeChanges : [];
-    const changeLabels = changes.map((change) => change?.classification).filter(Boolean);
-    if (/duplicate|no_information_gain/i.test(changeLabels.join("|"))) classification = "DUPLICATE";
-    else if (/updates?/i.test(changeLabels.join("|"))) classification = "UPDATED";
-    else if (changeLabels.length) classification = "NEW";
-    const knowledgeAfter = await scopedKnowledgeCount(session, filterId);
+    const responseSignals = Array.isArray(response.data?.signals) ? response.data.signals : [];
+    const gainStatuses = [...new Set(responseSignals.map((signal) => signal?.informationGainStatus).filter(Boolean))];
+    const classification = !runBound ? "NO_RUN_FOR_REQUEST" : deriveGainClassification(gainStatuses);
+    const fact = factFingerprint(responseSignals);
+    const knowledgeAfterState = await scopedKnowledgeState(session, filterId);
+    const knowledgeAfter = knowledgeCountFromState(knowledgeAfterState);
+
+    // LIVE capture: persist the sanitized response and the explicit knowledge
+    // initial state for later offline replay. Best-effort — a capture failure
+    // keeps the run going but leaves the replay causality open (PARTIAL).
+    let capturePath = null;
+    try {
+      const written = await writeRunCapture({
+        captureDir,
+        requestId,
+        runId: latest?.id ?? requestId,
+        commitSha,
+        entity: item.entity,
+        response: response.data,
+        knowledgeState: knowledgeStateBefore,
+      });
+      capturePath = written.path;
+      if (item.phase === "NEW_BASELINE") {
+        baselineCapture = {
+          path: written.path,
+          requestId,
+          runId: latest?.id ?? null,
+          entity: item.entity,
+        };
+      }
+      addEvidence(report, `Q${i + 1} captured -> ${capturePath}`);
+    } catch (error) {
+      addEvidence(report, `Q${i + 1} capture failed: ${sanitize(error instanceof Error ? error.message : error)}`);
+    }
 
     // After the Q6 duplicate probe, persist a LOWER_ATTENTION preference for the
     // Palmier Pro entity, then restart the server to prove the preference is
@@ -1806,13 +2689,36 @@ async function runTenQuerySequence(session, filterId) {
         body: { filterId, scopeType: "entity", scopeValue: "Palmier Pro", feedbackType: "LOWER_ATTENTION" },
       });
       preferenceSavedStatus = saved.status;
-      stopServer();
-      startServer();
+      const stopResult = await stopServer();
+      const started = startServer();
       await waitForHealth();
+      const identity = await confirmServerIdentity({ baseUrl, expectedInstanceId: started.instanceId });
+      const newServerAlive = identity.confirmed && isProcessAlive(serverProcess) && serverInstance?.instanceId === started.instanceId;
       const persisted = await session.request(`/api/preferences?filterId=${encodeURIComponent(filterId)}`);
       const list = Array.isArray(persisted.data?.preferences) ? persisted.data.preferences : [];
       const match = list.find((pref) => pref.scopeValue === "Palmier Pro" && pref.feedbackType === "LOWER_ATTENTION");
-      addEvidence(report, `Q${i + 1} preference save HTTP ${saved.status}; after restart list HTTP ${persisted.status} matches=${Boolean(match)}`);
+      restartEvidence = {
+        preferenceSaveHttp: saved.status,
+        oldExit: stopResult,
+        newServer: started,
+        newServerAlive,
+        identityConfirmation: identity,
+        persistedReadHttp: persisted.status,
+        preferenceDurable: Boolean(match),
+      };
+      addEvidence(report, `Q${i + 1} preference save HTTP ${saved.status}; oldExit stopped=${stopResult.stopped} reason=${stopResult.reason || "exit"}; newServer pid=${started.pid} identityConfirmed=${identity.confirmed} alive=${newServerAlive}; persisted HTTP ${persisted.status} matches=${Boolean(match)}`);
+      if (!stopResult.stopped) {
+        fail(report, "old server process exit could not be confirmed; restart acceptance aborted", { requestId, oldExit: stopResult });
+        return;
+      }
+      if (!identity.confirmed) {
+        fail(report, `health identity not confirmed for the new server process: ${identity.reason}`, { requestId, identityConfirmation: identity });
+        return;
+      }
+      if (!newServerAlive) {
+        fail(report, "new server process did not stay alive after health check; restart acceptance aborted", { requestId, newServer: started });
+        return;
+      }
       if (!match) {
         fail(report, "LOWER_ATTENTION preference for Palmier Pro was not durable across restart", { requestId });
         return;
@@ -1824,17 +2730,29 @@ async function runTenQuerySequence(session, filterId) {
       phase: item.phase,
       entity: item.entity,
       query: item.q,
+      mode: "LIVE",
       httpStatus: response.status,
       requestId,
-      failureClass: classifyQueryFailure(response.status, response.data),
+      requestStartedAt: new Date(requestStartedAt).toISOString(),
+      requestCompletedAt: new Date(requestCompletedAt).toISOString(),
+      failureClass: classifyQueryOutcome(response.status, response.data),
+      runBound,
+      runBinding: binding.status,
+      bindingCandidates: binding.candidateIds,
+      snapshotSize: bound.snapshotSize,
+      selectedRunId: latest?.id ?? null,
       classification,
+      gainStatuses: gainStatuses.join("|") || "none",
+      fact,
       discovered: Number(accounting?.discoveredCandidateCount ?? 0),
       produced: Number(accounting?.producedEvidenceCount ?? 0),
       accepted: Number(accounting?.acceptedEvidenceCount ?? 0),
       rejectionReasons: accounting?.rejectionReasons || null,
       evidenceCount: latest?.evidenceCount ?? 0,
       attention: attentionText,
-      knowledgeChanges: changeLabels.join("|") || "none",
+      knowledgeChanges: Array.isArray(latest?.knowledgeChanges)
+        ? latest.knowledgeChanges.map((change) => change?.classification).filter(Boolean).join("|") || "none"
+        : "none",
       knowledgeBefore,
       knowledgeAfter,
       knowledgeUnchanged: knowledgeBefore !== null && knowledgeAfter !== null && knowledgeBefore === knowledgeAfter,
@@ -1842,66 +2760,139 @@ async function runTenQuerySequence(session, filterId) {
       runAgentPath: agentPath.proven,
     };
     rows.push(row);
-    addEvidence(report, `Q${row.index} [${item.phase}] ${row.entity} http=${row.httpStatus} fail=${row.failureClass} class=${row.classification} attn=${row.attention} kb:${row.knowledgeBefore}->${row.knowledgeAfter} evidence=${row.evidenceCount} agent=${row.runAgentPath}`);
+    addEvidence(report, `Q${row.index} [${item.phase}] ${row.entity} http=${row.httpStatus} fail=${row.failureClass} bound=${row.runBound} class=${row.classification} attn=${row.attention} kb:${row.knowledgeBefore}->${row.knowledgeAfter} evidence=${row.evidenceCount} agent=${row.runAgentPath}`);
   }
 
-  const businessFailures = rows.filter((row) => row.failureClass === "BUSINESS_FAILURE");
+  const hardFailures = rows.filter((row) =>
+    row.failureClass === "BUSINESS_FAILURE"
+    || row.failureClass === "AUTH_FAILURE"
+    || row.failureClass === "INVALID_RESPONSE");
+  if (hardFailures.length) {
+    fail(report, `${hardFailures.map((row) => `Q${row.index}(${row.failureClass}:http${row.httpStatus})`).join(", ")}`, {
+      requestId: hardFailures[0].requestId,
+      rows,
+      underTest: gitInfo(),
+    });
+    return;
+  }
+
+  const unboundRows = rows.filter((row) => !row.runBound);
+  const rateLimitedRows = rows.filter((row) => row.failureClass === "RATE_LIMITED");
   const agentPathProven = rows.some((row) => row.runAgentPath);
   const baseline = rows.find((row) => row.phase === "NEW_BASELINE");
   const duplicateRow = rows.find((row) => row.phase === "DUPLICATE_SAME_FACT");
   const preferenceRow = rows.find((row) => row.phase === "PREFERENCE_ATTRIBUTION");
   const isolationRow = rows.find((row) => row.phase === "ISOLATION_CONTROL");
 
-  // Duplicate attribution: same fact, no knowledge growth, classification DUPLICATE,
-  // and attention dropped from the NEW baseline (when the baseline produced attention).
-  const duplicateObserved = Boolean(duplicateRow) && duplicateRow.classification === "DUPLICATE";
-  const duplicateNoWrite = Boolean(duplicateRow?.knowledgeUnchanged);
-  const duplicateAttentionDropped = Boolean(baseline && duplicateRow)
-    && hasHighAttention(baseline.attention)
-    && !hasHighAttention(duplicateRow.attention);
-  const duplicateCaseClosed = duplicateObserved && duplicateNoWrite && duplicateAttentionDropped;
+  const toEvaluationRow = (row) => row ? { ...row, bound: row.runBound } : row;
+  const duplicateEvaluation = evaluateDuplicateCase({
+    baseline: toEvaluationRow(baseline),
+    duplicate: toEvaluationRow(duplicateRow),
+  });
+  const duplicateCaseClosed = duplicateEvaluation.closed;
 
-  // Preference attribution: non-duplicate real-gain fact, attention lowered anyway,
-  // while the no-preference entity in the same sequence keeps high attention.
-  const preferenceNonDuplicate = Boolean(preferenceRow) && preferenceRow.classification !== "DUPLICATE" && preferenceRow.classification !== "NO_RUN";
-  const preferenceLowered = Boolean(preferenceRow) && !hasHighAttention(preferenceRow.attention) && hasLowAttention(preferenceRow.attention);
-  const isolationHeld = Boolean(isolationRow)
-    ? !hasLowAttention(isolationRow.attention) || hasHighAttention(isolationRow.attention)
-    : false;
-  const preferenceCaseClosed = preferenceNonDuplicate && preferenceLowered && isolationHeld;
+  // Replay causality: re-load the real Q1 baseline capture through the ONE
+  // shared loader-based path (integrity, provenance, association), then build
+  // CAPTURED_REPLAY evidence whose outputs are recomputed with the real
+  // modifier. Without a usable capture the causality stays explicitly open.
+  let replayEvidence = null;
+  let replayReason = "no-captured-baseline";
+  if (baselineCapture) {
+    const built = await buildReplayEvidenceForAcceptance({
+      capturePath: baselineCapture.path,
+      expected: {
+        requestId: baselineCapture.requestId,
+        runId: baselineCapture.runId,
+        entity: preferenceRow?.entity ?? baselineCapture.entity,
+      },
+    });
+    if (built.ok) replayEvidence = built.replayEvidence;
+    else replayReason = built.reason;
+  }
 
-  if (businessFailures.length) {
-    fail(report, `BUSINESS_FAILURE at ${businessFailures.map((row) => `Q${row.index}(${row.failureClass}:http${row.httpStatus})`).join(", ")}`, {
-      requestId: businessFailures[0].requestId,
+  // Preference isolation is computed from the actual scenario execution over
+  // HTTP (storage + auth) plus the live rows (consumption). It is never
+  // hardcoded, and generic auth/tenant isolation is reported separately.
+  let isolationScenario = {
+    observed: false,
+    status: "NOT_EXECUTED",
+    storageIsolation: null,
+    authRejection: null,
+    consumptionIsolation: null,
+  };
+  if (siblingFilterId && otherUserSession && otherUserFilterId) {
+    try {
+      isolationScenario = {
+        ...await runPreferenceIsolationScenarios({
+          ownerSession: session,
+          ownerFilterId: filterId,
+          siblingFilterId,
+          otherUserSession,
+          otherUserFilterId,
+          consumptionIsolation: {
+            matchedLowered: Boolean(preferenceRow) && hasLowAttention(preferenceRow.attention) && !hasHighAttention(preferenceRow.attention),
+            unmatchedHigh: Boolean(isolationRow) && hasHighAttention(isolationRow.attention),
+          },
+        }),
+        status: "EXECUTED_LIVE",
+      };
+    } catch (error) {
+      isolationScenario = {
+        observed: false,
+        status: "EXECUTION_FAILED",
+        reason: sanitize(error instanceof Error ? error.message : error),
+      };
+    }
+  }
+
+  const preferenceEvaluation = evaluatePreferenceAttribution({
+    baseline: toEvaluationRow(baseline),
+    preference: toEvaluationRow(preferenceRow),
+    control: toEvaluationRow(isolationRow),
+    preferencePersisted: restartEvidence?.preferenceDurable === true,
+    replayEvidence,
+    preferenceIsolationObserved: isolationScenario.observed === true,
+  });
+  const preferenceCaseClosed = preferenceEvaluation.closed;
+
+  if (!unboundRows.length && agentPathProven && duplicateCaseClosed && preferenceCaseClosed) {
+    pass(report, {
+      requestId: `${runId}-tq`,
+      underTest: gitInfo(),
+      restartEvidence,
       rows,
+      duplicateCase: duplicateEvaluation,
+      preferenceCase: {
+        ...preferenceEvaluation,
+        attributionBasis: `causality via ${preferenceEvaluation.replayMaterialMode || "no replay material"}`,
+        preferenceIsolation: isolationScenario,
+      },
+      verificationLayers: {
+        fixture: "asserted by tests/e2e-acceptance-logic.test.mjs (function contract only)",
+        capturedReplay: preferenceEvaluation.causalityProven ? "CLOSED" : `OPEN (${replayReason})`,
+        live: "OBSERVED (rows above)",
+        realDatabase: "NOT EXECUTED in this run (npm test real-DB suite; see skipped tests)",
+      },
+      agentPathProven,
     });
     return;
   }
 
-  const closedCases = [duplicateCaseClosed, preferenceCaseClosed].filter(Boolean).length;
-  if (agentPathProven && closedCases === 2) {
-    pass(report, {
-      requestId: `${runId}-tq`,
-      rows,
-      duplicateCaseClosed,
-      preferenceCaseClosed,
-      isolationHeld,
-      agentPathProven,
-    });
-  } else {
-    const missing = [];
-    if (!agentPathProven) missing.push("runAgent trace chain not observed");
-    if (!duplicateCaseClosed) missing.push(`duplicate case closed=${duplicateCaseClosed} (observed=${duplicateObserved}, noWrite=${duplicateNoWrite}, attentionDropped=${duplicateAttentionDropped})`);
-    if (!preferenceCaseClosed) missing.push(`preference case closed=${preferenceCaseClosed} (nonDuplicate=${preferenceNonDuplicate}, lowered=${preferenceLowered}, isolation=${isolationHeld})`);
-    partial(report, `real provider sequence completed with ${rows.length} queries; not all acceptance cases closed: ${missing.join("; ")}`, {
-      requestId: `${runId}-tq`,
-      rows,
-      duplicateCaseClosed,
-      preferenceCaseClosed,
-      isolationHeld,
-      agentPathProven,
-    });
-  }
+  const missing = [];
+  if (unboundRows.length) missing.push(`${unboundRows.length} query(ies) without a run record bound to their request: Q${unboundRows.map((row) => row.index).join(",Q")}`);
+  if (!agentPathProven) missing.push("runAgent trace chain not observed");
+  if (!duplicateCaseClosed) missing.push(`duplicate case: ${JSON.stringify(duplicateEvaluation)}`);
+  if (!preferenceCaseClosed) missing.push(`preference case: ${JSON.stringify(preferenceEvaluation)}; replay: ${replayReason}; isolation: ${isolationScenario.status}`);
+  if (rateLimitedRows.length) missing.push(`rate limited: Q${rateLimitedRows.map((row) => row.index).join(",Q")}`);
+  partial(report, `real provider sequence completed with ${rows.length} queries; acceptance not fully closed: ${missing.join("; ")}`, {
+    requestId: `${runId}-tq`,
+    underTest: gitInfo(),
+    restartEvidence,
+    rows,
+    duplicateCase: duplicateEvaluation,
+    preferenceCase: preferenceEvaluation,
+    agentPathProven,
+  });
 }
 
 function includesResearchChain(phases) {
@@ -1987,6 +2978,21 @@ async function cleanup() {
   }
 }
 
+// Traceability for the acceptance report: which commit was under test and
+// whether the working tree carried uncommitted changes when the run executed.
+function gitInfo() {
+  const silent = { stdio: ["ignore", "pipe", "ignore"] };
+  try {
+    const commitSha = (process.env.GITHUB_SHA
+      || execSync("git rev-parse HEAD", silent).toString().trim()
+      || "unknown").slice(0, 40);
+    const workingTreeDirty = execSync("git status --porcelain", silent).toString().trim().length > 0;
+    return { commitSha, workingTreeDirty };
+  } catch {
+    return { commitSha: process.env.GITHUB_SHA || "unknown", workingTreeDirty: null };
+  }
+}
+
 async function writeReport() {
   const all = Object.values(phaseReports);
   const failed = all.some((item) => item.status === statuses.fail);
@@ -2004,6 +3010,7 @@ async function writeReport() {
     totalStatus,
     generatedAt: new Date().toISOString(),
     durationMs: Date.now() - startedAt,
+    underTest: gitInfo(),
     qualityMode: qualityQuery
       ? { enabled: true, query: qualityQuery, modelRequestTimeoutMs: qualityModelRequestTimeoutMs }
       : { enabled: false },
@@ -2059,6 +3066,8 @@ async function main() {
     try {
       const db = await connectDb();
       await db.query("SELECT 1 AS ok");
+      const appliedMigrations = await applyMigrations();
+      addEvidence(phaseReports.runtimeDb, `Idempotent migrations applied after safety gate: ${appliedMigrations.join(", ")}`);
       await verifySchemaReady();
       startServer();
       const health = await waitForHealth();
@@ -2080,6 +3089,7 @@ async function main() {
       created.userIds.add(userA.id);
       created.userIds.add(userB.id);
       if (userA.id === userB.id) throw new Error("Account A and B resolved to the same Supabase user id");
+      acceptanceSessions = [accountA, accountB];
       await readControl(accountA, "/api/control/knowledge?summary=1", phaseReports.authTenant);
       await readControl(accountA, "/api/control/goals", phaseReports.authTenant);
       await readControl(accountA, "/api/control/follows", phaseReports.authTenant);
@@ -2104,7 +3114,8 @@ async function main() {
       await seedKnowledge(accountA.user.id, filterA);
       const beforeRestartKnowledge = await readControl(accountA, `/api/control/knowledge?summary=1&filterId=${encodeURIComponent(filterA)}`, phaseReports.persistence);
       if (!JSON.stringify(beforeRestartKnowledge.data).includes(runId)) throw new Error("Seeded knowledge was not readable before restart");
-      await stopServer();
+      const stopResult = await stopServer();
+      if (!stopResult.stopped) throw new Error(`Old server process exit could not be confirmed: ${JSON.stringify(stopResult)}`);
       startServer();
       await waitForHealth();
       const afterRestartKnowledge = await readControl(accountA, `/api/control/knowledge?summary=1&filterId=${encodeURIComponent(filterA)}`, phaseReports.persistence);
@@ -2121,6 +3132,7 @@ async function main() {
       fail(phaseReports.persistence, sanitize(error instanceof Error ? error.message : error), { lastPhase: "persistence" });
       return;
     }
+
 
     await runQualityAcceptance(accountA);
 
@@ -2195,9 +3207,6 @@ async function main() {
       } else {
         pass(phaseReports.statefulSecondRun);
       }
-      const logoutA = await accountA.request("/api/auth/logout", { method: "POST" });
-      const logoutB = await accountB.request("/api/auth/logout", { method: "POST" });
-      addEvidence(phaseReports.authTenant, `Logout A HTTP ${logoutA.status}; Logout B HTTP ${logoutB.status}`);
     } catch (error) {
       fail(phaseReports.statefulSecondRun, sanitize(error instanceof Error ? error.message : error), { lastPhase: "stateful_second_run" });
     }
@@ -2205,11 +3214,49 @@ async function main() {
     try {
       const harnessSession = new HttpSession("Account A (ten-query)");
       await login(harnessSession, process.env.TEST_ACCOUNT_A_EMAIL, process.env.TEST_ACCOUNT_A_PASSWORD);
-      await runTenQuerySequence(harnessSession, filterA);
+      acceptanceSessions.push(harnessSession);
+      await runAuthenticatedAcceptance({
+        ownerSession: harnessSession,
+        otherUserSession: accountB,
+        runDependent: async ({ ownerSession, otherUserSession }) => {
+          const siblingFilterId = `filter-${runId}-a2`;
+          const followA2 = await createFollow(ownerSession, siblingFilterId, `Sibling isolation filter ${runId}`);
+          created.filterIds.add(siblingFilterId);
+          addEvidence(phaseReports.tenQuery, `Created sibling isolation filter ${followA2.data.follow.id}`);
+          const scenarioConfigResult = await loadScenarioConfig(scenarioConfigPath);
+          if (scenarioConfigResult.config) {
+            addEvidence(phaseReports.tenQuery, `Scenario config loaded: ${scenarioConfigPath}`);
+          } else if (scenarioConfigPath) {
+            addEvidence(phaseReports.tenQuery, `Scenario config unavailable (${scenarioConfigResult.reason}); built-in sequence in use`);
+          }
+          await runTenQuerySequence(ownerSession, filterA, {
+            captureDir: captureDir,
+            commitSha: gitInfo().commitSha,
+            siblingFilterId,
+            otherUserSession,
+            otherUserFilterId: filterB,
+            scenarioConfig: scenarioConfigResult.config,
+          });
+        },
+      });
     } catch (error) {
       fail(phaseReports.tenQuery, sanitize(error instanceof Error ? error.message : error), { lastPhase: "ten_query_sequence" });
     }
   } finally {
+    // Convention: log out every created acceptance session AFTER the last
+    // dependent scenario. logoutAllSessions is tolerant and never throws, so a
+    // single logout failure cannot block the remaining cleanup or overwrite the
+    // original business failure. Runs before cleanup/stopServer so the server
+    // is still up to answer the logout HTTP calls.
+    const logoutResult = await logoutAllSessions(acceptanceSessions, {
+      logout: (session) => session.request("/api/auth/logout", { method: "POST" }),
+    });
+    for (const entry of logoutResult.loggedOut) {
+      addEvidence(phaseReports.authTenant, `Finalize logout ${entry.label} HTTP ${entry.httpStatus}`);
+    }
+    for (const label of logoutResult.failures) {
+      addEvidence(phaseReports.authTenant, `Finalize logout ${label} FAILED`);
+    }
     await cleanup();
     await stopServer();
     if (dbClient) {
@@ -2221,20 +3268,78 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch(async (error) => {
-    fail(phaseReports.runtimeDb, sanitize(error instanceof Error ? error.message : error), { lastPhase: "uncaught" });
-    await writeReport();
-    process.exitCode = 1;
-  });
+  const argv = process.argv.slice(2);
+  const replayIndex = argv.indexOf("--offline-replay");
+  if (replayIndex !== -1) {
+    // Offline replay entry: pure file operations against a capture artifact.
+    // No providers, no database, no server. Writes a standalone replay report.
+    const capturePath = argv[replayIndex + 1];
+    const entityIndex = argv.indexOf("--entity");
+    const entity = entityIndex !== -1 ? argv[entityIndex + 1] : undefined;
+    runOfflineReplay({ capturePath, entity, sourceMaterial: capturePath })
+      .then(async (result) => {
+        const report = {
+          kind: "OFFLINE_REPLAY_REPORT",
+          generatedAt: new Date().toISOString(),
+          capturePath,
+          entity: entity ?? null,
+          ...result,
+        };
+        await writeFile("signal-map-replay-report.json", `${JSON.stringify(report, null, 2)}\n`, "utf8");
+        console.log(JSON.stringify(report));
+        process.exitCode = result.closed ? 0 : 1;
+      })
+      .catch((error) => {
+        console.error(sanitize(error instanceof Error ? error.message : error));
+        process.exitCode = 1;
+      });
+  } else {
+    main().catch(async (error) => {
+      fail(phaseReports.runtimeDb, sanitize(error instanceof Error ? error.message : error), { lastPhase: "uncaught" });
+      await writeReport();
+      process.exitCode = 1;
+    });
+  }
 }
 
 export {
+  ACCEPTANCE_QUALITY_REQUEST_COUNT,
+  ACCEPTANCE_RESEARCH_REQUEST_COUNT,
+  ACCEPTANCE_SEQUENCE_LENGTH,
   attemptDiagnostics,
   attemptTraceGroups,
+  buildReplayEvidenceForAcceptance,
+  classifyQueryOutcome,
+  computeCaptureDigest,
+  deriveGainClassification,
+  evaluateDuplicateCase,
+  evaluatePreferenceAttribution,
+  evaluatePreferenceIsolation,
+  runAuthenticatedAcceptance,
+  factFingerprint,
+  factStateUnchanged,
+  hasHighAttention,
+  hasLowAttention,
+  isProcessAlive,
+  knowledgeCountFromState,
+  loadCaptureMaterial,
+  loadScenarioConfig,
+  buildReplayEvidenceFromCapture,
+  logoutAllSessions,
+  prepareAcceptanceSessions,
+  runOfflineReplay,
   qualityAcceptance,
   qualityMarkdown,
   producedEvidenceCountFromResponseData,
   rejectionAccounting,
   runCumulativeDiagnostics,
   actionabilityDiagnostics,
+  scopedKnowledgeState,
+  selectRunForRequest,
+  stopProcessLike,
+  confirmServerIdentity,
+  executeAndBindQuery,
+  replayEvidenceMaterialValid,
+  runPreferenceIsolationScenarios,
+  writeRunCapture,
 };

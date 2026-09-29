@@ -87,4 +87,6 @@ jobs:
             signal-map-agent-loop-e2e-report.md
             signal-map-agent-quality-report.json
             signal-map-agent-quality-report.md
+            signal-map-replay-report.json
+            captures/
           if-no-files-found: warn

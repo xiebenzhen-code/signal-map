@@ -4,9 +4,9 @@ module.exports = {
     {
       name: "no-circular",
       severity: "error",
-      comment: "Circular dependencies make module initialization and change impact unpredictable.",
+      comment: "Circular dependencies make module initialization and change impact unpredictable. Type-only cycles are erased at runtime and allowed.",
       from: {},
-      to: { circular: true },
+      to: { circular: true, dependencyTypesNot: ["type-only"] },
     },
     {
       name: "no-production-to-tests",

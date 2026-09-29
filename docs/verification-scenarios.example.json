@@ -1,0 +1,34 @@
+{
+  "$comment": "Example four-scenario configuration for the Signal Map E2E acceptance sequence. Entities, queries and candidate sources are operator inputs; the example entities are NOT assumed to produce new facts. Pass via SIGNAL_MAP_SCENARIO_CONFIG or `node scripts/signal-map-agent-loop-e2e.mjs --scenarios <path>`. candidateSources is surfaced in the acceptance report for the P1-B operator and does not alter the research contract.",
+  "newFact": {
+    "entity": "Palmier Pro",
+    "queries": {
+      "NEW_BASELINE": "Palmier Pro launch news for macOS AI video editing",
+      "UPDATE_PROBE": "Palmier Pro shipped team workspace collaboration",
+      "RELIABILITY_DIFF": "unverified rumor claims Palmier Pro will pivot to hardware"
+    }
+  },
+  "duplicate": {
+    "entity": "Palmier Pro",
+    "queries": {
+      "DUPLICATE_SAME_FACT": "Palmier Pro launch news for macOS AI video editing"
+    }
+  },
+  "preferenceRestart": {
+    "entity": "Palmier Pro",
+    "queries": {
+      "SAVE_PREFERENCE_RESTART": "Palmier Pro collaboration rollout details",
+      "PREFERENCE_ATTRIBUTION": "Palmier Pro pricing and plan changes",
+      "PREFERENCE_STABILITY": "Palmier Pro high-value launch follow-up"
+    },
+    "candidateSources": ["hacker-news", "arxiv"]
+  },
+  "isolation": {
+    "entity": "Acme",
+    "queries": {
+      "NEW_ENTITY_B": "Acme agent coding tool official release",
+      "DUPLICATE_ENTITY_B": "Acme agent coding tool official release",
+      "ISOLATION_CONTROL": "Acme agent tool new benchmark results"
+    }
+  }
+}
