@@ -1,34 +1,34 @@
 {
-  "$comment": "Example four-scenario configuration for the Signal Map E2E acceptance sequence. Entities, queries and candidate sources are operator inputs; the example entities are NOT assumed to produce new facts. Pass via SIGNAL_MAP_SCENARIO_CONFIG or `node scripts/signal-map-agent-loop-e2e.mjs --scenarios <path>`. candidateSources is surfaced in the acceptance report for the P1-B operator and does not alter the research contract.",
+  "$comment": "Example four-scenario configuration for the Signal Map E2E acceptance sequence. Entities, queries and candidate sources are operator inputs; the example entities are NOT assumed to produce new facts. Pass via SIGNAL_MAP_SCENARIO_CONFIG or `node scripts/signal-map-agent-loop-e2e.mjs --scenarios <path>`. candidateSources is surfaced in the acceptance report for the P1-B operator and does not alter the research contract. IMPORTANT: seed knowledge is 'AI video tool baseline already known' — scenario entities must NOT overlap with 'AI video' to avoid novelty-attribution rejection.",
   "newFact": {
-    "entity": "Palmier Pro",
+    "entity": "PostgreSQL",
     "queries": {
-      "NEW_BASELINE": "Palmier Pro launch news for macOS AI video editing",
-      "UPDATE_PROBE": "Palmier Pro shipped team workspace collaboration",
-      "RELIABILITY_DIFF": "unverified rumor claims Palmier Pro will pivot to hardware"
+      "NEW_BASELINE": "PostgreSQL 17 release notes and new features",
+      "UPDATE_PROBE": "PostgreSQL 17 performance improvements and vacuum",
+      "RELIABILITY_DIFF": "unverified claim PostgreSQL 17 removes SQL support"
     }
   },
   "duplicate": {
-    "entity": "Palmier Pro",
+    "entity": "PostgreSQL",
     "queries": {
-      "DUPLICATE_SAME_FACT": "Palmier Pro launch news for macOS AI video editing"
+      "DUPLICATE_SAME_FACT": "PostgreSQL 17 release notes and new features"
     }
   },
   "preferenceRestart": {
-    "entity": "Palmier Pro",
+    "entity": "PostgreSQL",
     "queries": {
-      "SAVE_PREFERENCE_RESTART": "Palmier Pro collaboration rollout details",
-      "PREFERENCE_ATTRIBUTION": "Palmier Pro pricing and plan changes",
-      "PREFERENCE_STABILITY": "Palmier Pro high-value launch follow-up"
+      "SAVE_PREFERENCE_RESTART": "PostgreSQL 17 logical replication improvements",
+      "PREFERENCE_ATTRIBUTION": "PostgreSQL 17 extension ecosystem changes",
+      "PREFERENCE_STABILITY": "PostgreSQL 17 community adoption updates"
     },
     "candidateSources": ["hacker-news", "arxiv"]
   },
   "isolation": {
-    "entity": "Acme",
+    "entity": "Kubernetes",
     "queries": {
-      "NEW_ENTITY_B": "Acme agent coding tool official release",
-      "DUPLICATE_ENTITY_B": "Acme agent coding tool official release",
-      "ISOLATION_CONTROL": "Acme agent tool new benchmark results"
+      "NEW_ENTITY_B": "Kubernetes 1.31 release announcements",
+      "DUPLICATE_ENTITY_B": "Kubernetes 1.31 release announcements",
+      "ISOLATION_CONTROL": "Kubernetes security policy engine updates"
     }
   }
 }
