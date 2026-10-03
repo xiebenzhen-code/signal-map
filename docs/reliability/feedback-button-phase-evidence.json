@@ -1,0 +1,240 @@
+[
+  {
+    "requestId": "signals-8c8b17c9-2957-4184-88ab-df36be4ac116",
+    "phase": "request_received",
+    "startedAt": "2026-10-02T15:42:11.95Z",
+    "finishedAt": "2026-10-02T15:42:11.95Z",
+    "durationMs": 0,
+    "success": true,
+    "itemCount": null,
+    "diagnostic": null
+  },
+  {
+    "requestId": "signals-8c8b17c9-2957-4184-88ab-df36be4ac116",
+    "phase": "research_started",
+    "startedAt": "2026-10-02T15:42:14.913Z",
+    "finishedAt": "2026-10-02T15:42:14.913Z",
+    "durationMs": 0,
+    "success": true,
+    "itemCount": null,
+    "diagnostic": null
+  },
+  {
+    "requestId": "signals-8c8b17c9-2957-4184-88ab-df36be4ac116",
+    "phase": "plan_finished",
+    "startedAt": "2026-10-02T15:42:29.308Z",
+    "finishedAt": "2026-10-02T15:42:29.308Z",
+    "durationMs": 0,
+    "success": true,
+    "itemCount": 5,
+    "diagnostic": {
+      "round": 1,
+      "agentGeneratedQueries": [
+        "site:github.com/Comfy-Org/ComfyUI/releases 最近一个月",
+        "ComfyUI release notes latest versions",
+        "ComfyUI changelog PyTorch 2.7",
+        "ComfyUI int8 convrot embedding lookup",
+        "ComfyUI KSamplerAdvanced add_noise nested latents"
+      ],
+      "selectedSourceType": "OFFICIAL",
+      "fallbackSourceTypes": [
+        "PRIMARY",
+        "GENERAL_WEB"
+      ],
+      "allowedProviderIds": [
+        "company-registry",
+        "official-update-pages",
+        "github-releases"
+      ],
+      "topicProfileSource": "unavailable",
+      "strategy": "REFRESH"
+    }
+  },
+  {
+    "requestId": "signals-8c8b17c9-2957-4184-88ab-df36be4ac116",
+    "phase": "search_finished",
+    "startedAt": "2026-10-02T15:42:29.324Z",
+    "finishedAt": "2026-10-02T15:42:34.196Z",
+    "durationMs": 4872,
+    "success": true,
+    "itemCount": 2,
+    "diagnostic": {
+      "selectedSourceType": "OFFICIAL",
+      "allowedProviderIds": [
+        "company-registry",
+        "official-update-pages",
+        "github-releases"
+      ],
+      "fallbackUsed": false,
+      "retrievalPlanSource": "upstream_agent_plan",
+      "agentGeneratedQueries": [
+        "site:github.com/Comfy-Org/ComfyUI/releases 最近一个月",
+        "ComfyUI release notes latest versions",
+        "ComfyUI changelog PyTorch 2.7",
+        "ComfyUI int8 convrot embedding lookup",
+        "ComfyUI KSamplerAdvanced add_noise nested latents"
+      ],
+      "pipelineActualQueries": [
+        "site:github.com/Comfy-Org/ComfyUI/releases 最近一个月",
+        "ComfyUI release notes latest versions",
+        "ComfyUI changelog PyTorch 2.7",
+        "ComfyUI int8 convrot embedding lookup",
+        "ComfyUI KSamplerAdvanced add_noise nested latents"
+      ],
+      "providerOutcomes": [
+        {
+          "providerName": "Primary Sources",
+          "execution": "not_searched",
+          "searched": false,
+          "resultCount": 0
+        },
+        {
+          "providerName": "Company Source Registry",
+          "providerId": "company-registry",
+          "execution": "searched_with_results",
+          "searched": true,
+          "resultCount": 2,
+          "rawResultCount": 2,
+          "normalizedCandidateCount": 2,
+          "rejectedRawCount": 0,
+          "candidateAdmissionRejectionReasons": {},
+          "candidateAdmissionRejectedSamples": [],
+          "requestCount": 1
+        },
+        {
+          "providerName": "GitHub Releases",
+          "execution": "searched_with_results",
+          "searched": true,
+          "resultCount": 10,
+          "requestCount": 1
+        },
+        {
+          "providerName": "Official Update Pages",
+          "execution": "not_searched",
+          "searched": false,
+          "resultCount": 0,
+          "requestCount": 0
+        },
+        {
+          "providerName": "Trusted Media",
+          "execution": "not_searched",
+          "searched": false,
+          "resultCount": 0,
+          "requestCount": 0
+        },
+        {
+          "providerName": "Industry Media",
+          "execution": "not_searched",
+          "searched": false,
+          "resultCount": 0,
+          "requestCount": 0
+        },
+        {
+          "providerName": "General Web",
+          "execution": "not_searched",
+          "searched": false,
+          "resultCount": 0,
+          "requestCount": 0
+        },
+        {
+          "providerName": "Product Hunt",
+          "execution": "not_searched",
+          "searched": false,
+          "resultCount": 0
+        },
+        {
+          "providerName": "Hacker News",
+          "execution": "not_searched",
+          "searched": false,
+          "resultCount": 0
+        },
+        {
+          "providerName": "Hugging Face",
+          "execution": "not_searched",
+          "searched": false,
+          "resultCount": 0
+        },
+        {
+          "providerName": "arXiv",
+          "execution": "not_searched",
+          "searched": false,
+          "resultCount": 0
+        },
+        {
+          "providerName": "Public Web Community",
+          "execution": "not_searched",
+          "searched": false,
+          "resultCount": 0,
+          "requestCount": 0
+        },
+        {
+          "providerName": "Reddit",
+          "execution": "not_searched",
+          "searched": false,
+          "resultCount": 0
+        }
+      ],
+      "providerResponseCount": 2,
+      "failureCount": 1,
+      "providerErrorCodes": []
+    }
+  },
+  {
+    "requestId": "signals-8c8b17c9-2957-4184-88ab-df36be4ac116",
+    "phase": "detail_fetch_finished",
+    "startedAt": "2026-10-02T15:42:34.206Z",
+    "finishedAt": "2026-10-02T15:42:36.44Z",
+    "durationMs": 2234,
+    "success": true,
+    "itemCount": 2,
+    "diagnostic": {
+      "detailAttempted": 2,
+      "detailSucceeded": 2,
+      "detailFailed": 0,
+      "stillInsufficient": 0,
+      "detailFetchCalls": 2
+    }
+  },
+  {
+    "requestId": "signals-8c8b17c9-2957-4184-88ab-df36be4ac116",
+    "phase": "knowledge_started",
+    "startedAt": "2026-10-02T15:42:37.747Z",
+    "finishedAt": "2026-10-02T15:42:37.747Z",
+    "durationMs": 0,
+    "success": true,
+    "itemCount": null,
+    "diagnostic": null
+  },
+  {
+    "requestId": "signals-8c8b17c9-2957-4184-88ab-df36be4ac116",
+    "phase": "agent_finished",
+    "startedAt": "2026-10-02T15:42:14.914Z",
+    "finishedAt": "2026-10-02T15:42:42.758Z",
+    "durationMs": 27844,
+    "success": false,
+    "itemCount": 12,
+    "diagnostic": null
+  },
+  {
+    "requestId": "signals-8c8b17c9-2957-4184-88ab-df36be4ac116",
+    "phase": "response_finished",
+    "startedAt": "2026-10-02T15:42:42.769Z",
+    "finishedAt": "2026-10-02T15:42:42.77Z",
+    "durationMs": 1,
+    "success": true,
+    "itemCount": 12,
+    "diagnostic": null
+  },
+  {
+    "requestId": "signals-8c8b17c9-2957-4184-88ab-df36be4ac116",
+    "phase": "agent_failed",
+    "startedAt": "2026-10-02T15:42:42.768Z",
+    "finishedAt": "2026-10-02T15:42:42.768Z",
+    "durationMs": 0,
+    "success": false,
+    "errorCode": "UNKNOWN_RESEARCH_FAILURE",
+    "errorName": "Error",
+    "errorMessage": "Agent returned failure result",
+    "failureKind": "failure_result"
+  }
+]

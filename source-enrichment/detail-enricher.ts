@@ -4,46 +4,16 @@ import { enrichHuggingFaceDetail } from "./resolvers/hugging-face.ts";
 import { enrichProductHuntDetail } from "./resolvers/product-hunt.ts";
 import { htmlTitle, isThinDetail, metaContent, stripHtmlForDetail } from "./resolvers/shared.ts";
 import { discardResponseBody } from "../lib/http-response.ts";
+import { isSafeDetailUrl } from "./safe-url.ts";
+import { resolveWrapperViaPublisherOrigin } from "./google-news-resolver.ts";
+import { titlesCorrespond } from "./title-correspondence.ts";
 
 export const maxDetailFetchesPerRound = 5;
 
-const LOOPBACK_HOSTS = new Set(["localhost", "localtest.me", "loopback", "0.0.0.0", "::", "::1"]);
-
-function ipLiteralPrivate(host: string) {
-  if (/^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) || /^169\.254\./.test(host)) return true;
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
-  // IPv6 literal: loopback (::1 / ::ffff:127.*), link-local (fe80::), ULA (fc/fd::).
-  if (/^[0-9a-f:]+$/i.test(host) && host.includes(":")) {
-    const lower = host.replace(/^\[|\]$/g, "").toLowerCase();
-    if (
-      lower === "::1" ||
-      lower.startsWith("::ffff:7f") ||
-      lower.startsWith("fe80") ||
-      /^f[c-d]/.test(lower) ||
-      lower.startsWith("::")
-    ) return true;
-  }
-  return false;
-}
-
-// SSRF guard for outbound detail fetches: only public http(s) URLs, and never
-// loopback / private / link-local literals. DNS rebinding to a private address
-// is out of scope for this minimal safety surface.
-export function isSafeDetailUrl(value: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(value);
-  } catch {
-    return false;
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
-  const host = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  if (LOOPBACK_HOSTS.has(host)) return false;
-  if (ipLiteralPrivate(host)) return false;
-  return true;
-}
-
-export function sourceCapability(providerId: string): SourceCapabilityRole {
+export function sourceCapability(providerId: string | undefined): SourceCapabilityRole {
+  // Web-search candidates (searchQueries path) carry no providerId; they are
+  // EVIDENCE-role candidates gated by relevance + a safe canonical URL.
+  if (providerId === undefined) return "EVIDENCE";
   if (providerId === "product-hunt") return "DISCOVERY";
   if (providerId === "huggingface") return "DISCOVERY";
   if (providerId === "company-registry" || providerId === "official-update-pages") return "EVIDENCE";
@@ -60,7 +30,11 @@ export function shouldEnrichDetail(input: {
   /** True when the candidate already passed topic relevance (guaranteed for admitted EVIDENCE candidates). */
   isRelevant?: boolean;
 }) {
-  if (!input.providerId) return false;
+  // Web-search candidates (searchQueries path) carry sourceType but no
+  // providerId. The 2026-09-30 acceptance run left its six most relevant news
+  // candidates permanently un-enriched because of that missing field while
+  // directory pages consumed the budget. Eligibility now rests on relevance +
+  // a safe canonical URL, not on providerId.
   if (input.potentialScore < 50) return false;
   const cleaned = cleanContent(`${input.title}\n${input.snippet || ""}`, input.title);
   const claim = extractClaim(cleaned, input.title);
@@ -72,10 +46,12 @@ export function shouldEnrichDetail(input: {
   return Boolean(input.isRelevant && input.url && isSafeDetailUrl(input.url));
 }
 
-async function fetchHtml(url: string) {
+async function fetchHtml(url: string, timeoutMs = 10000) {
+  // The abort signal governs the whole transfer including body reading, so an
+  // exhausted budget cancels the real request instead of abandoning it.
   const response = await fetch(url, {
     headers: { "User-Agent": "SignalMapResearch/0.4" },
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) {
     await discardResponseBody(response);
@@ -84,38 +60,144 @@ async function fetchHtml(url: string) {
   return response.text();
 }
 
+// Google News RSS wraps every article in a news.google.com URL whose page is a
+// JS shell. The wrapper is resolved via the google-news-resolver module (one
+// lite.duckduckgo.com search, anchor-verified against the candidate title),
+// which is fail-soft and shares the caller's deadline. After fetching the
+// resolved page, its own title must correspond to the candidate title before
+// its content is accepted.
+const GOOGLE_NEWS_WRAPPER = /https?:\/\/news\.google\.com\/rss\/articles\//i;
+
+function isGoogleNewsWrapper(url: string): boolean {
+  return GOOGLE_NEWS_WRAPPER.test(url);
+}
+
 export async function enrichGenericDetail(input: DetailEnrichmentInput): Promise<DetailEnrichmentResult> {
   if (!input.url) return { status: "NO_DETAIL", discoveredBy: input.providerId || "detail" };
+  // Counted across the whole candidate: one wrapper search and/or one body
+  // fetch — deliberately distinct from candidate-level counts upstream.
+  let fetchCalls = 0;
   try {
-    const html = await fetchHtml(input.url);
-    if (!html) return { status: "FETCH_FAILED", canonicalUrl: input.url, discoveredBy: input.providerId || "detail" };
+    const remainingMs = () => (input.deadlineAt === undefined ? undefined : Math.max(0, input.deadlineAt - Date.now()));
+    const budgetExhausted = () => {
+      const remaining = remainingMs();
+      return remaining !== undefined && remaining <= 0;
+    };
+    // Resolve Google News wrappers FIRST: fetching the wrapper yields a JS
+    // shell that must never be stored as article content.
+    let targetUrl = input.url;
+    let wrapperResolved = false;
+    if (isGoogleNewsWrapper(input.url)) {
+      const publisherOrigin =
+        (typeof input.metadata?.publisherUrl === "string" && isSafeDetailUrl(input.metadata.publisherUrl)
+          ? input.metadata.publisherUrl
+          : undefined);
+      const originalTitle = input.title?.trim() || "";
+      // Correspondence needs a publisher origin and the original candidate
+      // title; with either missing — or no budget left — the wrapper stays
+      // unresolved and no request is issued at all.
+      if (!publisherOrigin || !originalTitle || budgetExhausted()) {
+        return {
+          status: "TOO_THIN",
+          canonicalUrl: input.url,
+          discoveredBy: input.providerId || "detail",
+          title: input.title,
+          fetchCalls,
+        };
+      }
+      const resolved = await resolveWrapperViaPublisherOrigin(publisherOrigin, originalTitle, fetch, { deadlineAt: input.deadlineAt });
+      fetchCalls += 1;
+      // Honest failure: unresolvable, or the search consumed the remaining
+      // budget — the body request must not fire.
+      if (!resolved || budgetExhausted()) {
+        return {
+          status: "TOO_THIN",
+          canonicalUrl: input.url,
+          discoveredBy: input.providerId || "detail",
+          title: input.title,
+          fetchCalls,
+        };
+      }
+      targetUrl = resolved;
+      wrapperResolved = true;
+    }
+    if (budgetExhausted()) {
+      return { status: "FETCH_FAILED", canonicalUrl: targetUrl, discoveredBy: input.providerId || "detail", fetchCalls };
+    }
+    // Counted at initiation: a call cancelled mid-transfer still happened.
+    fetchCalls += 1;
+    const html = await fetchHtml(targetUrl, remainingMs() ?? 10000);
+    if (!html) return { status: "FETCH_FAILED", canonicalUrl: targetUrl, discoveredBy: input.providerId || "detail", fetchCalls };
+    // A resolved wrapper is only accepted when the page behind the URL
+    // corresponds to the original candidate (title tag / og:title / h1).
+    // Otherwise the result stays unresolved instead of stitching the original
+    // title onto another article's body.
+    if (wrapperResolved && !titlesCorrespond(input.title, [
+      htmlTitle(html),
+      metaContent(html, "og:title"),
+      stripHtmlForDetail(html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1] || ""),
+    ])) {
+      return {
+        status: "TOO_THIN",
+        canonicalUrl: input.url,
+        discoveredBy: input.providerId || "detail",
+        title: input.title,
+        fetchCalls,
+      };
+    }
+    // Prefer the semantic body (article/main) so navigation chrome cannot crowd
+    // out the real content within the stored length. When no semantic block
+    // exists, fall back to the full-page text; the thin check below keeps
+    // skeleton-only pages from passing as extractable content.
+    const semanticHtml =
+      html.match(/<article\b[\s\S]*?<\/article>/i)?.[0] ||
+      html.match(/<main\b[\s\S]*?<\/main>/i)?.[0] ||
+      html.match(/<div[^>]+(?:class|id)=["'][^"']*(?:post-content|entry-content|article-body|release-notes|changelog)[^"']*["'][^>]*>[\s\S]*?<\/div>/i)?.[0] ||
+      "";
+    // Without a semantic block, strip structural chrome (nav / header / footer
+    // / aside / cookie banners) before extraction so a skeleton-only landing
+    // page fails the thin check honestly instead of passing on navigation
+    // text. This mirrors the cleaner's chrome rules at the HTML level.
+    const fallbackHtml = semanticHtml || html
+      .replace(/<nav\b[\s\S]*?<\/nav>/gi, " ")
+      .replace(/<header\b[\s\S]*?<\/header>/gi, " ")
+      .replace(/<footer\b[\s\S]*?<\/footer>/gi, " ")
+      .replace(/<aside\b[\s\S]*?<\/aside>/gi, " ")
+      .replace(/<div[^>]+(?:class|id)=["'][^"']*(?:cookie|banner|hero)[^"']*["'][^>]*>[\s\S]*?<\/div>/gi, " ");
+    const bodySource = semanticHtml && stripHtmlForDetail(semanticHtml).trim().length >= 80 ? semanticHtml : fallbackHtml;
     const body = [
       htmlTitle(html),
       metaContent(html, "description"),
       metaContent(html, "og:description"),
-      stripHtmlForDetail(html).slice(0, 1400),
+      stripHtmlForDetail(bodySource).slice(0, 1400),
     ].filter(Boolean).join("\n");
+    // A resolved wrapper reports the ORIGINAL publisher article as canonical,
+    // keeping the wrapper URL provenance out of the evidence link.
+    const canonicalUrl = wrapperResolved ? targetUrl : input.url;
     if (isThinDetail(body)) {
-      return { status: "TOO_THIN", canonicalUrl: input.url, rawContent: body, contentType: "html", discoveredBy: input.providerId || "detail", title: input.title };
+      return { status: "TOO_THIN", canonicalUrl, rawContent: body, contentType: "html", discoveredBy: input.providerId || "detail", title: input.title, fetchCalls };
     }
     return {
       status: "SUCCESS",
-      canonicalUrl: input.url,
+      canonicalUrl,
       title: input.title || htmlTitle(html),
       rawContent: body,
       contentType: "html",
       discoveredBy: input.providerId || "detail",
-      evidenceFrom: "Detail page",
+      evidenceFrom: wrapperResolved ? "Publisher article (resolved from Google News wrapper)" : "Detail page",
+      fetchCalls,
     };
   } catch {
-    return { status: "FETCH_FAILED", canonicalUrl: input.url, discoveredBy: input.providerId || "detail" };
+    return { status: "FETCH_FAILED", canonicalUrl: input.url, discoveredBy: input.providerId || "detail", fetchCalls };
   }
 }
 
 export async function enrichDetail(input: DetailEnrichmentInput): Promise<DetailEnrichmentResult> {
   if (input.providerId === "product-hunt") return enrichProductHuntDetail(input);
   if (input.providerId === "huggingface") return enrichHuggingFaceDetail(input);
-  // Generic detail completion for relevant EVIDENCE candidates with a safe canonicalUrl.
+  // Generic detail completion for relevant candidates (with or without a
+  // providerId — searchQueries candidates carry sourceType only) with a safe
+  // canonicalUrl.
   if (input.url && isSafeDetailUrl(input.url)) return enrichGenericDetail(input);
   return {
     status: "UNSUPPORTED",

@@ -162,6 +162,7 @@ export type AgentStep = {
 };
 
 export type AgentRunResult = {
+  failure?: { stage: "knowledge" | "retrieval"; code: string; message: string };
   status: "completed" | "failed" | "needs_more_evidence";
   reason?: string;
   rounds: number;
@@ -199,8 +200,10 @@ export type AgentRunOptions = {
       existingEvidence: unknown[];
       previousQueries: string[];
       round: number;
+      signal?: AbortSignal;
     }): Promise<{
       status: "configured" | "not_configured" | "error";
+      errorCode?: string;
       plan?: Pick<ResearchPlan, "objective" | "queries" | "preferredSourceTypes" | "maxQueries">;
     }>;
   };

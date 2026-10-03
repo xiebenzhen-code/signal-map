@@ -1,0 +1,4 @@
+{
+  "$comment": "Optional source extensions. This file is loaded once at module import; changes require restart. Entries are merged with the built-in defaults. Duplicate company names or aliases are silently skipped.",
+  "entities": []
+}

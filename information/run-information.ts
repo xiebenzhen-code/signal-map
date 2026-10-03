@@ -7,6 +7,7 @@ export function isInformationRunCurrent(
 ) {
   return Boolean(
     run &&
+      run.status !== "failed" &&
       run.filterId === filterId &&
       run.generatedFromResearchContextRevision === researchContextRevision,
   );
@@ -50,8 +51,13 @@ export async function runInformation(options: RunInformationOptions): Promise<In
     };
   }
   try {
-    return stamp(await options.runLive(), options);
+    const payload = await options.runLive();
+    if (payload.status === "failed") {
+      throw Object.assign(new Error(`本次研究未完成，请稍后重新尝试。${payload.requestId ? `请求编号：${payload.requestId}` : ""}`), { code: "RESEARCH_FAILED" });
+    }
+    return stamp(payload, options);
   } catch (liveError) {
+    if (liveError && typeof liveError === "object" && "code" in liveError && liveError.code === "RESEARCH_FAILED") throw liveError;
     if (options.allowDemoFallback === false) throw liveError;
     if (liveError && typeof liveError === "object" && "status" in liveError && [401, 403].includes(Number(liveError.status))) {
       throw liveError;

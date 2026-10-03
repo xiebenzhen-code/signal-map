@@ -68,6 +68,9 @@ const topicNoise = new Set([
   "please", "recent", "research", "the", "this", "today", "update", "updates",
   "artificial", "intelligence", "foundation", "model", "release",
   "what", "when", "where", "which", "who", "why", "with", "domain", "field",
+  // Instruction fragments from homepage gap sentences must never become
+  // standalone search keywords or queries.
+  "supporting", "evidence", "backed", "around", "find", "following", "sentence",
 ]);
 
 const topicAnchorRules: Array<{ anchor: string; patterns: RegExp[] }> = [
@@ -149,7 +152,7 @@ function isTopicPhrase(value: string) {
   ) {
     return false;
   }
-  if (/排除|告诉我|为什么|值得|优先|不要|避免|只看|exclude|tell|why|worth|prefer|avoid|only/iu.test(normalized)) {
+  if (/排除|告诉我|为什么|值得|优先|不要|避免|只看|围绕|寻找|证据支持|exclude|tell|why|worth|prefer|avoid|only/iu.test(normalized)) {
     return false;
   }
   return normalized.split(/\s+/).some((word) => {
@@ -181,7 +184,9 @@ function topicKeywordsFor(input: ResearchInput, englishKeywords: string[], topic
     ...englishKeywords.filter((keyword) => !topicNoise.has(keyword.toLocaleLowerCase())),
   ].filter((value) =>
     isTopicPhrase(value) &&
-    !/(?:排除|告诉我|为什么|值得|优先|不要|避免|只看|有哪些|什么|过去|最近|当前|exclude|tell|why|worth|prefer|avoid|only|what|recent|latest)/iu.test(value),
+    // 围绕/寻找/证据支持 fragments come from the homepage gap sentence template;
+    // they are instructions, not topic concepts.
+    !/(?:排除|告诉我|为什么|值得|优先|不要|避免|只看|有哪些|什么|过去|最近|当前|围绕|寻找|证据支持|exclude|tell|why|worth|prefer|avoid|only|what|recent|latest)/iu.test(value),
   ), 16);
 }
 
@@ -321,9 +326,18 @@ function entityText(input: ResearchInput) {
     .join("；");
 }
 
+const sourcePlatformWords = new Set([
+  // Platforms that host evidence are sources, not research subjects. Treating
+  // them as entities produced nonsense queries ("GitHub Investor Relations") and
+  // gated correct results behind entity matches containing "github".
+  "github", "gitlab", "arxiv", "hugging face", "huggingface", "producthunt", "product hunt",
+  "reddit", "stack overflow", "stackoverflow", "npm", "pypi", "google news",
+]);
+
 function validEntityCandidate(value: string) {
   const normalized = value.trim();
   if (normalized.length < 2) return false;
+  if (sourcePlatformWords.has(normalized.toLocaleLowerCase())) return false;
   if (/^(AI|API|Agent|Model|Research|Open|New|Latest)$/i.test(normalized)) return false;
   if (genericEntityWords.has(normalized.toLocaleLowerCase())) return false;
   return /[A-Za-z0-9\u4e00-\u9fff]/.test(normalized);

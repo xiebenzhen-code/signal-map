@@ -14,6 +14,7 @@ import {
   handleControlGoalAction,
   handleControlGoals,
   handleControlKnowledge,
+  handleControlKnowledgePost,
   handleControlNotificationRead,
   handleControlNotifications,
   handlePreference,
@@ -24,6 +25,7 @@ import {
   handleSocialPost,
   handleSocialProfile,
 } from "./handlers.ts";
+import { handleSourceCheck } from "./custom-sources.ts";
 import { handlePostgresTransportProbe } from "./postgres-transport-probe.ts";
 
 const port = Number.parseInt(process.env.PORT || "8080", 10);
@@ -64,6 +66,8 @@ export async function handleBackendRequest(request: Request) {
       status: "ok",
       instanceId: process.env.SIGNAL_MAP_SERVER_INSTANCE_ID ?? null,
     }, { headers: { "Cache-Control": "no-store" } });
+  } else if (url.pathname === "/api/sources/check") {
+    response = await handleSourceCheck(request);
   } else if (url.pathname === "/api/signals") {
     response = await handleSignals(request);
   } else if (url.pathname === "/api/auth/login") {
@@ -95,7 +99,9 @@ export async function handleBackendRequest(request: Request) {
   } else if (url.pathname === "/api/control/notifications") {
     response = await handleControlNotifications(request);
   } else if (url.pathname === "/api/control/knowledge") {
-    response = await handleControlKnowledge(request);
+    response = request.method === "POST"
+      ? await handleControlKnowledgePost(request)
+      : await handleControlKnowledge(request);
   } else if (url.pathname === "/api/preferences") {
     response = await handlePreference(request);
   } else if (url.pathname === "/api/control/agent-runs") {

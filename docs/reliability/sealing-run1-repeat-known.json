@@ -1,0 +1,137 @@
+{
+  "requestId": "signals-4ef26dac-b679-45b2-84c9-e16f1e475183",
+  "researchMode": "authenticated",
+  "status": "completed",
+  "savedAt": "2026-10-03T01:36:47.989Z",
+  "note": "封口轮第一次真实研究（重复问题→全部已知→caught_up 为正确重复检测行为）。登录会话、direct TLS 数据库。",
+  "overview": {
+    "scanned": 2,
+    "deduplicated": 12,
+    "events": 12,
+    "verified": 12,
+    "relevant": 12,
+    "mustKnow": 1,
+    "worthWatching": 0,
+    "libraryOnly": 11,
+    "ignored": 0,
+    "noiseReductionRate": 50,
+    "novelInformationRate": 100
+  },
+  "queryPlan": {
+    "entities": [
+      "ComfyUI"
+    ],
+    "window": "30d"
+  },
+  "failures": [
+    "Trusted Media: Reuters、Bloomberg、FT、WSJ、CNBC 索引未返回匹配结果。"
+  ],
+  "signals": [
+    {
+      "eventStatus": "NEW",
+      "knowledgeStatus": "KNOWN",
+      "informationGainStatus": "NO_INFORMATION_GAIN",
+      "attentionDecision": "LIBRARY_ONLY",
+      "tag": "v0.38.0",
+      "publishedAt": "2026-09-29",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.38.0"
+    },
+    {
+      "eventStatus": "NEW",
+      "knowledgeStatus": "KNOWN",
+      "informationGainStatus": "NO_INFORMATION_GAIN",
+      "attentionDecision": "LIBRARY_ONLY",
+      "tag": "v0.37.0",
+      "publishedAt": "2026-09-21",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.37.0"
+    },
+    {
+      "eventStatus": "NEW",
+      "knowledgeStatus": "KNOWN",
+      "informationGainStatus": "NO_INFORMATION_GAIN",
+      "attentionDecision": "LIBRARY_ONLY",
+      "tag": "v0.36.0",
+      "publishedAt": "2026-09-15",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.36.0"
+    },
+    {
+      "eventStatus": "NEW",
+      "knowledgeStatus": "KNOWN",
+      "informationGainStatus": "NO_INFORMATION_GAIN",
+      "attentionDecision": "LIBRARY_ONLY",
+      "tag": "v0.35.0",
+      "publishedAt": "2026-09-09",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.35.0"
+    },
+    {
+      "eventStatus": "BACKGROUND",
+      "knowledgeStatus": "KNOWN",
+      "informationGainStatus": "NO_INFORMATION_GAIN",
+      "attentionDecision": "LIBRARY_ONLY",
+      "tag": "v0.29.2",
+      "publishedAt": "2026-07-31",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.29.2"
+    },
+    {
+      "eventStatus": "BACKGROUND",
+      "knowledgeStatus": "KNOWN",
+      "informationGainStatus": "NO_INFORMATION_GAIN",
+      "attentionDecision": "LIBRARY_ONLY",
+      "tag": "v0.34.0",
+      "publishedAt": "2026-08-26",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.34.0"
+    },
+    {
+      "eventStatus": "BACKGROUND",
+      "knowledgeStatus": "KNOWN",
+      "informationGainStatus": "NO_INFORMATION_GAIN",
+      "attentionDecision": "LIBRARY_ONLY",
+      "tag": "v0.33.1",
+      "publishedAt": "2026-08-13",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.33.1"
+    },
+    {
+      "eventStatus": "BACKGROUND",
+      "knowledgeStatus": "KNOWN",
+      "informationGainStatus": "NO_INFORMATION_GAIN",
+      "attentionDecision": "LIBRARY_ONLY",
+      "tag": "v0.32.0",
+      "publishedAt": "2026-08-11",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.32.0"
+    },
+    {
+      "eventStatus": "BACKGROUND",
+      "knowledgeStatus": "KNOWN",
+      "informationGainStatus": "NO_INFORMATION_GAIN",
+      "attentionDecision": "LIBRARY_ONLY",
+      "tag": "v0.31.0",
+      "publishedAt": "2026-08-08",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.31.0"
+    },
+    {
+      "eventStatus": "BACKGROUND",
+      "knowledgeStatus": "KNOWN",
+      "informationGainStatus": "NO_INFORMATION_GAIN",
+      "attentionDecision": "LIBRARY_ONLY",
+      "tag": "v0.30.0",
+      "publishedAt": "2026-08-03",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.30.0"
+    },
+    {
+      "eventStatus": "BACKGROUND",
+      "knowledgeStatus": "KNOWN",
+      "informationGainStatus": "NO_INFORMATION_GAIN",
+      "attentionDecision": "LIBRARY_ONLY",
+      "tag": null,
+      "sourceUrl": "https://github.com/comfyanonymous/ComfyUI/releases"
+    },
+    {
+      "eventStatus": "BACKGROUND",
+      "knowledgeStatus": "KNOWN",
+      "informationGainStatus": "NO_INFORMATION_GAIN",
+      "attentionDecision": "LIBRARY_ONLY",
+      "tag": null,
+      "sourceUrl": "https://docs.comfy.org/"
+    }
+  ]
+}

@@ -29,6 +29,8 @@ export type SignalPresentation = {
   oneLineSummary?: string;
   fact: string;
   whyItMatters?: string;
+  /** The evidence-backed change statement, present only when the claim adds substance beyond the title. */
+  changeStatement?: string;
   evidence: PresentationEvidence[];
   interpretation?: string;
   contentQuality: ContentQuality;
@@ -50,4 +52,6 @@ export type PresentationInput = {
   };
   cleaned: CleanedContent;
   claim: ExtractedClaim;
+  /** True when the user's own question is about software releases/upgrades — gates software-specific wording. */
+  upgradeContext?: boolean;
 };

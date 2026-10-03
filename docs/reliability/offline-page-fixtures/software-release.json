@@ -1,0 +1,1316 @@
+{
+  "signals": [
+    {
+      "id": "event-we90ot",
+      "category": "匹配",
+      "channel": "官方",
+      "title": "* Add transparent background support for GPT Image 2 partner nodes",
+      "summary": "* Add transparent background support for GPT Image 2 partner nodes",
+      "time": "10天前",
+      "truth": 92,
+      "baseUseful": 99,
+      "lead": 25,
+      "tags": [
+        "开源开发与 AI 工具",
+        "值得关注的新变化",
+        "ComfyUI 最近一个月在 GitHub 发布了哪些版本？有哪些值得升级的改动？",
+        "ComfyUI",
+        "artificial intelligence",
+        "foundation model",
+        "model release",
+        "AI",
+        "ComfyUI",
+        "GitHub",
+        "生成式 AI",
+        "基础模型",
+        "模型更新",
+        "ComfyUI"
+      ],
+      "action": "针对该变化做最小验证：* Add transparent background support for GPT Image 2 partner nodes。按证据所指入口实际操作一次，对比变化前后的结果并记录。",
+      "why": "为未解决问题补充证据：comfyui；1 条独立证据链；融合判断：FACT（包含 Primary/官方证据且无冲突）；包含 Primary Source",
+      "official": [
+        {
+          "name": "GitHub · comfyanonymous/ComfyUI",
+          "url": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.37.0",
+          "kind": "原文"
+        }
+      ],
+      "social": [],
+      "sourceType": "primary",
+      "sourceTier": "S",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.37.0",
+      "publisher": "GitHub · comfyanonymous/ComfyUI",
+      "publishedAt": "2026-09-21T07:35:01.000Z",
+      "eventOccurredAt": "2026-09-21T07:35:01.000Z",
+      "firstSeenAt": "2026-10-01T08:07:38.663Z",
+      "retrievedAt": "2026-10-01T08:07:38.663Z",
+      "originalOccurredAt": "2026-09-21T07:35:01.000Z",
+      "timestampStatus": "valid",
+      "dataOrigin": "live",
+      "confidence": 92,
+      "verificationStatus": "verified",
+      "topicRelevance": {
+        "decision": "MATCH",
+        "reason": "LEGACY_QUERY_TERM_MATCH",
+        "matchedTerms": [
+          "comfyanonymous",
+          "comfyui",
+          "release",
+          "notes"
+        ],
+        "matchedDomainAnchors": [],
+        "matchedTaskAnchors": [],
+        "matchedGenericTerms": [],
+        "matchedQueryTerms": [
+          "comfyanonymous",
+          "comfyui",
+          "release",
+          "notes"
+        ],
+        "relevanceGateApplied": false,
+        "relevanceGatePassed": true,
+        "score": 100
+      },
+      "relevanceScore": 99,
+      "reliabilityScore": 92,
+      "freshnessScore": 25,
+      "noveltyScore": 86,
+      "judgementImpactScore": 62,
+      "gapMatchScore": 69,
+      "overallScore": 81,
+      "sourceCount": 1,
+      "independentEvidenceCount": 1,
+      "propagationCount": 0,
+      "signalType": "FACT",
+      "signalCluster": {
+        "clusterId": "cluster-comfyanonymous-comfyui-v0-37-0",
+        "entity": "ComfyUI",
+        "topic": "开源开发与 AI 工具",
+        "normalizedClaim": "comfyanonymous comfyui v0 37 0",
+        "timeScope": "2026-09-21",
+        "evidenceIds": [
+          "event-we90ot-0"
+        ],
+        "sourceRoles": [
+          "PRIMARY"
+        ],
+        "independentSourceCount": 1,
+        "duplicateCount": 0,
+        "conflictState": "none",
+        "canonicalSources": [
+          "github.com"
+        ]
+      },
+      "sourceRoles": [
+        "PRIMARY"
+      ],
+      "sourceRoleDiversity": 1,
+      "duplicateRatio": 0,
+      "confirmationGain": true,
+      "primaryEvidenceIds": [
+        "event-we90ot-0"
+      ],
+      "claims": [
+        {
+          "claimText": "* Add transparent background support for GPT Image 2 partner nodes",
+          "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.37.0",
+          "publisher": "GitHub · comfyanonymous/ComfyUI",
+          "publishedAt": "2026-09-21T07:35:01.000Z",
+          "sourceType": "primary",
+          "sourceTier": "S",
+          "evidenceSnippet": "* Add transparent background support for GPT Image 2 partner nodes",
+          "verificationStatus": "verified",
+          "contentType": "FACT",
+          "evidenceSources": [
+            {
+              "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.37.0",
+              "publisher": "GitHub · comfyanonymous/ComfyUI",
+              "publishedAt": "2026-09-21T07:35:01.000Z",
+              "sourceType": "primary",
+              "sourceTier": "S",
+              "evidenceSnippet": "* Add transparent background support for GPT Image 2 partner nodes",
+              "sourceRole": "verification",
+              "verificationStatus": "verified"
+            }
+          ],
+          "contentQuality": "VALID",
+          "propagationCount": 1,
+          "independentEvidenceCount": 1
+        }
+      ],
+      "sources": [
+        {
+          "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.37.0",
+          "publisher": "GitHub · comfyanonymous/ComfyUI",
+          "publishedAt": "2026-09-21T07:35:01.000Z",
+          "sourceType": "primary",
+          "sourceTier": "S"
+        }
+      ],
+      "section": "must_know",
+      "gapMatches": [],
+      "questionMatches": [
+        "comfyui"
+      ],
+      "entityMatches": [
+        "comfyui"
+      ],
+      "whyItMatters": "该变化的具体内容：* Add transparent background support for GPT Image 2 partner nodes。证据未说明商用许可、成本，升级价值需结合你的使用场景验证。",
+      "eventStatus": "NEW",
+      "informationType": "FACT",
+      "knowledgeStatus": "NOVEL",
+      "actionabilityStatus": "TEST_NOW",
+      "informationGainStatus": "NEW_INFORMATION",
+      "hasExecutableAction": true,
+      "executionEntry": {
+        "type": "REPOSITORY",
+        "evidence": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.37.0",
+        "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.37.0"
+      },
+      "attentionDecision": "MUST_READ",
+      "presentation": {
+        "headline": "* Add transparent background support for GPT Image 2 partner nodes",
+        "oneLineSummary": "* Add transparent background support for GPT Image 2 partner nodes",
+        "fact": "* Add transparent background support for GPT Image 2 partner nodes",
+        "whyItMatters": "该变化的具体内容：* Add transparent background support for GPT Image 2 partner nodes。证据未说明商用许可、成本，升级价值需结合你的使用场景验证。",
+        "changeStatement": "* Add transparent background support for GPT Image 2 partner nodes",
+        "evidence": [
+          {
+            "sourceName": "GitHub · comfyanonymous/ComfyUI",
+            "sourceRole": "verification",
+            "snippet": "* Add transparent background support for GPT Image 2 partner nodes",
+            "publishedAt": "2026-09-21T07:35:01.000Z",
+            "url": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.37.0"
+          }
+        ],
+        "contentQuality": "VALID"
+      },
+      "contentQuality": "VALID",
+      "translationStatus": "failed",
+      "translationFailureReason": "远程翻译暂时不可用，已保留原文"
+    },
+    {
+      "id": "event-we90po",
+      "category": "匹配",
+      "channel": "官方",
+      "title": "* New video preview node for VLM pipelines with frame-accurate scrubbing",
+      "summary": "* New video preview node for VLM pipelines with frame-accurate scrubbing",
+      "time": "15天前",
+      "truth": 92,
+      "baseUseful": 99,
+      "lead": 25,
+      "tags": [
+        "开源开发与 AI 工具",
+        "值得关注的新变化",
+        "ComfyUI 最近一个月在 GitHub 发布了哪些版本？有哪些值得升级的改动？",
+        "ComfyUI",
+        "artificial intelligence",
+        "foundation model",
+        "model release",
+        "AI",
+        "ComfyUI",
+        "GitHub",
+        "生成式 AI",
+        "基础模型",
+        "模型更新",
+        "ComfyUI"
+      ],
+      "action": "针对该变化做最小验证：* New video preview node for VLM pipelines with frame-accurate scrubbing。按证据所指入口实际操作一次，对比变化前后的结果并记录。",
+      "why": "为未解决问题补充证据：comfyui；1 条独立证据链；融合判断：FACT（包含 Primary/官方证据且无冲突）；包含 Primary Source",
+      "official": [
+        {
+          "name": "GitHub · comfyanonymous/ComfyUI",
+          "url": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.36.0",
+          "kind": "原文"
+        }
+      ],
+      "social": [],
+      "sourceType": "primary",
+      "sourceTier": "S",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.36.0",
+      "publisher": "GitHub · comfyanonymous/ComfyUI",
+      "publishedAt": "2026-09-15T22:26:17.000Z",
+      "eventOccurredAt": "2026-09-15T22:26:17.000Z",
+      "firstSeenAt": "2026-10-01T08:07:38.663Z",
+      "retrievedAt": "2026-10-01T08:07:38.663Z",
+      "originalOccurredAt": "2026-09-15T22:26:17.000Z",
+      "timestampStatus": "valid",
+      "dataOrigin": "live",
+      "confidence": 92,
+      "verificationStatus": "verified",
+      "topicRelevance": {
+        "decision": "MATCH",
+        "reason": "LEGACY_QUERY_TERM_MATCH",
+        "matchedTerms": [
+          "comfyanonymous",
+          "comfyui",
+          "release",
+          "notes"
+        ],
+        "matchedDomainAnchors": [],
+        "matchedTaskAnchors": [],
+        "matchedGenericTerms": [],
+        "matchedQueryTerms": [
+          "comfyanonymous",
+          "comfyui",
+          "release",
+          "notes"
+        ],
+        "relevanceGateApplied": false,
+        "relevanceGatePassed": true,
+        "score": 100
+      },
+      "relevanceScore": 99,
+      "reliabilityScore": 92,
+      "freshnessScore": 25,
+      "noveltyScore": 86,
+      "judgementImpactScore": 62,
+      "gapMatchScore": 69,
+      "overallScore": 81,
+      "sourceCount": 1,
+      "independentEvidenceCount": 1,
+      "propagationCount": 0,
+      "signalType": "FACT",
+      "signalCluster": {
+        "clusterId": "cluster-comfyanonymous-comfyui-v0-36-0",
+        "entity": "ComfyUI",
+        "topic": "开源开发与 AI 工具",
+        "normalizedClaim": "comfyanonymous comfyui v0 36 0",
+        "timeScope": "2026-09-15",
+        "evidenceIds": [
+          "event-we90po-0"
+        ],
+        "sourceRoles": [
+          "PRIMARY"
+        ],
+        "independentSourceCount": 1,
+        "duplicateCount": 0,
+        "conflictState": "none",
+        "canonicalSources": [
+          "github.com"
+        ]
+      },
+      "sourceRoles": [
+        "PRIMARY"
+      ],
+      "sourceRoleDiversity": 1,
+      "duplicateRatio": 0,
+      "confirmationGain": true,
+      "primaryEvidenceIds": [
+        "event-we90po-0"
+      ],
+      "claims": [
+        {
+          "claimText": "* New video preview node for VLM pipelines with frame-accurate scrubbing",
+          "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.36.0",
+          "publisher": "GitHub · comfyanonymous/ComfyUI",
+          "publishedAt": "2026-09-15T22:26:17.000Z",
+          "sourceType": "primary",
+          "sourceTier": "S",
+          "evidenceSnippet": "* New video preview node for VLM pipelines with frame-accurate scrubbing",
+          "verificationStatus": "verified",
+          "contentType": "FACT",
+          "evidenceSources": [
+            {
+              "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.36.0",
+              "publisher": "GitHub · comfyanonymous/ComfyUI",
+              "publishedAt": "2026-09-15T22:26:17.000Z",
+              "sourceType": "primary",
+              "sourceTier": "S",
+              "evidenceSnippet": "* New video preview node for VLM pipelines with frame-accurate scrubbing",
+              "sourceRole": "verification",
+              "verificationStatus": "verified"
+            }
+          ],
+          "contentQuality": "VALID",
+          "propagationCount": 1,
+          "independentEvidenceCount": 1
+        }
+      ],
+      "sources": [
+        {
+          "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.36.0",
+          "publisher": "GitHub · comfyanonymous/ComfyUI",
+          "publishedAt": "2026-09-15T22:26:17.000Z",
+          "sourceType": "primary",
+          "sourceTier": "S"
+        }
+      ],
+      "section": "gap_update",
+      "gapMatches": [],
+      "questionMatches": [
+        "comfyui"
+      ],
+      "entityMatches": [
+        "comfyui"
+      ],
+      "whyItMatters": "该变化的具体内容：* New video preview node for VLM pipelines with frame-accurate scrubbing。证据未说明商用许可、成本、硬件与兼容性，升级价值需结合你的使用场景验证。",
+      "eventStatus": "NEW",
+      "informationType": "FACT",
+      "knowledgeStatus": "NOVEL",
+      "actionabilityStatus": "TEST_NOW",
+      "informationGainStatus": "NEW_INFORMATION",
+      "hasExecutableAction": true,
+      "executionEntry": {
+        "type": "REPOSITORY",
+        "evidence": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.36.0",
+        "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.36.0"
+      },
+      "attentionDecision": "LIBRARY_ONLY",
+      "presentation": {
+        "headline": "* New video preview node for VLM pipelines with frame-accurate scrubbing",
+        "oneLineSummary": "* New video preview node for VLM pipelines with frame-accurate scrubbing",
+        "fact": "* New video preview node for VLM pipelines with frame-accurate scrubbing",
+        "whyItMatters": "该变化的具体内容：* New video preview node for VLM pipelines with frame-accurate scrubbing。证据未说明商用许可、成本、硬件与兼容性，升级价值需结合你的使用场景验证。",
+        "changeStatement": "* New video preview node for VLM pipelines with frame-accurate scrubbing",
+        "evidence": [
+          {
+            "sourceName": "GitHub · comfyanonymous/ComfyUI",
+            "sourceRole": "verification",
+            "snippet": "* New video preview node for VLM pipelines with frame-accurate scrubbing",
+            "publishedAt": "2026-09-15T22:26:17.000Z",
+            "url": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.36.0"
+          }
+        ],
+        "contentQuality": "VALID"
+      },
+      "contentQuality": "VALID",
+      "translationStatus": "failed",
+      "translationFailureReason": "远程翻译暂时不可用，已保留原文"
+    }
+  ],
+  "status": "completed",
+  "queryPlan": {
+    "originalNeed": "开源开发与 AI 工具；值得关注的新变化；ComfyUI 最近一个月在 GitHub 发布了哪些版本？有哪些值得升级的改动？；ComfyUI；30d",
+    "coreKeywords": [
+      "开源开发与 AI 工具",
+      "值得关注的新变化",
+      "ComfyUI 最近一个月在 GitHub 发布了哪些版本？有哪些值得升级的改动？",
+      "ComfyUI"
+    ],
+    "topicAnchors": [],
+    "topicKeywords": [
+      "开源开发与 AI 工具",
+      "ComfyUI",
+      "GitHub"
+    ],
+    "englishKeywords": [
+      "artificial intelligence",
+      "foundation model",
+      "model release",
+      "AI",
+      "ComfyUI",
+      "GitHub"
+    ],
+    "synonyms": [
+      "生成式 AI",
+      "基础模型",
+      "模型更新"
+    ],
+    "entities": [
+      "ComfyUI"
+    ],
+    "industryKeywords": [
+      "开源开发与 AI 工具",
+      "official documentation",
+      "release notes",
+      "research",
+      "GitHub"
+    ],
+    "changeKeywords": [
+      "latest",
+      "today",
+      "update",
+      "new",
+      "release",
+      "announcement",
+      "release notes",
+      "changelog",
+      "GitHub",
+      "new feature",
+      "new limitation",
+      "pricing",
+      "API",
+      "policy",
+      "hiring",
+      "this week"
+    ],
+    "knowledgeAwareQueries": [],
+    "searchCombinations": [
+      "ComfyUI latest update",
+      "ComfyUI today announcement",
+      "ComfyUI release notes changelog",
+      "ComfyUI GitHub release this week",
+      "ComfyUI new feature new limitation pricing API policy hiring",
+      "ComfyUI Investor Relations",
+      "ComfyUI official announcement",
+      "开源开发与 AI 工具 product launch release",
+      "ComfyUI GitHub workflow tool",
+      "ComfyUI GitHub research model",
+      "开源开发与 AI 工具 official documentation release notes",
+      "ComfyUI GitHub implementation commercial workflow",
+      "artificial intelligence latest update",
+      "foundation model latest update",
+      "model release latest update",
+      "AI latest update",
+      "GitHub latest update",
+      "开源开发与 AI 工具 官方公告",
+      "开源开发与 AI 工具 权威媒体",
+      "开源开发与 AI 工具 artificial intelligence",
+      "开源开发与 AI 工具 foundation model",
+      "开源开发与 AI 工具 model release",
+      "值得关注的新变化 artificial intelligence",
+      "值得关注的新变化 foundation model"
+    ],
+    "retrievalWindows": [
+      "24h",
+      "3d",
+      "7d",
+      "30d"
+    ],
+    "requestedFreshnessWindow": "30d",
+    "resolvedEntities": [
+      {
+        "canonicalEntity": "ComfyUI",
+        "aliasesConsidered": [
+          "ComfyUI",
+          "comfyui",
+          "comfy ui",
+          "comfyanonymous"
+        ]
+      }
+    ],
+    "aliasesConsidered": [
+      "ComfyUI",
+      "comfyui",
+      "comfy ui",
+      "comfyanonymous"
+    ],
+    "queryBudget": 24,
+    "deduplicatedQueryCount": 24,
+    "selectedSourceType": "OFFICIAL",
+    "fallbackSourceTypes": [
+      "PRIMARY",
+      "GENERAL_WEB"
+    ],
+    "allowedProviderIds": [
+      "company-registry",
+      "official-update-pages",
+      "github-releases",
+      "primary-web-search",
+      "trusted-media",
+      "industry-media",
+      "public-web",
+      "product-hunt",
+      "hacker-news",
+      "huggingface",
+      "arxiv",
+      "reddit",
+      "reverse-primary",
+      "social-access"
+    ],
+    "sourceSelectionReason": "offline page fixture"
+  },
+  "progress": [
+    {
+      "stage": "planning",
+      "label": "正在理解需求并扩展中英文搜索词",
+      "counts": {
+        "candidates": 0,
+        "primary": 0,
+        "trustedMedia": 0,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      },
+      "detail": "生成 24 个搜索组合"
+    },
+    {
+      "stage": "candidates",
+      "label": "搜索候选资料",
+      "counts": {
+        "candidates": 0,
+        "primary": 0,
+        "trustedMedia": 0,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      },
+      "detail": "ComfyUI latest update · ComfyUI today announcement · ComfyUI release notes changelog · ComfyUI GitHub release this week"
+    },
+    {
+      "stage": "primary",
+      "label": "找到 2 条候选资料 · 官方来源 2 条",
+      "counts": {
+        "candidates": 2,
+        "primary": 2,
+        "trustedMedia": 0,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    },
+    {
+      "stage": "trusted_media",
+      "label": "正在补充可信媒体",
+      "counts": {
+        "candidates": 2,
+        "primary": 2,
+        "trustedMedia": 0,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    },
+    {
+      "stage": "trusted_media",
+      "label": "可信媒体补充完成 · 0 条",
+      "counts": {
+        "candidates": 2,
+        "primary": 2,
+        "trustedMedia": 0,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    },
+    {
+      "stage": "social",
+      "label": "正在检查社交媒体线索",
+      "counts": {
+        "candidates": 2,
+        "primary": 2,
+        "trustedMedia": 0,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    },
+    {
+      "stage": "social",
+      "label": "社交媒体线索 0 条 · 已尝试反向查证",
+      "counts": {
+        "candidates": 2,
+        "primary": 2,
+        "trustedMedia": 0,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    },
+    {
+      "stage": "deduplication",
+      "label": "去重完成 · 0 条扫描结果收敛为 2 条来源",
+      "counts": {
+        "candidates": 2,
+        "primary": 2,
+        "trustedMedia": 0,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    },
+    {
+      "stage": "clustering",
+      "label": "事件聚合完成 · 2 个独立事件",
+      "counts": {
+        "candidates": 2,
+        "primary": 2,
+        "trustedMedia": 0,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    },
+    {
+      "stage": "claim_extraction",
+      "label": "Claim 提取完成 · 2 条有来源 Claim",
+      "counts": {
+        "candidates": 2,
+        "primary": 2,
+        "trustedMedia": 0,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 2
+      }
+    },
+    {
+      "stage": "verification",
+      "label": "已验证 2 个事件 · 0 个需继续核查",
+      "counts": {
+        "candidates": 2,
+        "primary": 2,
+        "trustedMedia": 0,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 2
+      }
+    },
+    {
+      "stage": "gap_matching",
+      "label": "信息缺口匹配完成 · 0 个更新",
+      "counts": {
+        "candidates": 2,
+        "primary": 2,
+        "trustedMedia": 0,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 2
+      }
+    },
+    {
+      "stage": "novelty",
+      "label": "已对照 Known Information 检查新颖度",
+      "counts": {
+        "candidates": 2,
+        "primary": 2,
+        "trustedMedia": 0,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 2
+      }
+    },
+    {
+      "stage": "scoring",
+      "label": "七维评分完成 · Gate 优先于 Overall",
+      "counts": {
+        "candidates": 2,
+        "primary": 2,
+        "trustedMedia": 0,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 2
+      }
+    },
+    {
+      "stage": "filtering",
+      "label": "注意力决策完成 · 1 条 Must Read，0 条 Worth Watching",
+      "counts": {
+        "candidates": 2,
+        "primary": 2,
+        "trustedMedia": 0,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 2
+      }
+    },
+    {
+      "stage": "explanation",
+      "label": "已生成仅基于现有证据的解释",
+      "counts": {
+        "candidates": 2,
+        "primary": 2,
+        "trustedMedia": 0,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 2
+      }
+    },
+    {
+      "stage": "translation",
+      "label": "翻译完成 · 0 条中文呈现，2 条保留原文",
+      "counts": {
+        "candidates": 2,
+        "primary": 2,
+        "trustedMedia": 0,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 2
+      }
+    },
+    {
+      "stage": "complete",
+      "label": "研究完成 · 今天 1 条值得注意",
+      "counts": {
+        "candidates": 2,
+        "primary": 2,
+        "trustedMedia": 0,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 2
+      }
+    }
+  ],
+  "failures": [
+    "primary: 5 个搜索组合请求失败或超时。",
+    "trusted_media: 2 个搜索组合请求失败或超时。",
+    "Trusted Media: Reuters、Bloomberg、FT、WSJ、CNBC 索引未返回匹配结果。",
+    "industry_media: 3 个搜索组合请求失败或超时。",
+    "other: 4 个搜索组合请求失败或超时。",
+    "Product Hunt: 请求失败或超时。",
+    "Hacker News: 请求失败或超时。",
+    "arXiv: 请求失败或超时。",
+    "Social Discovery: Reddit 请求失败或超时。"
+  ],
+  "counts": {
+    "candidates": 2,
+    "primary": 2,
+    "trustedMedia": 0,
+    "industryMedia": 0,
+    "social": 0,
+    "verified": 2
+  },
+  "overview": {
+    "scanned": 0,
+    "deduplicated": 2,
+    "events": 2,
+    "verified": 2,
+    "relevant": 2,
+    "mustKnow": 1,
+    "worthWatching": 0,
+    "libraryOnly": 1,
+    "ignored": 0,
+    "noiseReductionRate": 0,
+    "novelInformationRate": 100
+  },
+  "coverage": {
+    "level": "Broad",
+    "usedProviders": [
+      "Company Source Registry",
+      "GitHub Releases",
+      "Hugging Face"
+    ],
+    "zeroResultProviders": [
+      "Company Source Registry",
+      "Hugging Face"
+    ],
+    "notSearchedProviders": [
+      "Official Update Pages",
+      "Public Web Community"
+    ],
+    "unavailableProviders": [
+      "Xiaohongshu"
+    ],
+    "notConfiguredProviders": [
+      "X"
+    ],
+    "failedProviders": [
+      "Primary Sources",
+      "Trusted Media",
+      "Industry Media",
+      "General Web",
+      "Product Hunt",
+      "Hacker News",
+      "arXiv",
+      "Reddit"
+    ],
+    "outcomes": [
+      {
+        "source": "Primary Sources",
+        "execution": "failed",
+        "searched": true,
+        "resultCount": 0,
+        "requestCount": 5,
+        "failureCode": "upstream_error",
+        "fallbackAttempted": false
+      },
+      {
+        "providerId": "company-registry",
+        "source": "Company Source Registry",
+        "execution": "searched_no_results",
+        "searched": true,
+        "resultCount": 0,
+        "rawResultCount": 0,
+        "normalizedCandidateCount": 0,
+        "rejectedRawCount": 0,
+        "candidateAdmissionRejectionReasons": {},
+        "candidateAdmissionRejectedSamples": [],
+        "requestCount": 1
+      },
+      {
+        "source": "GitHub Releases",
+        "execution": "searched_with_results",
+        "searched": true,
+        "resultCount": 2,
+        "requestCount": 1
+      },
+      {
+        "source": "Official Update Pages",
+        "execution": "not_searched",
+        "searched": false,
+        "resultCount": 0,
+        "requestCount": 0
+      },
+      {
+        "source": "Trusted Media",
+        "execution": "failed",
+        "searched": true,
+        "resultCount": 0,
+        "requestCount": 2,
+        "failureCode": "upstream_error",
+        "fallbackAttempted": false
+      },
+      {
+        "source": "Industry Media",
+        "execution": "failed",
+        "searched": true,
+        "resultCount": 0,
+        "requestCount": 3,
+        "failureCode": "upstream_error",
+        "fallbackAttempted": false
+      },
+      {
+        "source": "General Web",
+        "execution": "failed",
+        "searched": true,
+        "resultCount": 0,
+        "requestCount": 4,
+        "failureCode": "upstream_error",
+        "fallbackAttempted": true
+      },
+      {
+        "providerId": "product-hunt",
+        "source": "Product Hunt",
+        "execution": "failed",
+        "searched": true,
+        "resultCount": 0,
+        "requestCount": 1,
+        "failureCode": "upstream_error"
+      },
+      {
+        "providerId": "hacker-news",
+        "source": "Hacker News",
+        "execution": "failed",
+        "searched": true,
+        "resultCount": 0,
+        "requestCount": 1,
+        "failureCode": "upstream_error"
+      },
+      {
+        "providerId": "huggingface",
+        "source": "Hugging Face",
+        "execution": "searched_no_results",
+        "searched": true,
+        "resultCount": 0,
+        "rawResultCount": 0,
+        "normalizedCandidateCount": 0,
+        "rejectedRawCount": 0,
+        "candidateAdmissionRejectionReasons": {},
+        "candidateAdmissionRejectedSamples": [],
+        "requestCount": 1
+      },
+      {
+        "providerId": "arxiv",
+        "source": "arXiv",
+        "execution": "failed",
+        "searched": true,
+        "resultCount": 0,
+        "requestCount": 1,
+        "failureCode": "upstream_error"
+      },
+      {
+        "source": "Public Web Community",
+        "execution": "not_searched",
+        "searched": false,
+        "resultCount": 0,
+        "requestCount": 0
+      },
+      {
+        "source": "X",
+        "execution": "not_configured",
+        "searched": false,
+        "resultCount": 0
+      },
+      {
+        "source": "Xiaohongshu",
+        "execution": "unavailable",
+        "searched": false,
+        "resultCount": 0
+      },
+      {
+        "source": "Reddit",
+        "execution": "failed",
+        "searched": true,
+        "resultCount": 0,
+        "failureCode": "upstream_error"
+      }
+    ]
+  },
+  "filteringSummary": {
+    "retrievedCount": 2,
+    "clusteredCount": 2,
+    "displayedCount": 2,
+    "filteredReasons": {
+      "stale": 0,
+      "duplicate": 0,
+      "lowReliability": 0,
+      "insufficientVerification": 0,
+      "background": 0,
+      "lowNovelty": 0,
+      "unresolvedConflict": 0,
+      "lowActionability": 0,
+      "noInformationGain": 0,
+      "insufficientContent": 0,
+      "topicMismatch": 0
+    },
+    "detailEnrichment": {
+      "detailAttempted": 0,
+      "detailSucceeded": 0,
+      "detailFailed": 0,
+      "stillInsufficient": 0
+    },
+    "filteringDetails": [
+      {
+        "id": "event-we90ot",
+        "title": "* Add transparent background support for GPT Image 2 partner nodes",
+        "decision": "displayed",
+        "explanation": "为未解决问题补充证据：comfyui；1 条独立证据链；融合判断：FACT（包含 Primary/官方证据且无冲突）；包含 Primary Source",
+        "topicRelevance": {
+          "decision": "MATCH",
+          "reason": "LEGACY_QUERY_TERM_MATCH",
+          "matchedDomainAnchors": [],
+          "matchedTaskAnchors": [],
+          "matchedGenericTerms": [],
+          "matchedQueryTerms": [
+            "comfyanonymous",
+            "comfyui",
+            "release",
+            "notes"
+          ],
+          "relevanceGateApplied": false,
+          "relevanceGatePassed": true
+        },
+        "sources": [
+          {
+            "publisher": "GitHub · comfyanonymous/ComfyUI",
+            "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.37.0"
+          }
+        ]
+      },
+      {
+        "id": "event-we90po",
+        "title": "* New video preview node for VLM pipelines with frame-accurate scrubbing",
+        "decision": "displayed",
+        "explanation": "为未解决问题补充证据：comfyui；1 条独立证据链；融合判断：FACT（包含 Primary/官方证据且无冲突）；包含 Primary Source",
+        "topicRelevance": {
+          "decision": "MATCH",
+          "reason": "LEGACY_QUERY_TERM_MATCH",
+          "matchedDomainAnchors": [],
+          "matchedTaskAnchors": [],
+          "matchedGenericTerms": [],
+          "matchedQueryTerms": [
+            "comfyanonymous",
+            "comfyui",
+            "release",
+            "notes"
+          ],
+          "relevanceGateApplied": false,
+          "relevanceGatePassed": true
+        },
+        "sources": [
+          {
+            "publisher": "GitHub · comfyanonymous/ComfyUI",
+            "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.36.0"
+          }
+        ]
+      }
+    ],
+    "summaryText": "共检索 2 条，聚合为 2 个信号，最终展示 2 个；其余主要因证据价值不足被过滤。"
+  },
+  "evidenceAccounting": {
+    "discoveredCandidateCount": 2,
+    "producedEvidenceCount": 2,
+    "cumulativeEvidenceCount": 2,
+    "evaluatedEvidenceCount": 2,
+    "acceptedEvidenceCount": 2,
+    "rejectedEvidenceCount": 0,
+    "finalEvidenceCount": 2,
+    "rejectionReasons": {
+      "stale": 0,
+      "duplicate": 0,
+      "lowReliability": 0,
+      "insufficientVerification": 0,
+      "background": 0,
+      "lowNovelty": 0,
+      "unresolvedConflict": 0,
+      "lowActionability": 0,
+      "noInformationGain": 0,
+      "insufficientContent": 0,
+      "topicMismatch": 0
+    }
+  },
+  "evidenceRecords": [
+    {
+      "id": "evidence-frbr0z",
+      "claimId": "claim-cvw3ce",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.37.0",
+      "canonicalUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.37.0",
+      "publisher": "GitHub · comfyanonymous/ComfyUI",
+      "publishedAt": "2026-09-21T07:35:01.000Z",
+      "sourceType": "primary",
+      "sourceRole": "verification",
+      "sourceTier": "S",
+      "verificationStatus": "verified",
+      "evidenceSnippet": "* Add transparent background support for GPT Image 2 partner nodes",
+      "dataMode": "live",
+      "retrievedAt": "2026-10-01T08:07:38.663Z",
+      "createdAt": "2026-10-01T08:07:38.663Z"
+    },
+    {
+      "id": "evidence-s8mtra",
+      "claimId": "claim-1yuu49z",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.36.0",
+      "canonicalUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.36.0",
+      "publisher": "GitHub · comfyanonymous/ComfyUI",
+      "publishedAt": "2026-09-15T22:26:17.000Z",
+      "sourceType": "primary",
+      "sourceRole": "verification",
+      "sourceTier": "S",
+      "verificationStatus": "verified",
+      "evidenceSnippet": "* New video preview node for VLM pipelines with frame-accurate scrubbing",
+      "dataMode": "live",
+      "retrievedAt": "2026-10-01T08:07:38.663Z",
+      "createdAt": "2026-10-01T08:07:38.663Z"
+    }
+  ],
+  "fetchedAt": "2026-10-01T08:07:39.149Z",
+  "dataMode": "live",
+  "lastCheckedAt": "2026-10-01T08:07:39.149Z",
+  "sourceOutcomes": [
+    {
+      "sourceType": "PRIMARY",
+      "providerId": "primary-web-search",
+      "executed": true,
+      "resultCount": 0,
+      "requestCount": 5,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 80,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "OFFICIAL",
+      "providerId": "company-registry",
+      "executed": true,
+      "resultCount": 0,
+      "requestCount": 1,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 90,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "OFFICIAL",
+      "providerId": "github-releases",
+      "executed": true,
+      "resultCount": 2,
+      "requestCount": 1,
+      "newEvidenceCount": 2,
+      "newClaimCount": 0,
+      "reliabilityGain": 90,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "OFFICIAL",
+      "providerId": "official-update-pages",
+      "executed": false,
+      "resultCount": 0,
+      "requestCount": 0,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 90,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "INDEPENDENT_MEDIA",
+      "providerId": "trusted-media",
+      "executed": true,
+      "resultCount": 0,
+      "requestCount": 2,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 60,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "INDEPENDENT_MEDIA",
+      "providerId": "industry-media",
+      "executed": true,
+      "resultCount": 0,
+      "requestCount": 3,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 60,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "GENERAL_WEB",
+      "providerId": "public-web",
+      "executed": true,
+      "resultCount": 0,
+      "requestCount": 4,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 60,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "SOCIAL_SIGNAL",
+      "providerId": "product-hunt",
+      "executed": true,
+      "resultCount": 0,
+      "requestCount": 1,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 60,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "SOCIAL_SIGNAL",
+      "providerId": "hacker-news",
+      "executed": true,
+      "resultCount": 0,
+      "requestCount": 1,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 60,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "GENERAL_WEB",
+      "providerId": "huggingface",
+      "executed": true,
+      "resultCount": 0,
+      "requestCount": 1,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 60,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "PRIMARY",
+      "providerId": "arxiv",
+      "executed": true,
+      "resultCount": 0,
+      "requestCount": 1,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 80,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "SOCIAL_SIGNAL",
+      "providerId": "public-web",
+      "executed": false,
+      "resultCount": 0,
+      "requestCount": 0,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 60,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "PRIMARY",
+      "providerId": "primary-web-search",
+      "executed": false,
+      "resultCount": 0,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 80,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "PRIMARY",
+      "providerId": "primary-web-search",
+      "executed": false,
+      "resultCount": 0,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 80,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "SOCIAL_SIGNAL",
+      "providerId": "reddit",
+      "executed": true,
+      "resultCount": 0,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 60,
+      "conflictReduction": 0
+    }
+  ],
+  "sourceDiagnostics": [
+    {
+      "providerId": "company-registry",
+      "rawProviderResultCount": 0,
+      "normalizedCandidateCount": 0,
+      "rejectedRawCount": 0,
+      "candidateAdmissionRejectionReasons": {},
+      "candidateAdmissionRejectedSamples": [],
+      "admittedCandidateCount": 0,
+      "enrichmentEligibleCount": 0,
+      "detailAttempted": 0,
+      "detailSucceeded": 0,
+      "detailFailed": 0,
+      "pipelineRetrievedCount": 0,
+      "displayedCount": 0
+    },
+    {
+      "providerId": "product-hunt",
+      "rawProviderResultCount": 0,
+      "normalizedCandidateCount": 0,
+      "rejectedRawCount": 0,
+      "admittedCandidateCount": 0,
+      "enrichmentEligibleCount": 0,
+      "detailAttempted": 0,
+      "detailSucceeded": 0,
+      "detailFailed": 0,
+      "pipelineRetrievedCount": 0,
+      "displayedCount": 0,
+      "rejectionReasons": {
+        "no_candidate_after_normalization": 1
+      }
+    },
+    {
+      "providerId": "hacker-news",
+      "rawProviderResultCount": 0,
+      "normalizedCandidateCount": 0,
+      "rejectedRawCount": 0,
+      "admittedCandidateCount": 0,
+      "enrichmentEligibleCount": 0,
+      "detailAttempted": 0,
+      "detailSucceeded": 0,
+      "detailFailed": 0,
+      "pipelineRetrievedCount": 0,
+      "displayedCount": 0
+    },
+    {
+      "providerId": "huggingface",
+      "rawProviderResultCount": 0,
+      "normalizedCandidateCount": 0,
+      "rejectedRawCount": 0,
+      "candidateAdmissionRejectionReasons": {},
+      "candidateAdmissionRejectedSamples": [],
+      "admittedCandidateCount": 0,
+      "enrichmentEligibleCount": 0,
+      "detailAttempted": 0,
+      "detailSucceeded": 0,
+      "detailFailed": 0,
+      "pipelineRetrievedCount": 0,
+      "displayedCount": 0
+    },
+    {
+      "providerId": "arxiv",
+      "rawProviderResultCount": 0,
+      "normalizedCandidateCount": 0,
+      "rejectedRawCount": 0,
+      "admittedCandidateCount": 0,
+      "enrichmentEligibleCount": 0,
+      "detailAttempted": 0,
+      "detailSucceeded": 0,
+      "detailFailed": 0,
+      "pipelineRetrievedCount": 0,
+      "displayedCount": 0
+    }
+  ],
+  "requestId": "offline-fixture-software-release",
+  "researchMode": "anonymous",
+  "_offlineFixture": {
+    "label": "software-release",
+    "question": "ComfyUI 最近一个月在 GitHub 发布了哪些版本？有哪些值得升级的改动？",
+    "generatedAt": "2026-10-01T08:07:39.149Z",
+    "materials": "GitHub releases 列表替身（2 个版本，多节要点正文）",
+    "note": "离线回放产物：由注入替身驱动真实管线生成，用于页面呈现验收；不代表当前真实检索能力。"
+  }
+}

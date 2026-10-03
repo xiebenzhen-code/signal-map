@@ -1,0 +1,161 @@
+{
+  "requestId": "signals-f0f0182d-113b-4fc4-8d8d-b865d709f4e2",
+  "researchMode": "authenticated",
+  "status": "completed",
+  "savedAt": "2026-10-02T01:26:16.270Z",
+  "note": "首页原问题真实提交验收证据（登录态、direct TLS 数据库、真实前端代理）。",
+  "overview": {
+    "scanned": 2,
+    "deduplicated": 12,
+    "events": 12,
+    "verified": 12,
+    "relevant": 12,
+    "mustKnow": 1,
+    "worthWatching": 0,
+    "libraryOnly": 11,
+    "ignored": 0,
+    "noiseReductionRate": 50,
+    "novelInformationRate": 100
+  },
+  "queryPlan": {
+    "entities": [
+      "ComfyUI"
+    ],
+    "requestedFreshnessWindow": "30d"
+  },
+  "failures": [
+    "Trusted Media: Reuters、Bloomberg、FT、WSJ、CNBC 索引未返回匹配结果。"
+  ],
+  "signals": [
+    {
+      "eventStatus": "NEW",
+      "attentionDecision": "MUST_READ",
+      "title": "* 通过 @rattus128 在 https://GitHub.com/Comfy-Org/Co… 中改进 qwen 2.1 KV 缓存位置逻辑",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.38.0",
+      "publishedAt": "2026-09-29T21:46:45.000Z",
+      "action": "针对该变化做最小验证：* Improve qwen 2.1 KV cache location logic by @rattus128 in https://github.com/Comfy-Org/ComfyUI/pull/16429。按证据所指入口实际操作一次，对比变化前后的结果并记录。",
+      "whyItMatters": "该变化的具体内容：* Improve qwen 2.1 KV cache location logic by @rattus128 in https://github.com/Comfy-Org/ComfyUI/pull/16429。证据未说明商用许可、成本、硬件与兼容性，升级价值需结合你的使用场景验证。",
+      "actionabilityStatus": "TEST_NOW",
+      "hasExecutableAction": true
+    },
+    {
+      "eventStatus": "NEW",
+      "attentionDecision": "LIBRARY_ONLY",
+      "title": "* Aimdo 0.5.5 + 当磁盘速度很快时自动检测并启用 --fast-disk (CORE-440) by @rat…",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.37.0",
+      "publishedAt": "2026-09-21T07:35:01.000Z",
+      "action": "针对该变化做最小验证：* Aimdo 0.5.5 + Auto-detect and enable --fast-disk when the disk is fast (CORE-440) by @rattus128 in https://github.c…。按证据所指入口实际操作一次，对比变化前后的结果并记录。",
+      "whyItMatters": "该变化的具体内容：* Aimdo 0.5.5 + Auto-detect and enable --fast-disk when the disk is fast (CORE-440) by @rattus128 in https://github.com/Comfy-Org/ComfyUI/pull/16333。证据未说明商用许可、成本，升级价值需结合你的使用场景验证。",
+      "actionabilityStatus": "TEST_NOW",
+      "hasExecutableAction": true
+    },
+    {
+      "eventStatus": "NEW",
+      "attentionDecision": "LIBRARY_ONLY",
+      "title": "* 通过 @comfyui-wiki 在 https://g... 添加新的模型蓝图并重新组织子图类别",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.36.0",
+      "publishedAt": "2026-09-15T22:26:17.000Z",
+      "action": "针对该变化做最小验证：* Add new model blueprints and reorganize subgraph categories by @comfyui-wiki in https://github.com/Comfy-Org/ComfyU…。按证据所指入口实际操作一次，对比变化前后的结果并记录。",
+      "whyItMatters": "该变化的具体内容：* Add new model blueprints and reorganize subgraph categories by @comfyui-wiki in https://github.com/Comfy-Org/ComfyUI/pull/14785。证据未说明商用许可、成本、硬件与兼容性，升级价值需结合你的使用场景验证。",
+      "actionabilityStatus": "TEST_NOW",
+      "hasExecutableAction": true
+    },
+    {
+      "eventStatus": "NEW",
+      "attentionDecision": "LIBRARY_ONLY",
+      "title": "* [合作伙伴节点] feat(Recraft)：在 https://GitHub.com/Comfy-Org 中添加 @bigcat88 的 V4 样式...",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.35.0",
+      "publishedAt": "2026-09-09T19:55:08.000Z",
+      "action": "针对该变化做最小验证：* [Partner Nodes] feat(Recraft): add V4 Styles by @bigcat88 in https://github.com/Comfy-Org/ComfyUI/pull/15903。按证据所指入口实际操作一次，对比变化前后的结果并记录。",
+      "whyItMatters": "该变化的具体内容：* [Partner Nodes] feat(Recraft): add V4 Styles by @bigcat88 in https://github.com/Comfy-Org/ComfyUI/pull/15903。证据未说明商用许可、成本、硬件与兼容性，升级价值需结合你的使用场景验证。",
+      "actionabilityStatus": "TEST_NOW",
+      "hasExecutableAction": true
+    },
+    {
+      "eventStatus": "BACKGROUND",
+      "attentionDecision": "LIBRARY_ONLY",
+      "title": "* 修复极小极大音乐在非动态 vram 上不起作用的问题。",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.34.0",
+      "publishedAt": "2026-08-26T02:09:08.000Z",
+      "action": "仅作背景参考；除非出现新的公开能力或工作流变化，否则不安排测试。",
+      "whyItMatters": "该变化的具体内容：* Fix minimax music not working on non dynamic vram.。证据未说明商用许可、成本，升级价值需结合你的使用场景验证。",
+      "actionabilityStatus": "BACKGROUND",
+      "hasExecutableAction": true
+    },
+    {
+      "eventStatus": "BACKGROUND",
+      "attentionDecision": "LIBRARY_ONLY",
+      "title": "* 修复 KSamplerAdvanced，并在嵌套潜在变量上禁用 add_noise，由 @kijai 在 https://githu...",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.33.1",
+      "publishedAt": "2026-08-13T22:18:34.000Z",
+      "action": "仅作背景参考；除非出现新的公开能力或工作流变化，否则不安排测试。",
+      "whyItMatters": "该变化的具体内容：* Fix KSamplerAdvanced with add_noise disabled on nested latents by @kijai in https://github.com/Comfy-Org/ComfyUI/pull/15447。证据未说明商用许可、成本、硬件与兼容性，升级价值需结合你的使用场景验证。",
+      "actionabilityStatus": "BACKGROUND",
+      "hasExecutableAction": true
+    },
+    {
+      "eventStatus": "BACKGROUND",
+      "attentionDecision": "LIBRARY_ONLY",
+      "title": "* 目前官方支持的 pytorch 最低版本为 2.7，由 @comfyanonymous 在 https://GitHub.com/...",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.32.0",
+      "publishedAt": "2026-08-11T21:56:20.000Z",
+      "action": "仅作背景参考；除非出现新的公开能力或工作流变化，否则不安排测试。",
+      "whyItMatters": "该变化的具体内容：* Minimum officially supported pytorch is now 2.7 by @comfyanonymous in https://github.com/Comfy-Org/ComfyUI/pull/15413。证据未说明商用许可、成本、硬件与兼容性，升级价值需结合你的使用场景验证。",
+      "actionabilityStatus": "BACKGROUND",
+      "hasExecutableAction": true
+    },
+    {
+      "eventStatus": "BACKGROUND",
+      "attentionDecision": "LIBRARY_ONLY",
+      "title": "* 修复（minimax）：将原始参数投射到 H3 VAE 中的输入设备，由 @rivadart 在 https://gith...",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.31.0",
+      "publishedAt": "2026-08-08T03:10:59.000Z",
+      "action": "仅作背景参考；除非出现新的公开能力或工作流变化，否则不安排测试。",
+      "whyItMatters": "该变化的具体内容：* fix(minimax): cast raw parameters to input device in H3 VAEs by @rivadart in https://github.com/Comfy-Org/ComfyUI/pull/15268。证据未说明商用许可、成本，升级价值需结合你的使用场景验证。",
+      "actionabilityStatus": "BACKGROUND",
+      "hasExecutableAction": true
+    },
+    {
+      "eventStatus": "BACKGROUND",
+      "attentionDecision": "LIBRARY_ONLY",
+      "title": "* 支持 @kijai 在 https://GitHub.com/Comfy-Or 中的 int8 convrot 嵌入查找 (CORE-371)...",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.30.0",
+      "publishedAt": "2026-08-03T03:48:40.000Z",
+      "action": "仅作背景参考；除非出现新的公开能力或工作流变化，否则不安排测试。",
+      "whyItMatters": "该变化的具体内容：* Support int8 convrot embedding lookup (CORE-371) by @kijai in https://github.com/Comfy-Org/ComfyUI/pull/15035。证据未说明商用许可、成本、硬件与兼容性，升级价值需结合你的使用场景验证。",
+      "actionabilityStatus": "BACKGROUND",
+      "hasExecutableAction": true
+    },
+    {
+      "eventStatus": "BACKGROUND",
+      "attentionDecision": "LIBRARY_ONLY",
+      "title": "前端修复和新的 api/合作伙伴节点。",
+      "sourceUrl": "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.29.2",
+      "publishedAt": "2026-07-31T06:56:45.000Z",
+      "action": "仅作背景参考；除非出现新的公开能力或工作流变化，否则不安排测试。",
+      "whyItMatters": "该变化的具体内容：Frontend fixes and new api/partner nodes.。证据未说明商用许可、成本、硬件与兼容性，升级价值需结合你的使用场景验证。",
+      "actionabilityStatus": "BACKGROUND",
+      "hasExecutableAction": true
+    },
+    {
+      "eventStatus": "BACKGROUND",
+      "attentionDecision": "LIBRARY_ONLY",
+      "title": "- 发布 · Comfy-Org/ComfyUI",
+      "sourceUrl": "https://github.com/comfyanonymous/ComfyUI/releases",
+      "action": "仅作背景参考；除非出现新的公开能力或工作流变化，否则不安排测试。",
+      "whyItMatters": "该变化的具体内容：- Releases · Comfy-Org/ComfyUI。证据未说明商用许可、成本、硬件与兼容性，升级价值需结合你的使用场景验证。",
+      "actionabilityStatus": "BACKGROUND",
+      "hasExecutableAction": true
+    },
+    {
+      "eventStatus": "BACKGROUND",
+      "attentionDecision": "LIBRARY_ONLY",
+      "title": "h 我的自定义节点 在 Comfy Registry 上共享您的自定义节点 获取帮助 联系支持人员 获取...",
+      "sourceUrl": "https://docs.comfy.org/",
+      "action": "仅作背景参考；除非出现新的公开能力或工作流变化，否则不安排测试。",
+      "whyItMatters": "该变化的具体内容：h my Custom Node Share your custom node on the Comfy Registry Get Help Contact Support Get help from our。证据未说明商用许可、成本，升级价值需结合你的使用场景验证。",
+      "actionabilityStatus": "BACKGROUND",
+      "hasExecutableAction": true
+    }
+  ]
+}

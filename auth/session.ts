@@ -54,7 +54,12 @@ export function withSession<Args extends unknown[]>(handler: (request: Request, 
   return async (request: Request, ...args: Args): Promise<Response> => {
     const origin = request.headers.get("origin");
     const expectedOrigin = process.env.SIGNAL_MAP_ALLOWED_ORIGIN || new URL(request.url).origin;
-    if (request.method === "POST" && origin && origin !== expectedOrigin) {
+    const isDevelopment = process.env.NODE_ENV !== "production";
+    const trustedOrigins = new Set([
+      expectedOrigin,
+      ...(isDevelopment ? ["http://localhost:3000", "http://127.0.0.1:3000"] : []),
+    ]);
+    if (request.method === "POST" && origin && !trustedOrigins.has(origin)) {
       return Response.json({ error: "Forbidden origin" }, { status: 403, headers: { "Cache-Control": "no-store" } });
     }
     let response: Response;

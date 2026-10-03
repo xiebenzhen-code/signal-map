@@ -1,6 +1,6 @@
 import type { CleanedContent, ExtractedClaim } from "./types.ts";
 
-const actionPattern = /发布|新增|更新|推出|上线|开放|停止|变更|支持|集成|招聘|岗位|\b(?:launch(?:ed|es|ing)?|release(?:d|s)?|updat(?:ed|es|ing)|announce(?:d|s)?|add(?:ed|s)?|introduc(?:ed|es|ing)|support(?:s|ed)?|open role|job opening|hiring|lists?)\b/i;
+const actionPattern = /发布|新增|更新|推出|上线|开放|停止|变更|支持|集成|招聘|岗位|\b(?:launch(?:ed|es|ing)?|release(?:d|s)?|updat(?:ed|es|ing)|announce(?:d|s)?|add(?:ed|s)?|introduc(?:ed|es|ing)|support(?:s|ed)?|new|fix(?:ed|es)?|improv(?:e|ed|es)|enabl(?:e|ed|es)|remov(?:e|ed|es)|reduc(?:e|ed|es)|open role|job opening|hiring|lists?)\b/i;
 
 function sentences(value: string) {
   return value
@@ -37,9 +37,17 @@ export function extractClaim(cleaned: CleanedContent, title: string): ExtractedC
     return { statement: "", quality: "INSUFFICIENT_CONTENT", failureReason: cleaned.failureReason };
   }
   const titleKey = title.replace(/[^\p{L}\p{N}]+/gu, "").toLowerCase();
+  // Section labels ("Release Notes", "## Frontend") are not claims even when a
+  // word like "release" trips the action pattern.
+  const sectionLabel = /^\s*(?:#{1,6}\s*)?(?:release notes?|changelog|what['’`]s new|highlights|updates?|changes?|new features?)\s*:?\s*$/i;
   const candidate = sentences(cleaned.mainContent).map(actionCenteredStatement).find((sentence) => {
     const sentenceKey = sentence.replace(/[^\p{L}\p{N}]+/gu, "").toLowerCase();
-    return sentenceKey !== titleKey && !/^(Announcements|Newsroom|Related|Recommended)\b/i.test(sentence) && hasSubjectAndAction(sentence);
+    return (
+      !sectionLabel.test(sentence) &&
+      sentenceKey !== titleKey &&
+      !/^(Announcements|Newsroom|Related|Recommended)\b/i.test(sentence) &&
+      hasSubjectAndAction(sentence)
+    );
   });
   if (!candidate) {
     return {

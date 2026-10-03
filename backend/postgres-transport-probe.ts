@@ -1,5 +1,6 @@
 import pg from "pg";
 
+import { readDatabaseConfig, resolveDriverSsl } from "./postgres.ts";
 import { resolveAuthContext, withSession } from "../auth/session.ts";
 
 const { Client, Pool } = pg;
@@ -35,10 +36,6 @@ function sanitizedError(error: unknown) {
   };
 }
 
-function sslEnabled() {
-  return process.env.PGSSLMODE === "require" || process.env.POSTGRES_SSL === "true";
-}
-
 async function timedPhase<T>(phase: string, phases: ProbePhase[], operation: () => Promise<T>) {
   const startedAt = nowMs();
   try {
@@ -52,11 +49,11 @@ async function timedPhase<T>(phase: string, phases: ProbePhase[], operation: () 
 }
 
 function clientConfig() {
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) throw Object.assign(new Error("DATABASE_URL is not configured"), { code: "POSTGRES_NOT_CONFIGURED" });
+  const config = readDatabaseConfig();
+  if (!config) throw Object.assign(new Error("DATABASE_URL is not configured"), { code: "POSTGRES_NOT_CONFIGURED" });
   return {
-    connectionString,
-    ssl: sslEnabled() ? { rejectUnauthorized: false } : undefined,
+    connectionString: config.connectionString,
+    ssl: resolveDriverSsl(config),
   };
 }
 

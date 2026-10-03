@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { knowledgeFailure, safeFailureText } from "./failure.ts";
 
 import { runResearchPipeline } from "../research/research-pipeline.ts";
 import type { ResearchResponse } from "../research/types.ts";
@@ -18,7 +19,7 @@ import type { AgentRunOptions, AgentRunResult, AgentState, AgentStep, AgentTrace
 const now = () => new Date().toISOString();
 
 function appendLines(existing: string, values: string[]) {
-  return [existing, ...values].map((value) => value.trim()).filter(Boolean).join("\n");
+  return [...new Set([existing, ...values].flatMap((value) => value.split(/\r?\n/)).map((value) => value.trim()).filter(Boolean))].join("\n");
 }
 
 function sourceOutcomesFromResponse(response: ResearchResponse): SourceOutcome[] {
@@ -60,25 +61,40 @@ async function applyModelPlanning(options: {
   relatedKnowledge: string[];
   previousQueries: string[];
   round: number;
+  timeoutMs: number;
+  onTimeout: () => void;
 }) {
   if (!options.adapter || options.adapter.status !== "configured") return options.plan;
-  const result = await options.adapter.planResearch({
-    userQuery: options.userQuery,
-    relatedKnowledge: options.relatedKnowledge,
-    existingEvidence: [],
-    previousQueries: options.previousQueries,
-    round: options.round,
-  });
-  if (result.status !== "configured" || !result.plan) return options.plan;
-  const queries = [...result.plan.queries, ...options.plan.queries]
-    .map((query) => query.trim())
-    .filter((query, index, all) => query && all.indexOf(query) === index)
-    .slice(0, options.plan.maxQueries);
-  return {
-    ...options.plan,
-    objective: result.plan.objective || options.plan.objective,
-    queries,
-  };
+  if (options.timeoutMs <= 0) return options.plan;
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = Symbol("planning timeout");
+  try {
+    const result = await Promise.race([options.adapter.planResearch({
+      userQuery: options.userQuery,
+      relatedKnowledge: options.relatedKnowledge,
+      existingEvidence: [],
+      previousQueries: options.previousQueries,
+      round: options.round,
+      signal: controller.signal,
+    }), new Promise<typeof expired>((resolve) => {
+      timer = setTimeout(() => { resolve(expired); controller.abort(); }, options.timeoutMs);
+    })]);
+    if (result === expired) { options.onTimeout(); return options.plan; }
+    if (result.status !== "configured" || !result.plan) {
+      if (result.errorCode === "timeout") options.onTimeout();
+      return options.plan;
+    }
+    const queries = [...result.plan.queries, ...options.plan.queries]
+      .map((query) => query.trim())
+      .filter((query, index, all) => query && all.indexOf(query) === index)
+      .slice(0, options.plan.maxQueries);
+    return {
+      ...options.plan,
+      objective: result.plan.objective || options.plan.objective,
+      queries,
+    };
+  } finally { if (timer !== undefined) clearTimeout(timer); }
 }
 
 export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult> {
@@ -112,7 +128,19 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
   const previousRun = options.repository && options.context
     ? await Promise.resolve(options.repository.getLatestRunMetadata(options.context))
     : null;
-  const relatedKnowledge = persistedKnowledge.map((record) => record.text);
+  // Persisted personal-knowledge records are typed (KNOWN_INFORMATION /
+  // JUDGEMENT / TRACKED_*), and each type has its own consumption path.
+  // Merging every record into knownInformation turned negative judgements
+  // ("Not useful: X") and view-change judgements into "known facts", which
+  // penalized fresh evidence as already-known. Split by type instead:
+  // - known facts → knownInformation (novelty dedup / already-known penalty)
+  // - judgements  → userJudgements (judgement-impact scoring)
+  // - tracked entities/events → the same-named input fields
+  const knownFactRecords = persistedKnowledge.filter((record) => record.type === "KNOWN_INFORMATION");
+  const judgementRecords = persistedKnowledge.filter((record) => record.type === "JUDGEMENT");
+  const trackedEntityRecords = persistedKnowledge.filter((record) => record.type === "TRACKED_ENTITY");
+  const trackedEventRecords = persistedKnowledge.filter((record) => record.type === "TRACKED_EVENT");
+  const relatedKnowledge = knownFactRecords.map((record) => record.text);
   add("RETRIEVE", "completed", { query: options.userQuery ?? options.input.currentQuestions }, relatedKnowledge.join("\n") || "none");
   const intent = classifyIntent({
     userQuery: (options.userQuery ?? options.input.currentQuestions) || options.input.industry,
@@ -126,6 +154,12 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
   const researchInput = {
     ...options.input,
     knownInformation: appendLines(options.input.knownInformation, relatedKnowledge),
+    userJudgements: appendLines(options.input.userJudgements, judgementRecords.map((record) =>
+      /^\s*(?:Not useful|Changed after evidence)\s*:/i.test(record.text)
+        ? record.text.replace(/\s*\r?\n\s*/g, " ")
+        : record.text)),
+    trackedEntities: appendLines(options.input.trackedEntities, trackedEntityRecords.map((record) => record.text)),
+    trackedEvents: appendLines(options.input.trackedEvents, trackedEventRecords.map((record) => record.text)),
   };
   const generatedFromRevision = options.context && options.repository
     ? await Promise.resolve(options.repository.getResearchContextRevision(options.context))
@@ -218,6 +252,8 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       relatedKnowledge,
       previousQueries: [],
       round: 1,
+      timeoutMs: budget.modelPlanningTimeoutMs(),
+      onTimeout: () => markPhase("budget_checked", true, undefined, "MODEL_PLANNING_TIMEOUT", { stage: "model_planning_timeout", fallback: "deterministic_plan" }),
     });
   }
   options.onPlan?.(plan, researchInput, 1);
@@ -250,7 +286,11 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     };
     try {
       const executeResearch = (currentPlan: typeof plan) => (options.research ?? ((input, selectedPlan) => runResearchPipeline(input, undefined, undefined, toRetrievalPlan(selectedPlan))))(researchInput, currentPlan, round);
-      const retrievalBudget = budget.snapshot();
+      // Per-round retrieval gate scales with the attempt (same rationale as
+      // the fallback gate): a fixed 4s guard makes rounds 2+ impossible after a
+      // budget-heavy first round, even when the round would fit the deadline.
+      const roundBudget = round === 1 ? budget : new BudgetManager({ deadlineAt, attempt: round });
+      const retrievalBudget = roundBudget.snapshot();
       markPhase("budget_checked", true, undefined, undefined, budgetDiagnostics(retrievalBudget, { round, stage: "retrieval" }));
       if (!retrievalBudget.canStartRetrieval) {
         throw Object.assign(new Error("Worker deadline budget exhausted before research"), { code: "WORKER_DEADLINE" });
@@ -288,7 +328,12 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
         if (fallbackSelection.primarySourceType && fallbackSelection.primarySourceType !== plan.selectedSourceType) {
           phaseContext = { round, attemptId: `round-${round}-fallback`, attemptType: "fallback" };
           plan = createResearchPlan(researchInput, round, maxQueries, relatedKnowledge, plan.strategy, fallbackSelection, intent, sourceProfile);
-          const fallbackPlanningBudget = budget.snapshot();
+          // Verification (fallback) gates scale with the attempt: fixed 9s/4s
+          // guards structurally blocked every verification round once round-1
+          // planning + discovery consumed their share of the same deadline
+          // (run signals-7dd4694e: 2.0s left → fallback retrieval never ran).
+          const fallbackBudget = new BudgetManager({ deadlineAt, attempt: round });
+          const fallbackPlanningBudget = fallbackBudget.snapshot();
           markPhase("budget_checked", true, undefined, undefined, budgetDiagnostics(fallbackPlanningBudget, { round, stage: "fallback_planning" }));
           if (fallbackPlanningBudget.canStartModelPlanning) {
             plan = await applyModelPlanning({
@@ -298,6 +343,8 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
               relatedKnowledge,
               previousQueries: plan.queries,
               round,
+              timeoutMs: fallbackBudget.modelPlanningTimeoutMs(),
+              onTimeout: () => markPhase("budget_checked", true, undefined, "MODEL_PLANNING_TIMEOUT", { stage: "model_planning_timeout", fallback: "deterministic_plan" }),
             });
           }
           markPhase("plan_finished", true, plan.queries.length, undefined, {
@@ -312,7 +359,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
             strategy: plan.strategy,
           });
           add("SOURCE_SELECTOR", "completed", { round, fallback: true }, fallbackSelection, "首选来源无有效结果，执行 fallback 来源");
-          const fallbackRetrievalBudget = budget.snapshot();
+          const fallbackRetrievalBudget = fallbackBudget.snapshot();
           markPhase("budget_checked", true, undefined, undefined, budgetDiagnostics(fallbackRetrievalBudget, { round, stage: "fallback_retrieval" }));
           if (!fallbackRetrievalBudget.canStartRetrieval) {
             throw Object.assign(new Error("Worker deadline budget exhausted before fallback research"), { code: "WORKER_DEADLINE" });
@@ -380,7 +427,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
         add("COMPLETE", status === "completed" ? "completed" : "needs_more_evidence", { round }, { reason: evaluation.reason, carriedForwardEvidence: true });
         return { status, rounds, response, plan, evaluation, knowledgeChanges: allKnowledgeChanges, attention: [], steps, trace };
       }
-      return { status: "failed", rounds, plan, evaluation, knowledgeChanges: [], attention: [], steps, trace };
+      return { status: "failed", failure: { stage: "retrieval", code: safeFailureText(errorCode), message: safeFailureText(error instanceof Error ? error.message : error) }, rounds, plan, evaluation, knowledgeChanges: [], attention: [], steps, trace };
     }
     const cumulativeResponse = runState.cumulativeResponse;
     if (!cumulativeResponse) throw Object.assign(new Error("Missing cumulative response after round merge"), { code: "UNKNOWN_RESEARCH_FAILURE" });
@@ -490,8 +537,10 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
           allKnowledgeChanges = [...allKnowledgeChanges, ...updateResult.persistedChanges];
           allEvidenceIds = Array.from(new Set([...allEvidenceIds, ...updateResult.evidenceIds]));
         } catch (error) {
-          add("UPDATE_KNOWLEDGE", "failed", { round }, { error: "knowledge update failed" }, error instanceof Error ? error.message : "unknown error");
-          return { status: "failed", rounds, response, plan, evaluation, knowledgeChanges: allKnowledgeChanges, attention: [], steps, trace };
+          const failure = knowledgeFailure(error);
+          options.onPhase?.({ ...phaseContext, phase: "knowledge_finished", success: false, errorCode: failure.code, errorMessage: failure.message });
+          add("UPDATE_KNOWLEDGE", "failed", { round }, { error: "knowledge update failed" }, failure.message);
+          return { status: "failed", failure, rounds, response, plan, evaluation, knowledgeChanges: allKnowledgeChanges, attention: [], steps, trace };
         }
       } else {
         allKnowledgeChanges = [...allKnowledgeChanges, ...changes];
@@ -530,8 +579,10 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
         allEvidenceIds = Array.from(new Set([...allEvidenceIds, ...evidenceOnly.evidenceIds]));
         add("UPDATE_KNOWLEDGE", "skipped", { round }, { evidenceOnly: true, evidenceIds: evidenceOnly.evidenceIds }, "研究未结束，仅保存 Evidence provenance");
       } catch (error) {
-        add("UPDATE_KNOWLEDGE", "failed", { round }, { error: "evidence persistence failed" }, error instanceof Error ? error.message : "unknown error");
-        return { status: "failed", rounds, response, plan, evaluation, knowledgeChanges: allKnowledgeChanges, attention: [], steps, trace };
+        const failure = knowledgeFailure(error);
+        options.onPhase?.({ ...phaseContext, phase: "knowledge_finished", success: false, errorCode: failure.code, errorMessage: failure.message });
+        add("UPDATE_KNOWLEDGE", "failed", { round }, { error: "evidence persistence failed" }, failure.message);
+        return { status: "failed", failure, rounds, response, plan, evaluation, knowledgeChanges: allKnowledgeChanges, attention: [], steps, trace };
       }
     }
     phaseContext = { round: round + 1, attemptId: `round-${round + 1}-primary`, attemptType: "primary" };
@@ -561,6 +612,8 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
           relatedKnowledge,
           previousQueries: plan.queries,
           round: round + 1,
+          timeoutMs: budget.modelPlanningTimeoutMs(),
+          onTimeout: () => markPhase("budget_checked", true, undefined, "MODEL_PLANNING_TIMEOUT", { stage: "model_planning_timeout", fallback: "deterministic_plan" }),
         });
       } catch (error) {
         const errorCode = error && typeof error === "object" && "code" in error ? String(error.code) : "UNKNOWN_RESEARCH_FAILURE";

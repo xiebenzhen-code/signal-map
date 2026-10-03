@@ -1,0 +1,17 @@
+{
+  "question": "过去 30 天内，AI 辅助视频剪辑与自动化领域有哪些真正值得我测试的新发布、模型、工具或工作流更新？重点关注多素材理解、自动粗剪、镜头选择、批量处理和可商用工作流。优先官方或一手来源，排除纯营销、重复转载和只有概念没有可验证功能的内容。告诉我发生了什么、为什么值得关注，以及我现在能具体测试什么。",
+  "startedAt": "2026-09-30T07:03:04.415Z",
+  "endedAt": "2026-09-30T07:03:27.540Z",
+  "wallMs": 23125,
+  "httpStatus": 200,
+  "requestId": "signals-7dd4694e-cef6-48ce-a139-c16d5e351095",
+  "researchMode": "anonymous",
+  "backend": "node dist-api/server.mjs (bundle with this round's fixes, started 07:01Z)",
+  "frontend": "vinext dev :3000 (workspace source)",
+  "browserTool": "private-target denied (fake-IP DNS) — DOM screenshot not obtainable; entry semantics reproduced via homepage submit path",
+  "limitations": [
+    "single submission",
+    "no retry",
+    "no topic switch"
+  ]
+}

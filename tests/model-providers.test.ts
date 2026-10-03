@@ -72,3 +72,30 @@ test("a third adapter can satisfy the same contract without AgentRunner changes"
   };
   assert.equal((await third.planResearch()).plan?.objective, "third");
 });
+
+for (const provider of ["deepseek", "openai"]) {
+  test(`${provider} planning cancellation reaches HTTP transport without serializing signal`, async () => {
+    const controller = new AbortController();
+    let aborted = false;
+    const adapter = createModelAdapter({env:{MODEL_PROVIDER:provider,DEEPSEEK_API_KEY:"test",OPENAI_API_KEY:"test"},
+      fetch:async (_, init) => {
+        assert.doesNotMatch(String(init.body), /"signal"/);
+        return new Promise((_, reject) => {
+          init.signal?.addEventListener("abort", () => {aborted=true; reject(new DOMException("cancelled", "AbortError"));}, {once:true});
+          controller.abort();
+        });
+      }});
+    const result = await adapter.planResearch({...input,signal:controller.signal});
+    assert.equal(aborted,true);
+    assert.equal(result.errorCode,"timeout");
+  });
+}
+
+test("model timeout remains active while reading response body", async () => {
+  const adapter = createModelAdapter({env:{MODEL_PROVIDER:"deepseek",DEEPSEEK_API_KEY:"test",MODEL_REQUEST_TIMEOUT_MS:"5"},
+    fetch: async (_,init) => new Response(new ReadableStream({start(controller){
+      init.signal?.addEventListener("abort", () => controller.error(new DOMException("cancelled","AbortError")),{once:true});
+    }}))});
+  const result = await adapter.planResearch(input);
+  assert.equal(result.errorCode,"timeout");
+});

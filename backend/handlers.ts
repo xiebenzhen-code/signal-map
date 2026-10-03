@@ -5,6 +5,7 @@ import { runTaskPlannedAgent } from "../agent/task-runner.ts";
 import { createEnvironmentModelAdapter } from "../agent/model-adapter.ts";
 import { createSignalTracer, createSignalsRequestId, type SignalTracePhase } from "./signals-trace.ts";
 import { requestSession, resolveAuthContext, withSession } from "../auth/session.ts";
+import { feedbackKnowledgeRecord, feedbackScope, type FeedbackKind } from "./feedback-records.ts";
 import { resolveResearchIdentity } from "../auth/request-identity.ts";
 import { mapAuthError } from "../auth/auth-error.ts";
 import { executeResearch } from "../research/research-service.ts";
@@ -288,7 +289,7 @@ export const handleSignals = withSession(async (request: Request) => {
     const response = Response.json(
       {
         error: "Research Pipeline 未能完成。",
-        reason: "本轮来源检索暂时不可用，请稍后再试。",
+        reason: errorCode === "WORKER_DEADLINE" ? "本次研究达到时间上限，尚未完成，请稍后重新尝试。" : "本轮来源检索暂时不可用，请稍后再试。",
         requestId,
         errorCode,
       },
@@ -442,6 +443,37 @@ export const handleControlKnowledge = withSession(async (request: Request) => {
     context: auth.context,
     repository,
   }, { includeSupportingEvidence }), { headers: { "Cache-Control": "no-store" } });
+});
+
+export const handleControlKnowledgePost = withSession(async (request: Request) => {
+  if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
+  const repository = agentRepository();
+  const auth = await resolveAuthContext(request);
+  if (!auth) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const body = await bodyRecord(request);
+  const kind = typeof body.kind === "string" ? body.kind : "";
+  const sourceTitle = typeof body.sourceTitle === "string" ? body.sourceTitle : "";
+  let record;
+  try {
+    record = feedbackKnowledgeRecord(kind as FeedbackKind, sourceTitle);
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code) : "INVALID_FEEDBACK";
+    return Response.json({ error: "Invalid feedback", code }, { status: 400 });
+  }
+  const context = { authenticatedUserId: auth.userId, filterId: `account-${auth.userId}` };
+  const saved = await withOperationTimeout(
+    Promise.resolve(repository.upsertPersonalKnowledge(context, record, new Date().toISOString())),
+    CONTROL_PERSISTENCE_TIMEOUT_MS,
+    "DB_TIMEOUT",
+  ).catch((error) => {
+    if (error && typeof error === "object" && "code" in error && error.code === "DB_TIMEOUT") return null;
+    throw error;
+  });
+  if (!saved) return Response.json({ error: "Service temporarily unavailable", code: "DB_TIMEOUT" }, { status: 503 });
+  return Response.json(
+    { scope: feedbackScope(auth.mode), record: saved.record },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 });
 
 export const handleControlAgentRuns = withSession(async (request: Request) => {

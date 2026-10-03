@@ -1,4 +1,5 @@
 import type { ResearchSignal } from "../research/types.ts";
+import { freshnessWindowHours } from "./freshness.ts";
 
 type TodayPresentationKind =
   | "must_read"
@@ -23,7 +24,14 @@ function uniqueEvents(events: ResearchSignal[]) {
   });
 }
 
-function isUsableUpdateCandidate(event: ResearchSignal) {
+// "usable updates" are in-window official/trusted changes the user explicitly
+// asked about. The freshness gate is relative to the requested research window
+// (the caller passes it), not a fixed 72h cutoff: a verified 8-day-old release
+// must surface for a "last month" question. Every non-freshness gate —
+// verification, reliability, relevance, novelty, source tier, event status —
+// is unchanged.
+function isUsableUpdateCandidate(event: ResearchSignal, windowDays: number) {
+  const ageHours = freshnessAgeHours(event);
   return (
     event.attentionDecision === "LIBRARY_ONLY" &&
     event.timestampStatus === "valid" &&
@@ -33,9 +41,18 @@ function isUsableUpdateCandidate(event: ResearchSignal) {
     ["verified", "partially_verified"].includes(event.verificationStatus) &&
     event.reliabilityScore >= 70 &&
     event.relevanceScore >= 50 &&
-    event.freshnessScore >= 65 &&
+    ageHours !== undefined &&
+    ageHours <= windowDays * 24 &&
     event.noveltyScore >= 60
   );
+}
+
+function freshnessAgeHours(event: ResearchSignal) {
+  const reference = event.lastUpdatedAt || event.eventOccurredAt || event.publishedAt;
+  if (!reference || event.timestampStatus !== "valid") return undefined;
+  const time = new Date(reference).getTime();
+  if (!Number.isFinite(time)) return undefined;
+  return Math.max(0, (Date.now() - time) / (60 * 60 * 1000));
 }
 
 function sourceRank(event: ResearchSignal) {
@@ -52,7 +69,11 @@ function byUsableUpdatePriority(left: ResearchSignal, right: ResearchSignal) {
   );
 }
 
-export function selectTodayPresentation(events: ResearchSignal[]): TodayPresentation {
+export function selectTodayPresentation(
+  events: ResearchSignal[],
+  freshnessWindow: string = "7d",
+): TodayPresentation {
+  const windowDays = Math.max(1, freshnessWindowHours(freshnessWindow) / 24);
   const mustRead = uniqueEvents(
     events.filter((event) =>
       event.attentionDecision === "MUST_READ" && event.eventStatus !== "BACKGROUND"),
@@ -61,7 +82,7 @@ export function selectTodayPresentation(events: ResearchSignal[]): TodayPresenta
     events.filter((event) => event.attentionDecision === "WORTH_WATCHING"),
   ).slice(0, 3);
   const usableUpdates = uniqueEvents(events)
-    .filter(isUsableUpdateCandidate)
+    .filter((event) => isUsableUpdateCandidate(event, windowDays))
     .sort(byUsableUpdatePriority)
     .slice(0, 3);
 

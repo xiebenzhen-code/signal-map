@@ -1,0 +1,23 @@
+{
+  "requestId": "signals-b80d8c61-a4b1-48af-bce9-d3864f9463e2",
+  "httpStatus": 502,
+  "error": "Research Pipeline 未能完成。",
+  "reason": "本轮来源检索暂时不可用，请稍后再试。",
+  "errorCode": "UNKNOWN_RESEARCH_FAILURE",
+  "requestPayload": {
+    "question": [
+      "ComfyUI 最近一个月在 GitHub 发布了哪些版本？\n有哪些值得升级的改动？"
+    ],
+    "userJudgements": [
+      "Changed after evidence: * Improve qwen 2.1 KV cache location logic by @rattus128 in https://github.com/Comfy-Org/Co…"
+    ],
+    "knownInformation": [
+      "* Improve qwen 2.1 KV cache location logic by @rattus128 in https://github.com/Comfy-Org/Co…"
+    ],
+    "trackedEntities": [
+      "ComfyUI"
+    ]
+  },
+  "savedAt": "2026-10-03T01:47:08.190Z",
+  "note": "第二次研究（预算 2/2）失败于来源检索阶段；请求载荷正确携带 changed_view 反馈（userJudgements）与已知信息。"
+}

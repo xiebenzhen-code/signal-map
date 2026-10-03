@@ -1,0 +1,23 @@
+{
+  "question": "过去 30 天内，AI 辅助视频剪辑与自动化领域有哪些真正值得我测试的新发布、模型、工具或工作流更新？重点关注多素材理解、自动粗剪、镜头选择、批量处理和可商用工作流。优先官方或一手来源，排除纯营销、重复转载和只有概念没有可验证功能的内容。告诉我发生了什么、为什么值得关注，以及我现在能具体测试什么。",
+  "startedAt": "2026-09-30T05:01:48.680Z",
+  "endedAt": "2026-09-30T05:02:11.531Z",
+  "wallMs": 22851,
+  "httpStatus": 200,
+  "requestIdHeader": "signals-d5d3097d-ee28-42c4-9b85-908019eef354",
+  "requestIdBody": "signals-d5d3097d-ee28-42c4-9b85-908019eef354",
+  "researchMode": "anonymous",
+  "draft": {
+    "industry": "AI 视频与创作者工具",
+    "trackedEntities": [],
+    "freshnessWindow": "30d",
+    "informationGaps": [
+      "围绕“过去 30 天内，AI 辅助视频剪辑与自动化领域有哪些真正值得我测试的新发布、模型、工具或工作流更新？重点关注多素材理解、自动粗剪、镜头选择、批量处理和可商用工作流。优先官方或一手来源，排除纯营销、重复转载和只有概念没有可验证功能的内容。告诉我发生了什么、为什么值得关注，以及我现在能具体测试什么。”寻找有证据支持的新变化"
+    ]
+  },
+  "browserTool": "private-target denied for localhost / [::1] — DOM screenshot not obtainable this round",
+  "limitations": [
+    "single submission, no retry, no topic switch",
+    "model calls: DeepSeek planning only as triggered by this one run"
+  ]
+}

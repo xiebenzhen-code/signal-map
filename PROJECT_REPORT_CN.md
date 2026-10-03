@@ -1,6 +1,6 @@
 # Signal Map 项目技术报告
 
-> 状态日期：2026-09-22 ｜ 基线：`423 项测试，420 通过，0 失败，3 跳过`
+> 状态日期：2026-10-02 ｜ 基线：`700 项测试，695 通过，0 失败，5 跳过`
 > 所有"已实现/未实现"仅依据仓库中真实存在的代码、测试与提交历史，不夸大、不臆测。
 > 专业名词给出英文原名 + 中文解释，避免只堆术语。
 
@@ -249,6 +249,20 @@ FIRST LOSS（第一个失败点）
 | 反馈学习反馈 Feedback Loop | 正式 fixture pass（本地） | agent-runner 测试 | 未闭环 | 偏好降低注意力；postgres 偏好未迁移 |
 | 调度 Scheduler | 存在 | 测试存在 | 未关闭 |
 | 主动发现 Proactive | 未校准 | — | — |
+| **V1 Alpha 发布** | **已冻结** | 全量 422/0/3 + 门禁全绿 | 未重新部署 | tag `v1.0.0-alpha`=`431418b`；公网可达，线上版本未能与 tag 对质 |
+
+## 2.3-bis V1 Alpha 冻结与公网部署（2026-09）
+
+**V1 已冻结。** tag `v1.0.0-alpha` → commit `431418b`（== 本地 HEAD == origin/master）。V1 scope 到 Feedback/Preference 语义为止；V2 才开放持久化/E2E/自主性工作。
+
+- 全量：422 通过 / 0 失败 / 3 跳过。
+- typecheck、lint、api:build、生产 `npm run build`、`git diff --check` 全部 PASS。
+- secret 边界审计（`scripts/audit-public-boundary.mjs`）：331 文件扫描，0 处凭证匹配、0 处客户端边界匹配。
+- 数据库连通测试：PASS（不输出凭证）。
+
+**公网可达性 smoke（只读，无写操作）。** 现有公网 `https://signal.benzhenlab.com` 可达：HTTP 200、SSL 有效、无重定向；静态 CSS/JS 返回 200；未登录 `GET /api/control/goals?guest=true` 返回 **401**（无 guest 回退）；未登录 `POST /api/signals` 缺输入返回 400（输入校验，无数据泄漏、无堆栈）。
+
+**诚实边界：** 工作区**无部署 CLI、平台凭证、或指向该域名的上传入口**。因此冻结的 `v1.0.0-alpha` **未从本工作区重新部署**，线上构建无法确认等于 tag commit。这是 **DEPLOYED WITH KNOWN LIMITATION / NOT VERIFIED** 状态，不是"冻结构建已上线"的声明。
 
 ## 2.4 值得记录的工程教训
 
@@ -268,6 +282,31 @@ FIRST LOSS（第一个失败点）
 - 数据层：`information/`（`rag-records.ts`、`repositories/`）
 - 运行时：`backend/`
 - 测试：`tests/`
+
+## 2.6 本轮交付：开发验证版封装（2026-10-02）
+
+**本轮结论（开发验证版封装交付）。** V1 Alpha 已冻结；开发验证版已封装交付；ComfyUI 官方版本跟踪完成「登录态 + 加密数据库 + 真实研究链路 + 浏览器展示」的端到端验收。通用跨领域过滤、反馈跨会话闭环、长期个人成长、生产部署仍未完成验证，因此原始产品愿景尚未全部实现。
+
+### 测试基线（本轮实测）
+
+- 全量 `npm test`：**700 项测试，695 通过，0 失败，5 跳过**（V1 冻结时为 422/0/3）。
+- 完整 `npm run quality` 门禁（typecheck / lint / test / knip / deps:check）：全绿（knip 走 `KNIP_DISABLE_RAW_TRANSFER=1`，deps:check 无依赖违规）。
+
+### 本轮已验证内容
+
+- **加密数据库（生产 TLS）**：`POSTGRES_SSL=true`，接入官方 Production CA（`certs/prod-ca-2021.crt`）；业务连接配置专项 + TLS 专项测试通过。
+- **ComfyUI 官方版本跟踪 E2E 验收**：真实前端 → 登录态 → Node 后端 → 真实 GitHub 上游 → 加密数据库持久化 → 页面展示；一次真实提交产出 12 条事件、全部通过验证、1 条 MUST_READ、新信息率 100%（证据：`docs/reliability/acceptance-final-submission-4.json`）。
+- **本轮最小修正**（均为最小修复、未放宽质量门禁）：GitHub 默认改用 `releases?per_page=10` 覆盖整月多版本（此前仅 `releases/latest` 单版本）；72 小时新鲜度硬门槛改为窗口感知（保留验证/可靠性/相关性/新颖度等其余门禁）；换题后实体/关键词零残留；平台名不再被当作研究实体。
+- **封装交付物**：`signal-map-dev-validation-20261002.zip`（2026-10-02 09:36）。
+
+### 原始产品愿景尚未实现（如实）
+
+| 未实现项 | 说明 |
+|---|---|
+| 通用跨领域过滤 | 端到端验收覆盖 ComfyUI 官方版本跟踪；其他领域/意图无真实 E2E 证据 |
+| 反馈跨会话闭环 | 用户偏好已持久化到 Postgres，但「上一次反馈 → 改变后续规划」的跨会话闭环未闭环 |
+| 长期个人成长 | 跨 run 的连续记忆是否真正改变后续规划，仅 DUPLICATE 阻断有证据 |
+| 生产部署 | 工作区无部署入口，线上构建未与 tag 对质，生产 TLS 未在真实域名全量验证 |
 
 ---
 

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isSafeDetailUrl, shouldEnrichDetail } from "../source-enrichment/detail-enricher.ts";
+import { isSafeDetailUrl } from "../source-enrichment/safe-url.ts";
+import { shouldEnrichDetail } from "../source-enrichment/detail-enricher.ts";
 import { runResearchPipeline } from "../research/research-pipeline.ts";
 import type { ResearchInput } from "../research/types.ts";
 

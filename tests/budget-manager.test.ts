@@ -29,3 +29,13 @@ test("BudgetManager snapshot exposes deterministic guard decisions", () => {
     retrievalGuardMs: 4000,
   });
 });
+
+ test("planning cap reserves retrieval time inside unchanged deadline", () => {
+  let clock = 0;
+  const budget = new BudgetManager({deadlineAt: 21089, now: () => clock});
+  assert.equal(budget.modelPlanningTimeoutMs(), 8000);
+  clock = 11589;
+  assert.equal(budget.modelPlanningTimeoutMs(), 500);
+  clock = 12500;
+  assert.equal(budget.modelPlanningTimeoutMs(), 0);
+});

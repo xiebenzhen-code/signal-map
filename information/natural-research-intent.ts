@@ -43,12 +43,17 @@ function inferredSourceScope(options: NaturalResearchOptions): SourceScope {
   return "hybrid";
 }
 
+// GitHub-hosted release/update questions are open-source tool research; the
+// generic fallback ("个人关注方向") made source selection miss the OFFICIAL
+// first hop that carries GitHub Releases. "github" is matched as a word so a
+// phrase like "工作" inside "工作流" cannot trigger the job industry.
 function inferredIndustry(query: string) {
   // JOB_SEARCH must reflect explicit employment intent; a bare substring like
   // "工作" inside "工作流" (workflow) must not classify a tool-research query
   // as a job search. Aligned with intent/classifier.ts JOB_SEARCH rule set.
   if (/岗位|职位|招聘|求职|投递|内推|job|jobs|career|hiring|opening/i.test(query)) return "AI 招聘与职业机会";
   if (/视频|AIGC|剪辑|生成|影像/i.test(query)) return "AI 视频与创作者工具";
+  if (/\bgithub\b|发布|版本|release|changelog|开源/i.test(query)) return "开源开发与 AI 工具";
   if (/模型|agent|智能体|工具|AI/i.test(query)) return "人工智能与产品工具";
   return "个人关注方向";
 }
@@ -69,7 +74,10 @@ function inferredFocusAreas(query: string) {
 }
 
 function inferredEntities(query: string) {
-  const known = ["OpenAI", "Anthropic", "Google", "DeepSeek", "Hugging Face", "Product Hunt", "Runway", "Pika", "Kling", "Midjourney"];
+  // The catalog mirrors the officialUpdateTargets / companySourceRegistry
+  // entities; ComfyUI was missing, so a plain homepage question produced an
+  // empty trackedEntities payload and GitHub discovery never ran.
+  const known = ["OpenAI", "Anthropic", "Google", "DeepSeek", "ComfyUI", "Hugging Face", "Product Hunt", "Runway", "Pika", "Kling", "Midjourney"];
   return known.filter((entity) => query.toLowerCase().includes(entity.toLowerCase()));
 }
 

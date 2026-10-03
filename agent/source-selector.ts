@@ -90,6 +90,10 @@ function uniqueSourceTypes(types: SourceSelectionType[]) {
   return Array.from(new Set(types));
 }
 
+function uniqueProviderIds(ids: string[]) {
+  return Array.from(new Set(ids));
+}
+
 function hasResolvedEntities(input: { resolvedEntities?: Array<{ canonicalEntity?: string }> }) {
   return Boolean(input.resolvedEntities?.some((entity) => entity.canonicalEntity?.trim()));
 }
@@ -138,12 +142,27 @@ export function selectSource(input: {
   const usable = preferred.filter((type) => available.has(type) && !hasLowValueOutcome(type, input.previousSourceOutcomes ?? []));
   const primarySourceType = usable[0];
   const availableVerificationSourceTypes = verificationSources.filter((type) => usable.includes(type));
+  // Discovery-first must not DEFER first-hand verification providers to a later
+  // fallback attempt: entity-less questions whose round-1 discovery consumes the
+  // budget never reach that fallback (observed twice in production runs), so the
+  // OFFICIAL/PRIMARY providers lose their executable chance entirely. Keep the
+  // discovery provider set first, but include the verification providers in the
+  // same attempt's allowed list — the pipeline's provider-level guards (entity
+  // gates, canExecute, budget) still govern what actually runs, and no provider
+  // starts unconditionally.
+  const allowedProviderIds = primarySourceType
+    ? discoveryMode && availableVerificationSourceTypes.length
+      ? uniqueProviderIds([
+          ...providerIds[primarySourceType],
+          ...availableVerificationSourceTypes.flatMap((type) => providerIds[type]),
+        ])
+      : providerIds[primarySourceType]
+    : [];
   return {
     primarySourceType,
     fallbackSourceTypes: primarySourceType ? usable.slice(1) : [],
-    allowedProviderIds: primarySourceType
-      ? providerIds[primarySourceType]
-      : [],
+    allowedProviderIds,
+
     reason: primarySourceType
       ? discoveryMode
         ? `${input.sourceProfile?.intent ?? "GENERAL_RESEARCH"} + ${input.strategy} 无明确实体，先使用 ${primarySourceType} 发现候选，再用 ${availableVerificationSourceTypes.join(" / ") || "OFFICIAL / PRIMARY"} 验证`

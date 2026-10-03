@@ -13,6 +13,8 @@ export type DetailEnrichmentInput = {
   url?: string;
   title?: string;
   metadata?: Record<string, unknown>;
+  /** Absolute epoch-ms deadline shared by search, body fetch, and response reading. */
+  deadlineAt?: number;
 };
 
 export type DetailEnrichmentResult = {
@@ -25,6 +27,8 @@ export type DetailEnrichmentResult = {
   discoveredBy: string;
   evidenceFrom?: string;
   officialUrl?: string;
+  /** Actual HTTP requests issued for this candidate (search + body fetch), distinct from the candidate count. */
+  fetchCalls?: number;
 };
 
 export type DetailEnrichmentMetadata = {
@@ -40,4 +44,6 @@ export type DetailEnrichmentSummary = {
   detailSucceeded: number;
   detailFailed: number;
   stillInsufficient: number;
+  /** Actual HTTP requests issued across all candidates (kept separate from detailAttempted). */
+  detailFetchCalls?: number;
 };

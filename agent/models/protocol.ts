@@ -24,36 +24,35 @@ export function modelTimeoutMs(env: Record<string, string | undefined> = process
   return Number.isFinite(configured) && configured > 0 ? configured : 8000;
 }
 
-export async function callJsonEndpoint(fetchImpl: (input: string, init: RequestInit) => Promise<Response>, endpoint: string, apiKey: string, body: unknown, timeoutMs = modelTimeoutMs()) {
+export async function callJsonEndpoint(fetchImpl: (input: string, init: RequestInit) => Promise<Response>, endpoint: string, apiKey: string, body: unknown, timeoutMs = modelTimeoutMs(), externalSignal?: AbortSignal) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const signal = externalSignal ? AbortSignal.any([controller.signal, externalSignal]) : controller.signal;
   let response: Response;
   try {
-    response = await fetchImpl(endpoint, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify(body), signal: controller.signal });
+    response = await fetchImpl(endpoint, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify(body), signal });
+    if (!response.ok) {
+      await discardResponseBody(response);
+      if (response.status === 401 || response.status === 403) throw new Error("authentication_error");
+      if (response.status === 402) throw new Error("quota_error");
+      if (response.status === 429) throw new Error("rate_limit");
+      if (response.status === 408) throw new Error("timeout");
+      if (response.status >= 500) throw new Error("model_unavailable");
+      throw new Error("provider_error");
+    }
+    const bodyJson = await response.json() as Record<string, unknown>;
+    if (typeof bodyJson.output_text === "string") return bodyJson.output_text;
+    const choices = Array.isArray(bodyJson.choices) ? bodyJson.choices : [];
+    const message = choices[0] && typeof choices[0] === "object" ? (choices[0] as Record<string, unknown>).message : undefined;
+    if (message && typeof message === "object" && typeof (message as Record<string, unknown>).content === "string") return (message as Record<string, unknown>).content as string;
+    const output = Array.isArray(bodyJson.output) ? bodyJson.output : [];
+    const text = output.flatMap((item) => item && typeof item === "object" && Array.isArray((item as Record<string, unknown>).content) ? (item as Record<string, unknown>).content as unknown[] : []).map((item) => item && typeof item === "object" ? (item as Record<string, unknown>).text : undefined).find((item): item is string => typeof item === "string");
+    if (text) return text;
+    throw new Error("malformed_response");
   } catch (error) {
-    if (controller.signal.aborted || error instanceof Error && error.name === "AbortError") throw new Error("timeout");
+    if (signal.aborted || error instanceof Error && error.name === "AbortError") throw new Error("timeout");
     throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
-  if (!response.ok) {
-    await discardResponseBody(response);
-    if (response.status === 401 || response.status === 403) throw new Error("authentication_error");
-    if (response.status === 402) throw new Error("quota_error");
-    if (response.status === 429) throw new Error("rate_limit");
-    if (response.status === 408) throw new Error("timeout");
-    if (response.status >= 500) throw new Error("model_unavailable");
-    throw new Error("provider_error");
-  }
-  const bodyJson = await response.json() as Record<string, unknown>;
-  if (typeof bodyJson.output_text === "string") return bodyJson.output_text;
-  const choices = Array.isArray(bodyJson.choices) ? bodyJson.choices : [];
-  const message = choices[0] && typeof choices[0] === "object" ? (choices[0] as Record<string, unknown>).message : undefined;
-  if (message && typeof message === "object" && typeof (message as Record<string, unknown>).content === "string") return (message as Record<string, unknown>).content as string;
-  const output = Array.isArray(bodyJson.output) ? bodyJson.output : [];
-  const text = output.flatMap((item) => item && typeof item === "object" && Array.isArray((item as Record<string, unknown>).content) ? (item as Record<string, unknown>).content as unknown[] : []).map((item) => item && typeof item === "object" ? (item as Record<string, unknown>).text : undefined).find((item): item is string => typeof item === "string");
-  if (text) return text;
-  throw new Error("malformed_response");
+  } finally { clearTimeout(timeout); }
 }
 export function normalizeModelError(error: unknown): "authentication_error" | "quota_error" | "rate_limit" | "model_unavailable" | "timeout" | "malformed_response" | "schema_validation_error" | "provider_error" {
   const message = error instanceof Error ? error.message : "";

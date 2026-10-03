@@ -3,6 +3,7 @@ import type { ResearchInput } from "./types.ts";
 import { runAgent } from "../agent/runner.ts";
 import { toRetrievalPlan } from "../agent/retrieval-plan.ts";
 import type { AgentRunOptions } from "../agent/types.ts";
+import { safeFailureText } from "../agent/failure.ts";
 
 type ResearchExecution = {
   identity: { id: string; mode: "anonymous" | "authenticated" };
@@ -27,11 +28,7 @@ function enforceBudget(identity: ResearchExecution["identity"]) {
 }
 
 function sanitizeTraceText(value: unknown) {
-  return String(value ?? "")
-    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
-    .replace(/postgres(?:ql)?:\/\/\S+/gi, "[redacted-database-url]")
-    .replace(/\b(token|token_hash|apikey|api_key|authorization|cookie|password)=([^&\s]+)/gi, "$1=[redacted]")
-    .slice(0, 240);
+  return safeFailureText(value);
 }
 
 function topStackFrame(error: unknown) {
@@ -112,11 +109,16 @@ export async function executeResearch({ identity, input, debug, context, reposit
     });
     onPhase?.({ phase: "agent_finished", success: result.status !== "failed", itemCount: result.response?.signals.length });
     if (result.status === "failed") {
-      onPhase?.(summarizeAgentFailure(new Error("Agent returned failure result"), "failure_result", agentFailurePhase()));
+      const cause = result.failure
+        ? Object.assign(new Error(result.failure.message), { code: result.failure.code })
+        : new Error("Agent returned failure result");
+      onPhase?.(summarizeAgentFailure(cause, "failure_result", agentFailurePhase()));
       tracedAgentFailure = true;
     }
     if (!result.response) {
-      const error = new Error("Agent research produced no response");
+      const error = result.failure
+        ? Object.assign(new Error(result.failure.message), { code: result.failure.code })
+        : new Error("Agent research produced no response");
       if (!tracedAgentFailure) {
         onPhase?.(summarizeAgentFailure(error, "empty_response", agentFailurePhase()));
         tracedAgentFailure = true;

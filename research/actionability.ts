@@ -47,6 +47,15 @@ type ActionabilityInput = Pick<
 > & {
   knownMatches?: string[];
   evidenceText?: string;
+  // Optional freshness-window context from the caller. The fixed freshnessScore
+  // bar (>=65 ~ 72h) silently dropped verified in-window official releases for
+  // one-month questions; with the context, an event inside the requested
+  // window satisfies the gate even when its absolute score is lower.
+  eventAgeHours?: number;
+  requestedFreshnessHours?: number;
+  // Evidence-backed change statement from the presentation; enables a
+  // change-specific test action instead of the per-entry-type template.
+  changeStatement?: string;
 };
 
 const ACADEMIC_PATTERN =
@@ -131,7 +140,13 @@ function informationGainStatus(input: ActionabilityInput): InformationGainStatus
   return "NEW_INFORMATION";
 }
 
-function executableAction(entry: ExecutionEntry | undefined) {
+function executableAction(entry: ExecutionEntry | undefined, changeStatement?: string) {
+  // A change-specific run instruction requires an actual execution entry;
+  // without one the advice is to check the original source, not to "run" it.
+  if (entry && changeStatement) {
+    const detail = changeStatement.length > 120 ? `${changeStatement.slice(0, 117)}…` : changeStatement;
+    return `针对该变化做最小验证：${detail}。按证据所指入口实际操作一次，对比变化前后的结果并记录。`;
+  }
   if (entry?.type === "API") {
     return "打开公开 API/SDK 文档，用一个最小输入完成一次调用并记录结果。";
   }
@@ -143,6 +158,9 @@ function executableAction(entry: ExecutionEntry | undefined) {
   }
   if (entry?.type === "WORKFLOW") {
     return "导入或运行证据明确指向的工作流模板，比较耗时、质量和人工修改量。";
+  }
+  if (changeStatement) {
+    return "该变化的具体内容已在证据中列出，但当前没有公开可执行入口；建议核查原文确认适用范围，不安排立即测试。";
   }
   return "阅读原文并评估适用范围；当前没有可验证的执行入口，不安排立即测试。";
 }
@@ -189,12 +207,16 @@ export function assessSignalActionability(input: ActionabilityInput): Actionabil
     };
   }
 
+  const inRequestedWindow =
+    input.eventAgeHours !== undefined &&
+    input.requestedFreshnessHours !== undefined &&
+    input.eventAgeHours <= input.requestedFreshnessHours;
   const qualityGate =
     input.verificationStatus !== "unverified" &&
     input.verificationStatus !== "conflicting" &&
     input.relevanceScore >= 75 &&
     input.reliabilityScore >= 70 &&
-    input.freshnessScore >= 65;
+    (input.freshnessScore >= 65 || inRequestedWindow);
 
   if (executionEntry && qualityGate) {
     return {
@@ -202,7 +224,7 @@ export function assessSignalActionability(input: ActionabilityInput): Actionabil
       informationGainStatus: gain,
       hasExecutableAction: true,
       executionEntry,
-      action: executableAction(executionEntry),
+      action: executableAction(executionEntry, input.changeStatement),
       reason: "存在公开可执行入口，且已满足现有证据质量门槛",
     };
   }
@@ -212,7 +234,7 @@ export function assessSignalActionability(input: ActionabilityInput): Actionabil
     informationGainStatus: gain,
     hasExecutableAction,
     executionEntry,
-    action: executableAction(executionEntry),
+    action: executableAction(executionEntry, input.changeStatement),
     reason: executionEntry
       ? "存在潜在执行入口，但仍需先核对证据质量或适用范围"
       : "证据相关但没有明确的公开执行入口",

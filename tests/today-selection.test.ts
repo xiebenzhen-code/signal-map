@@ -24,7 +24,10 @@ function signal(overrides: Partial<ResearchSignal> = {}): ResearchSignal {
     propagationCount: 1,
     sourceTier: "S",
     sourceType: "primary",
-    publishedAt: "2026-08-28T10:00:00.000Z",
+    // Relative to "now" so the default 7d window keeps this fixture in-window
+    // regardless of when the suite runs; the gate under test is the candidate
+    // quality gates, not calendar drift.
+    publishedAt: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString(),
     ...overrides,
   } as ResearchSignal;
 }

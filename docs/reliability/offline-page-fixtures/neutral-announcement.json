@@ -1,0 +1,1064 @@
+{
+  "signals": [
+    {
+      "id": "event-skj118",
+      "category": "匹配",
+      "channel": "混合",
+      "title": "每周项目例会时间由周三 14:00 变更为周四 14:00，自下周一起生效，会议室不变",
+      "summary": "每周项目例会时间由周三 14:00 变更为周四 14:00，自下周一起生效，会议室不变",
+      "time": "1小时前",
+      "truth": 72,
+      "baseUseful": 78,
+      "lead": 90,
+      "tags": [
+        "开源开发与 AI 工具",
+        "值得关注的新变化",
+        "ComfyUI 社区本周例会安排有哪些更新？",
+        "ComfyUI",
+        "artificial intelligence",
+        "foundation model",
+        "model release",
+        "AI",
+        "ComfyUI",
+        "生成式 AI",
+        "基础模型",
+        "模型更新",
+        "ComfyUI"
+      ],
+      "action": "该变化的具体内容已在证据中列出，但当前没有公开可执行入口；建议核查原文确认适用范围，不安排立即测试。",
+      "why": "为未解决问题补充证据：comfyui；1 条独立证据链；融合判断：INTERPRETATION（有外部证据但尚未形成 Primary 事实闭环）；证据尚未完全闭环",
+      "official": [
+        {
+          "name": "Reuters",
+          "url": "https://www.reuters.com/announcements/schedule-change",
+          "kind": "原文"
+        }
+      ],
+      "social": [],
+      "sourceType": "trusted_media",
+      "sourceTier": "A",
+      "sourceUrl": "https://www.reuters.com/announcements/schedule-change",
+      "publisher": "Reuters",
+      "publishedAt": "2026-10-01T07:07:38.000Z",
+      "eventOccurredAt": "2026-10-01T07:07:38.000Z",
+      "firstSeenAt": "2026-10-01T08:07:39.155Z",
+      "retrievedAt": "2026-10-01T08:07:39.155Z",
+      "originalOccurredAt": "2026-10-01T07:07:38.000Z",
+      "timestampStatus": "valid",
+      "dataOrigin": "live",
+      "confidence": 72,
+      "verificationStatus": "partially_verified",
+      "topicRelevance": {
+        "decision": "MATCH",
+        "reason": "LEGACY_QUERY_TERM_MATCH",
+        "matchedTerms": [
+          "comfyui"
+        ],
+        "matchedDomainAnchors": [],
+        "matchedTaskAnchors": [],
+        "matchedGenericTerms": [],
+        "matchedQueryTerms": [
+          "comfyui"
+        ],
+        "relevanceGateApplied": false,
+        "relevanceGatePassed": true,
+        "score": 75
+      },
+      "relevanceScore": 78,
+      "reliabilityScore": 72,
+      "freshnessScore": 90,
+      "noveltyScore": 90,
+      "judgementImpactScore": 62,
+      "gapMatchScore": 69,
+      "overallScore": 77,
+      "sourceCount": 1,
+      "independentEvidenceCount": 1,
+      "propagationCount": 0,
+      "signalType": "INTERPRETATION",
+      "signalCluster": {
+        "clusterId": "cluster-comfyui-社区例会安排更新-例会时间由周三-14-00-变更为周四-14-00",
+        "entity": "ComfyUI",
+        "topic": "开源开发与 AI 工具",
+        "normalizedClaim": "comfyui 社区例会安排更新 例会时间由周三 14 00 变更为周四 14 00",
+        "timeScope": "2026-10-01",
+        "evidenceIds": [
+          "event-skj118-0"
+        ],
+        "sourceRoles": [
+          "AUTHORITATIVE_MEDIA"
+        ],
+        "independentSourceCount": 1,
+        "duplicateCount": 0,
+        "conflictState": "none",
+        "canonicalSources": [
+          "reuters.com"
+        ]
+      },
+      "sourceRoles": [
+        "AUTHORITATIVE_MEDIA"
+      ],
+      "sourceRoleDiversity": 1,
+      "duplicateRatio": 0,
+      "confirmationGain": false,
+      "primaryEvidenceIds": [],
+      "claims": [
+        {
+          "claimText": "每周项目例会时间由周三 14:00 变更为周四 14:00，自下周一起生效，会议室不变",
+          "sourceUrl": "https://www.reuters.com/announcements/schedule-change",
+          "publisher": "Reuters",
+          "publishedAt": "2026-10-01T07:07:38.000Z",
+          "sourceType": "trusted_media",
+          "sourceTier": "A",
+          "evidenceSnippet": "每周项目例会时间由周三 14:00 变更为周四 14:00，自下周一起生效，会议室不变",
+          "verificationStatus": "partially_verified",
+          "contentType": "SIGNAL",
+          "evidenceSources": [
+            {
+              "sourceUrl": "https://www.reuters.com/announcements/schedule-change",
+              "publisher": "Reuters",
+              "publishedAt": "2026-10-01T07:07:38.000Z",
+              "sourceType": "trusted_media",
+              "sourceTier": "A",
+              "evidenceSnippet": "每周项目例会时间由周三 14:00 变更为周四 14:00，自下周一起生效，会议室不变",
+              "sourceRole": "verification",
+              "verificationStatus": "partially_verified"
+            }
+          ],
+          "contentQuality": "VALID",
+          "propagationCount": 1,
+          "independentEvidenceCount": 1
+        }
+      ],
+      "sources": [
+        {
+          "sourceUrl": "https://www.reuters.com/announcements/schedule-change",
+          "publisher": "Reuters",
+          "publishedAt": "2026-10-01T07:07:38.000Z",
+          "sourceType": "trusted_media",
+          "sourceTier": "A"
+        }
+      ],
+      "section": "gap_update",
+      "gapMatches": [],
+      "questionMatches": [
+        "comfyui"
+      ],
+      "entityMatches": [
+        "comfyui"
+      ],
+      "whyItMatters": "该变化的具体内容：每周项目例会时间由周三 14:00 变更为周四 14:00，自下周一起生效，会议室不变。请核查原文确认适用范围与生效条件。",
+      "eventStatus": "NEW",
+      "informationType": "INTERPRETATION",
+      "knowledgeStatus": "NOVEL",
+      "actionabilityStatus": "REVIEW_FIRST",
+      "informationGainStatus": "NEW_INFORMATION",
+      "hasExecutableAction": false,
+      "attentionDecision": "LIBRARY_ONLY",
+      "presentation": {
+        "headline": "每周项目例会时间由周三 14:00 变更为周四 14:00，自下周一起生效，会议室不变",
+        "fact": "每周项目例会时间由周三 14:00 变更为周四 14:00，自下周一起生效，会议室不变",
+        "whyItMatters": "该变化的具体内容：每周项目例会时间由周三 14:00 变更为周四 14:00，自下周一起生效，会议室不变。请核查原文确认适用范围与生效条件。",
+        "changeStatement": "每周项目例会时间由周三 14:00 变更为周四 14:00，自下周一起生效，会议室不变",
+        "evidence": [
+          {
+            "sourceName": "Reuters",
+            "sourceRole": "verification",
+            "snippet": "每周项目例会时间由周三 14:00 变更为周四 14:00，自下周一起生效，会议室不变",
+            "publishedAt": "2026-10-01T07:07:38.000Z",
+            "url": "https://www.reuters.com/announcements/schedule-change"
+          }
+        ],
+        "interpretation": "这是基于已提取证据的解释，不等同于已确认事实。",
+        "contentQuality": "VALID"
+      },
+      "contentQuality": "VALID",
+      "translationStatus": "not_needed"
+    }
+  ],
+  "status": "completed",
+  "queryPlan": {
+    "originalNeed": "开源开发与 AI 工具；值得关注的新变化；ComfyUI 社区本周例会安排有哪些更新？；ComfyUI；30d",
+    "coreKeywords": [
+      "开源开发与 AI 工具",
+      "值得关注的新变化",
+      "ComfyUI 社区本周例会安排有哪些更新？",
+      "ComfyUI"
+    ],
+    "topicAnchors": [],
+    "topicKeywords": [
+      "开源开发与 AI 工具",
+      "ComfyUI"
+    ],
+    "englishKeywords": [
+      "artificial intelligence",
+      "foundation model",
+      "model release",
+      "AI",
+      "ComfyUI"
+    ],
+    "synonyms": [
+      "生成式 AI",
+      "基础模型",
+      "模型更新"
+    ],
+    "entities": [
+      "ComfyUI"
+    ],
+    "industryKeywords": [
+      "开源开发与 AI 工具",
+      "official documentation",
+      "release notes",
+      "research",
+      "GitHub"
+    ],
+    "changeKeywords": [
+      "latest",
+      "today",
+      "update",
+      "new",
+      "release",
+      "announcement",
+      "release notes",
+      "changelog",
+      "GitHub",
+      "new feature",
+      "new limitation",
+      "pricing",
+      "API",
+      "policy",
+      "hiring",
+      "this week"
+    ],
+    "knowledgeAwareQueries": [],
+    "searchCombinations": [
+      "ComfyUI latest update",
+      "ComfyUI today announcement",
+      "ComfyUI release notes changelog",
+      "ComfyUI GitHub release this week",
+      "ComfyUI new feature new limitation pricing API policy hiring",
+      "ComfyUI Investor Relations",
+      "ComfyUI official announcement",
+      "开源开发与 AI 工具 product launch release",
+      "ComfyUI workflow tool",
+      "ComfyUI research model",
+      "开源开发与 AI 工具 official documentation release notes",
+      "ComfyUI implementation commercial workflow",
+      "artificial intelligence latest update",
+      "foundation model latest update",
+      "model release latest update",
+      "AI latest update",
+      "开源开发与 AI 工具 官方公告",
+      "开源开发与 AI 工具 权威媒体",
+      "开源开发与 AI 工具 artificial intelligence",
+      "开源开发与 AI 工具 foundation model",
+      "开源开发与 AI 工具 model release",
+      "值得关注的新变化 artificial intelligence",
+      "值得关注的新变化 foundation model",
+      "值得关注的新变化 model release"
+    ],
+    "retrievalWindows": [
+      "24h",
+      "3d",
+      "7d",
+      "30d"
+    ],
+    "requestedFreshnessWindow": "30d",
+    "resolvedEntities": [
+      {
+        "canonicalEntity": "ComfyUI",
+        "aliasesConsidered": [
+          "ComfyUI",
+          "comfyui",
+          "comfy ui",
+          "comfyanonymous"
+        ]
+      }
+    ],
+    "aliasesConsidered": [
+      "ComfyUI",
+      "comfyui",
+      "comfy ui",
+      "comfyanonymous"
+    ],
+    "queryBudget": 24,
+    "deduplicatedQueryCount": 24,
+    "selectedSourceType": "OFFICIAL",
+    "fallbackSourceTypes": [
+      "PRIMARY",
+      "GENERAL_WEB"
+    ],
+    "allowedProviderIds": [
+      "company-registry",
+      "official-update-pages",
+      "github-releases",
+      "primary-web-search",
+      "trusted-media",
+      "industry-media",
+      "public-web",
+      "product-hunt",
+      "hacker-news",
+      "huggingface",
+      "arxiv",
+      "reddit",
+      "reverse-primary",
+      "social-access"
+    ],
+    "sourceSelectionReason": "offline page fixture"
+  },
+  "progress": [
+    {
+      "stage": "planning",
+      "label": "正在理解需求并扩展中英文搜索词",
+      "counts": {
+        "candidates": 0,
+        "primary": 0,
+        "trustedMedia": 0,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      },
+      "detail": "生成 24 个搜索组合"
+    },
+    {
+      "stage": "candidates",
+      "label": "搜索候选资料",
+      "counts": {
+        "candidates": 0,
+        "primary": 0,
+        "trustedMedia": 0,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      },
+      "detail": "ComfyUI latest update · ComfyUI today announcement · ComfyUI release notes changelog · ComfyUI GitHub release this week"
+    },
+    {
+      "stage": "primary",
+      "label": "找到 0 条候选资料 · 官方来源 0 条",
+      "counts": {
+        "candidates": 0,
+        "primary": 0,
+        "trustedMedia": 0,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    },
+    {
+      "stage": "trusted_media",
+      "label": "正在补充可信媒体",
+      "counts": {
+        "candidates": 0,
+        "primary": 0,
+        "trustedMedia": 0,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    },
+    {
+      "stage": "trusted_media",
+      "label": "可信媒体补充完成 · 1 条",
+      "counts": {
+        "candidates": 1,
+        "primary": 0,
+        "trustedMedia": 1,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    },
+    {
+      "stage": "social",
+      "label": "正在检查社交媒体线索",
+      "counts": {
+        "candidates": 1,
+        "primary": 0,
+        "trustedMedia": 1,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    },
+    {
+      "stage": "social",
+      "label": "社交媒体线索 0 条 · 已尝试反向查证",
+      "counts": {
+        "candidates": 1,
+        "primary": 0,
+        "trustedMedia": 1,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    },
+    {
+      "stage": "deduplication",
+      "label": "去重完成 · 15 条扫描结果收敛为 1 条来源",
+      "counts": {
+        "candidates": 1,
+        "primary": 0,
+        "trustedMedia": 1,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    },
+    {
+      "stage": "clustering",
+      "label": "事件聚合完成 · 1 个独立事件",
+      "counts": {
+        "candidates": 1,
+        "primary": 0,
+        "trustedMedia": 1,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    },
+    {
+      "stage": "claim_extraction",
+      "label": "Claim 提取完成 · 1 条有来源 Claim",
+      "counts": {
+        "candidates": 1,
+        "primary": 0,
+        "trustedMedia": 1,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    },
+    {
+      "stage": "verification",
+      "label": "已验证 0 个事件 · 1 个需继续核查",
+      "counts": {
+        "candidates": 1,
+        "primary": 0,
+        "trustedMedia": 1,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    },
+    {
+      "stage": "gap_matching",
+      "label": "信息缺口匹配完成 · 0 个更新",
+      "counts": {
+        "candidates": 1,
+        "primary": 0,
+        "trustedMedia": 1,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    },
+    {
+      "stage": "novelty",
+      "label": "已对照 Known Information 检查新颖度",
+      "counts": {
+        "candidates": 1,
+        "primary": 0,
+        "trustedMedia": 1,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    },
+    {
+      "stage": "scoring",
+      "label": "七维评分完成 · Gate 优先于 Overall",
+      "counts": {
+        "candidates": 1,
+        "primary": 0,
+        "trustedMedia": 1,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    },
+    {
+      "stage": "filtering",
+      "label": "注意力决策完成 · 0 条 Must Read，0 条 Worth Watching",
+      "counts": {
+        "candidates": 1,
+        "primary": 0,
+        "trustedMedia": 1,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    },
+    {
+      "stage": "explanation",
+      "label": "已生成仅基于现有证据的解释",
+      "counts": {
+        "candidates": 1,
+        "primary": 0,
+        "trustedMedia": 1,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    },
+    {
+      "stage": "translation",
+      "label": "翻译完成 · 0 条中文呈现",
+      "counts": {
+        "candidates": 1,
+        "primary": 0,
+        "trustedMedia": 1,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    },
+    {
+      "stage": "complete",
+      "label": "研究完成 · 今天没有重要变化",
+      "counts": {
+        "candidates": 1,
+        "primary": 0,
+        "trustedMedia": 1,
+        "industryMedia": 0,
+        "social": 0,
+        "verified": 0
+      }
+    }
+  ],
+  "failures": [
+    "Primary Sources: 扩展查询未命中可识别的监管文件、公司 IR 或官方公告，已继续搜索可信媒体。",
+    "Product Hunt: 请求失败或超时。",
+    "Hacker News: 请求失败或超时。",
+    "arXiv: 请求失败或超时。",
+    "Social Discovery: Reddit 请求失败或超时。"
+  ],
+  "counts": {
+    "candidates": 1,
+    "primary": 0,
+    "trustedMedia": 1,
+    "industryMedia": 0,
+    "social": 0,
+    "verified": 0
+  },
+  "overview": {
+    "scanned": 15,
+    "deduplicated": 1,
+    "events": 1,
+    "verified": 0,
+    "relevant": 1,
+    "mustKnow": 0,
+    "worthWatching": 0,
+    "libraryOnly": 1,
+    "ignored": 0,
+    "noiseReductionRate": 100,
+    "novelInformationRate": 100
+  },
+  "coverage": {
+    "level": "Broad",
+    "usedProviders": [
+      "Primary Sources",
+      "Company Source Registry",
+      "GitHub Releases",
+      "Trusted Media",
+      "Industry Media",
+      "General Web",
+      "Hugging Face"
+    ],
+    "zeroResultProviders": [
+      "Primary Sources",
+      "Company Source Registry",
+      "GitHub Releases",
+      "Industry Media",
+      "General Web",
+      "Hugging Face"
+    ],
+    "notSearchedProviders": [
+      "Official Update Pages",
+      "Public Web Community"
+    ],
+    "unavailableProviders": [
+      "Xiaohongshu"
+    ],
+    "notConfiguredProviders": [
+      "X"
+    ],
+    "failedProviders": [
+      "Product Hunt",
+      "Hacker News",
+      "arXiv",
+      "Reddit"
+    ],
+    "outcomes": [
+      {
+        "source": "Primary Sources",
+        "execution": "searched_no_results",
+        "searched": true,
+        "resultCount": 0,
+        "requestCount": 5,
+        "engine": "google_news",
+        "fallbackAttempted": false
+      },
+      {
+        "providerId": "company-registry",
+        "source": "Company Source Registry",
+        "execution": "searched_no_results",
+        "searched": true,
+        "resultCount": 0,
+        "rawResultCount": 0,
+        "normalizedCandidateCount": 0,
+        "rejectedRawCount": 0,
+        "candidateAdmissionRejectionReasons": {},
+        "candidateAdmissionRejectedSamples": [],
+        "requestCount": 1
+      },
+      {
+        "source": "GitHub Releases",
+        "execution": "searched_no_results",
+        "searched": true,
+        "resultCount": 0,
+        "requestCount": 1
+      },
+      {
+        "source": "Official Update Pages",
+        "execution": "not_searched",
+        "searched": false,
+        "resultCount": 0,
+        "requestCount": 0
+      },
+      {
+        "source": "Trusted Media",
+        "execution": "searched_with_results",
+        "searched": true,
+        "resultCount": 1,
+        "requestCount": 2,
+        "engine": "google_news",
+        "fallbackAttempted": false
+      },
+      {
+        "source": "Industry Media",
+        "execution": "searched_no_results",
+        "searched": true,
+        "resultCount": 0,
+        "requestCount": 3,
+        "engine": "google_news",
+        "fallbackAttempted": false
+      },
+      {
+        "source": "General Web",
+        "execution": "searched_no_results",
+        "searched": true,
+        "resultCount": 0,
+        "requestCount": 4,
+        "engine": "google_news",
+        "fallbackAttempted": false
+      },
+      {
+        "providerId": "product-hunt",
+        "source": "Product Hunt",
+        "execution": "failed",
+        "searched": true,
+        "resultCount": 0,
+        "requestCount": 1,
+        "failureCode": "upstream_error"
+      },
+      {
+        "providerId": "hacker-news",
+        "source": "Hacker News",
+        "execution": "failed",
+        "searched": true,
+        "resultCount": 0,
+        "requestCount": 1,
+        "failureCode": "upstream_error"
+      },
+      {
+        "providerId": "huggingface",
+        "source": "Hugging Face",
+        "execution": "searched_no_results",
+        "searched": true,
+        "resultCount": 0,
+        "rawResultCount": 0,
+        "normalizedCandidateCount": 0,
+        "rejectedRawCount": 0,
+        "candidateAdmissionRejectionReasons": {},
+        "candidateAdmissionRejectedSamples": [],
+        "requestCount": 1
+      },
+      {
+        "providerId": "arxiv",
+        "source": "arXiv",
+        "execution": "failed",
+        "searched": true,
+        "resultCount": 0,
+        "requestCount": 1,
+        "failureCode": "upstream_error"
+      },
+      {
+        "source": "Public Web Community",
+        "execution": "not_searched",
+        "searched": false,
+        "resultCount": 0,
+        "requestCount": 0
+      },
+      {
+        "source": "X",
+        "execution": "not_configured",
+        "searched": false,
+        "resultCount": 0
+      },
+      {
+        "source": "Xiaohongshu",
+        "execution": "unavailable",
+        "searched": false,
+        "resultCount": 0
+      },
+      {
+        "source": "Reddit",
+        "execution": "failed",
+        "searched": true,
+        "resultCount": 0,
+        "failureCode": "upstream_error"
+      }
+    ]
+  },
+  "filteringSummary": {
+    "retrievedCount": 1,
+    "clusteredCount": 1,
+    "displayedCount": 1,
+    "filteredReasons": {
+      "stale": 0,
+      "duplicate": 0,
+      "lowReliability": 0,
+      "insufficientVerification": 0,
+      "background": 0,
+      "lowNovelty": 0,
+      "unresolvedConflict": 0,
+      "lowActionability": 0,
+      "noInformationGain": 0,
+      "insufficientContent": 0,
+      "topicMismatch": 0
+    },
+    "detailEnrichment": {
+      "detailAttempted": 0,
+      "detailSucceeded": 0,
+      "detailFailed": 0,
+      "stillInsufficient": 0
+    },
+    "filteringDetails": [
+      {
+        "id": "event-skj118",
+        "title": "每周项目例会时间由周三 14:00 变更为周四 14:00，自下周一起生效，会议室不变",
+        "decision": "displayed",
+        "explanation": "为未解决问题补充证据：comfyui；1 条独立证据链；融合判断：INTERPRETATION（有外部证据但尚未形成 Primary 事实闭环）；证据尚未完全闭环",
+        "topicRelevance": {
+          "decision": "MATCH",
+          "reason": "LEGACY_QUERY_TERM_MATCH",
+          "matchedDomainAnchors": [],
+          "matchedTaskAnchors": [],
+          "matchedGenericTerms": [],
+          "matchedQueryTerms": [
+            "comfyui"
+          ],
+          "relevanceGateApplied": false,
+          "relevanceGatePassed": true
+        },
+        "sources": [
+          {
+            "publisher": "Reuters",
+            "sourceUrl": "https://www.reuters.com/announcements/schedule-change"
+          }
+        ]
+      }
+    ],
+    "summaryText": "共检索 1 条，聚合为 1 个信号，最终展示 1 个；其余主要因证据价值不足被过滤。"
+  },
+  "evidenceAccounting": {
+    "discoveredCandidateCount": 1,
+    "producedEvidenceCount": 1,
+    "cumulativeEvidenceCount": 1,
+    "evaluatedEvidenceCount": 1,
+    "acceptedEvidenceCount": 1,
+    "rejectedEvidenceCount": 0,
+    "finalEvidenceCount": 1,
+    "rejectionReasons": {
+      "stale": 0,
+      "duplicate": 0,
+      "lowReliability": 0,
+      "insufficientVerification": 0,
+      "background": 0,
+      "lowNovelty": 0,
+      "unresolvedConflict": 0,
+      "lowActionability": 0,
+      "noInformationGain": 0,
+      "insufficientContent": 0,
+      "topicMismatch": 0
+    }
+  },
+  "evidenceRecords": [
+    {
+      "id": "evidence-yoy345",
+      "claimId": "claim-iuiynn",
+      "sourceUrl": "https://www.reuters.com/announcements/schedule-change",
+      "canonicalUrl": "https://www.reuters.com/announcements/schedule-change",
+      "publisher": "Reuters",
+      "publishedAt": "2026-10-01T07:07:38.000Z",
+      "sourceType": "trusted_media",
+      "sourceRole": "verification",
+      "sourceTier": "A",
+      "verificationStatus": "partially_verified",
+      "evidenceSnippet": "每周项目例会时间由周三 14:00 变更为周四 14:00，自下周一起生效，会议室不变",
+      "dataMode": "live",
+      "retrievedAt": "2026-10-01T08:07:39.155Z",
+      "createdAt": "2026-10-01T08:07:39.155Z"
+    }
+  ],
+  "fetchedAt": "2026-10-01T08:07:39.162Z",
+  "dataMode": "live",
+  "lastCheckedAt": "2026-10-01T08:07:39.162Z",
+  "sourceOutcomes": [
+    {
+      "sourceType": "PRIMARY",
+      "providerId": "primary-web-search",
+      "executed": true,
+      "resultCount": 0,
+      "requestCount": 5,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 80,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "OFFICIAL",
+      "providerId": "company-registry",
+      "executed": true,
+      "resultCount": 0,
+      "requestCount": 1,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 90,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "OFFICIAL",
+      "providerId": "github-releases",
+      "executed": true,
+      "resultCount": 0,
+      "requestCount": 1,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 90,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "OFFICIAL",
+      "providerId": "official-update-pages",
+      "executed": false,
+      "resultCount": 0,
+      "requestCount": 0,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 90,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "INDEPENDENT_MEDIA",
+      "providerId": "trusted-media",
+      "executed": true,
+      "resultCount": 1,
+      "requestCount": 2,
+      "newEvidenceCount": 1,
+      "newClaimCount": 0,
+      "reliabilityGain": 60,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "INDEPENDENT_MEDIA",
+      "providerId": "industry-media",
+      "executed": true,
+      "resultCount": 0,
+      "requestCount": 3,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 60,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "GENERAL_WEB",
+      "providerId": "public-web",
+      "executed": true,
+      "resultCount": 0,
+      "requestCount": 4,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 60,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "SOCIAL_SIGNAL",
+      "providerId": "product-hunt",
+      "executed": true,
+      "resultCount": 0,
+      "requestCount": 1,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 60,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "SOCIAL_SIGNAL",
+      "providerId": "hacker-news",
+      "executed": true,
+      "resultCount": 0,
+      "requestCount": 1,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 60,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "GENERAL_WEB",
+      "providerId": "huggingface",
+      "executed": true,
+      "resultCount": 0,
+      "requestCount": 1,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 60,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "PRIMARY",
+      "providerId": "arxiv",
+      "executed": true,
+      "resultCount": 0,
+      "requestCount": 1,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 80,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "SOCIAL_SIGNAL",
+      "providerId": "public-web",
+      "executed": false,
+      "resultCount": 0,
+      "requestCount": 0,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 60,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "PRIMARY",
+      "providerId": "primary-web-search",
+      "executed": false,
+      "resultCount": 0,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 80,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "PRIMARY",
+      "providerId": "primary-web-search",
+      "executed": false,
+      "resultCount": 0,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 80,
+      "conflictReduction": 0
+    },
+    {
+      "sourceType": "SOCIAL_SIGNAL",
+      "providerId": "reddit",
+      "executed": true,
+      "resultCount": 0,
+      "newEvidenceCount": 0,
+      "newClaimCount": 0,
+      "reliabilityGain": 60,
+      "conflictReduction": 0
+    }
+  ],
+  "sourceDiagnostics": [
+    {
+      "providerId": "company-registry",
+      "rawProviderResultCount": 0,
+      "normalizedCandidateCount": 0,
+      "rejectedRawCount": 0,
+      "candidateAdmissionRejectionReasons": {},
+      "candidateAdmissionRejectedSamples": [],
+      "admittedCandidateCount": 0,
+      "enrichmentEligibleCount": 0,
+      "detailAttempted": 0,
+      "detailSucceeded": 0,
+      "detailFailed": 0,
+      "pipelineRetrievedCount": 0,
+      "displayedCount": 0
+    },
+    {
+      "providerId": "product-hunt",
+      "rawProviderResultCount": 0,
+      "normalizedCandidateCount": 0,
+      "rejectedRawCount": 0,
+      "admittedCandidateCount": 0,
+      "enrichmentEligibleCount": 0,
+      "detailAttempted": 0,
+      "detailSucceeded": 0,
+      "detailFailed": 0,
+      "pipelineRetrievedCount": 0,
+      "displayedCount": 0,
+      "rejectionReasons": {
+        "no_candidate_after_normalization": 1
+      }
+    },
+    {
+      "providerId": "hacker-news",
+      "rawProviderResultCount": 0,
+      "normalizedCandidateCount": 0,
+      "rejectedRawCount": 0,
+      "admittedCandidateCount": 0,
+      "enrichmentEligibleCount": 0,
+      "detailAttempted": 0,
+      "detailSucceeded": 0,
+      "detailFailed": 0,
+      "pipelineRetrievedCount": 0,
+      "displayedCount": 0
+    },
+    {
+      "providerId": "huggingface",
+      "rawProviderResultCount": 0,
+      "normalizedCandidateCount": 0,
+      "rejectedRawCount": 0,
+      "candidateAdmissionRejectionReasons": {},
+      "candidateAdmissionRejectedSamples": [],
+      "admittedCandidateCount": 0,
+      "enrichmentEligibleCount": 0,
+      "detailAttempted": 0,
+      "detailSucceeded": 0,
+      "detailFailed": 0,
+      "pipelineRetrievedCount": 0,
+      "displayedCount": 0
+    },
+    {
+      "providerId": "arxiv",
+      "rawProviderResultCount": 0,
+      "normalizedCandidateCount": 0,
+      "rejectedRawCount": 0,
+      "admittedCandidateCount": 0,
+      "enrichmentEligibleCount": 0,
+      "detailAttempted": 0,
+      "detailSucceeded": 0,
+      "detailFailed": 0,
+      "pipelineRetrievedCount": 0,
+      "displayedCount": 0
+    }
+  ],
+  "requestId": "offline-fixture-neutral-announcement",
+  "researchMode": "anonymous",
+  "_offlineFixture": {
+    "label": "neutral-announcement",
+    "question": "ComfyUI 社区本周例会安排有哪些更新？",
+    "generatedAt": "2026-10-01T08:07:39.162Z",
+    "materials": "Google News RSS 替身（1 条例会时间变更公告，Reuters 域名，无执行入口）",
+    "note": "离线回放产物：由注入替身驱动真实管线生成，用于页面呈现验收；不代表当前真实检索能力。"
+  }
+}

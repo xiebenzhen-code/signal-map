@@ -5,7 +5,7 @@ import type { ResearchPlan } from "../types.ts";
 
 export type ModelStatus = "configured" | "not_configured" | "error";
 export type ModelErrorCode = "model_not_configured" | "authentication_error" | "quota_error" | "rate_limit" | "model_unavailable" | "timeout" | "malformed_response" | "schema_validation_error" | "provider_error" | "configuration_error";
-export type ResearchPlanningInput = { userQuery: string; relatedKnowledge: string[]; existingEvidence: EvidenceRecord[]; previousQueries: string[]; round: number };
+export type ResearchPlanningInput = { userQuery: string; relatedKnowledge: string[]; existingEvidence: EvidenceRecord[]; previousQueries: string[]; round: number; signal?: AbortSignal };
 export type ModelResearchPlan = { status: ModelStatus; plan?: Pick<ResearchPlan, "objective" | "queries" | "preferredSourceTypes" | "maxQueries">; errorCode?: ModelErrorCode };
 export type EvidenceSynthesisResult =
   | { status: "configured"; synthesis: EvidenceBoundSynthesis }

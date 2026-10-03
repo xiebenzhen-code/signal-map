@@ -1,0 +1,15 @@
+{
+  "kind": "readonly_after_real_button",
+  "requestId": "signals-8c8b17c9-2957-4184-88ab-df36be4ac116",
+  "rows": [
+    {
+      "id": "pk-8mfntc",
+      "userIdMasked": "9b21a55d…",
+      "filterScope": "account",
+      "type": "JUDGEMENT",
+      "text": "Changed after evidence: * Improve qwen 2.1 KV cache location logic by @rattus128 in https://github.com/Comfy-Org/Co…",
+      "createdAt": "2026-10-02T15:43:24.310Z",
+      "updatedAt": "2026-10-02T15:43:24.310Z"
+    }
+  ]
+}

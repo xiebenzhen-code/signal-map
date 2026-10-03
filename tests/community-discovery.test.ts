@@ -13,14 +13,18 @@ test("GitHub release discovery records a real execution outcome", async () => {
     ["Codex"],
     async () =>
       new Response(
-        JSON.stringify({
-          id: 42,
-          name: "v1.2.0",
-          tag_name: "v1.2.0",
-          html_url: "https://github.com/openai/codex/releases/tag/v1.2.0",
-          body: "Adds a new developer-facing limitation.",
-          published_at: "2026-08-28T08:00:00.000Z",
-        }),
+        // The discovery now reads the releases LIST endpoint (newest first),
+        // so the injected payload is an array of releases.
+        JSON.stringify([
+          {
+            id: 42,
+            name: "v1.2.0",
+            tag_name: "v1.2.0",
+            html_url: "https://github.com/openai/codex/releases/tag/v1.2.0",
+            body: "Adds a new developer-facing limitation.",
+            published_at: "2026-08-28T08:00:00.000Z",
+          },
+        ]),
         { status: 200 },
       ),
   );

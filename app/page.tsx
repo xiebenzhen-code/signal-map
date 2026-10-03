@@ -38,7 +38,8 @@ import {
   type NaturalResearchOptions,
 } from "@/information/natural-research-intent";
 import { selectTodayPresentation } from "@/information/today-selection";
-import { todayResultCopy } from "@/information/today-copy";
+import { todayContextNotice, todayResultCopy } from "@/information/today-copy";
+import { accountKnowledgeVerificationLabel } from "@/information/knowledge-labels";
 import type {
   ActiveKnowledgeContext,
   FilterKnowledgeState,
@@ -57,7 +58,10 @@ import {
   clearAlphaData,
   loadAlphaSnapshot,
   setAlphaValue,
+  saveFilterSources,
 } from "@/lib/alpha-storage";
+import { CustomSourcesEditor } from "./components/custom-sources-editor";
+import { parseCustomSources } from "@/lib/custom-sources";
 import { signalTypeLabel, userFacingReason } from "@/lib/user-facing-labels";
 
 type Page = "today" | "information" | "library" | "settings";
@@ -305,6 +309,15 @@ function EventCard({
         </span>
         <span className="shrink-0 text-[#7d8691]">{event.time}</span>
       </div>
+      {(() => {
+        const version = event.sources?.[0]?.sourceUrl?.match(/releases\/tag\/(v[\d.]+)/)?.[1];
+        return version ? (
+          <div className="mt-3 flex items-center gap-2">
+            <span className="rounded-lg bg-[#e8ecfb] px-2.5 py-1 text-xs font-bold text-[#2359ff]">{version}</span>
+            {event.publishedAt && <span className="text-xs text-[#68727f]">{new Date(event.publishedAt).toLocaleDateString("zh-CN")}</span>}
+          </div>
+        ) : null;
+      })()}
 
       <h3 className="signal-event-title mt-4 text-[20px] leading-7 sm:text-[23px] sm:leading-8">
         {event.presentation?.headline || event.title}
@@ -401,6 +414,7 @@ function EventDetail({
   onClose,
   onSave,
   onFeedback,
+  onFeedbackPersist,
 }: {
   event: ResearchSignal;
   saved: boolean;
@@ -408,8 +422,10 @@ function EventDetail({
   onClose: () => void;
   onSave: (note: string) => void;
   onFeedback: (value: Feedback) => void;
+  onFeedbackPersist?: (value: Feedback, event: ResearchSignal) => Promise<{ ok: boolean; scope?: string; skipped?: boolean; errorCode?: string }>;
 }) {
   const [note, setNote] = useState(initialNote);
+  const [persistState, setPersistState] = useState<{ pending?: boolean; ok?: boolean; scope?: string; skipped?: boolean; errorCode?: string } | null>(null);
   const reliableClaims = event.claims.filter((claim) =>
     ["verified", "partially_verified"].includes(claim.verificationStatus),
   );
@@ -417,6 +433,12 @@ function EventDetail({
   const respond = (value: Feedback) => {
     if (note.trim()) onSave(note);
     onFeedback(value);
+    if (onFeedbackPersist) {
+      setPersistState({ pending: true });
+      onFeedbackPersist(value, event)
+        .then((result) => setPersistState(result.skipped ? null : { ok: result.ok, scope: result.scope, errorCode: result.errorCode }))
+        .catch((error) => setPersistState({ ok: false, errorCode: String(error) }));
+    }
   };
   return (
     <div
@@ -488,6 +510,13 @@ function EventDetail({
           <p className="mt-2 text-sm font-semibold leading-6 text-[#4f5968]">{event.presentation?.interpretation || event.why}</p>
         </section>
 
+        {event.action && (
+          <section className="mt-7 rounded-2xl bg-[#f6f7f4] p-4">
+            <p className="text-xs font-black uppercase tracking-[.12em] text-[#7e8792]">建议行动</p>
+            <p className="mt-2 text-sm font-semibold leading-6 text-[#4f5968]">{event.action}</p>
+          </section>
+        )}
+
         <section className="mt-7">
           <p className="text-xs font-black uppercase tracking-[.12em] text-[#7e8792]">原始来源 · {event.sourceCount}</p>
           <div className="mt-3 grid gap-2">
@@ -510,6 +539,9 @@ function EventDetail({
             <button onClick={() => respond("not_useful")} className="min-h-12 rounded-xl border border-[#dfe3e7] px-2 text-xs font-black">对我没用</button>
             <button onClick={() => respond("monitor")} className="min-h-12 rounded-xl border border-[#dfe3e7] px-2 text-xs font-black">继续关注</button>
           </div>
+          {persistState?.pending && <p className="mt-2 text-xs font-semibold text-[#7d8691]">正在保存反馈…</p>}
+          {persistState && !persistState.pending && persistState.ok && <p className="mt-2 text-xs font-semibold text-emerald-700">反馈已保存{persistState.scope === "account" ? "到账号长期记忆" : ""}。</p>}
+          {persistState && !persistState.pending && persistState.ok === false && <p className="mt-2 text-xs font-bold text-rose-700">反馈保存失败（{persistState.errorCode === "DB_TIMEOUT" ? "服务暂时不可用" : persistState.errorCode === "UNAUTHORIZED" ? "需要登录" : persistState.errorCode ?? "未知原因"}）。本地草稿仍保留，但未写入账号长期记忆。</p>}
         </section>
 
         <details className="mt-7 rounded-2xl border border-[#e2e5e8] p-4">
@@ -697,6 +729,8 @@ function FilterBuilder({
   onCancel?: () => void;
 }) {
   const [query, setQuery] = useState("");
+  const [sources, setSources] = useState("");
+  const [sourceError, setSourceError] = useState("");
   const [options, setOptions] = useState<NaturalResearchOptions>({
     sourcePreference: "auto",
     reliabilityPreference: "balanced",
@@ -708,7 +742,10 @@ function FilterBuilder({
   ];
   const submit = () => {
     const draft = inferNaturalResearchDraft(query, options);
-    onSave({ ...emptyFilterDraft, ...draft });
+    const parsed = parseCustomSources(sources);
+    if (parsed.errors.length) { setSourceError(parsed.errors[0]); return; }
+    setSourceError("");
+    onSave({ ...emptyFilterDraft, ...draft, customSources: parsed.urls });
   };
 
   return (
@@ -754,6 +791,8 @@ function FilterBuilder({
           <details className="rounded-2xl border border-[#e4e7eb] bg-white/60 p-4">
             <summary className="min-h-10 cursor-pointer list-none text-sm font-black text-[#2359ff]">更多筛选</summary>
             <div className="mt-4 grid gap-4">
+              <CustomSourcesEditor value={sources} onChange={setSources} />
+              {sourceError && <p role="alert" className="text-xs text-[#ad3342]">{sourceError}</p>}
               <label><span className="text-sm font-black">时间范围</span><select value={options.freshnessWindow ?? ""} onChange={(event) => setOptions((current) => ({ ...current, freshnessWindow: event.target.value ? event.target.value as InformationFilter["freshnessWindow"] : undefined }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="">自动判断</option><option value="24h">最新</option><option value="3d">最近 3 天</option><option value="7d">最近 7 天</option><option value="30d">最近一个月</option></select></label>
               <label><span className="text-sm font-black">来源偏好</span><select value={options.sourcePreference ?? "auto"} onChange={(event) => setOptions((current) => ({ ...current, sourcePreference: event.target.value as NaturalResearchOptions["sourcePreference"] }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="auto">自动选择</option><option value="official">优先官方和一手来源</option><option value="domestic">优先中文/国内来源</option><option value="global">优先全球来源</option></select></label>
               <label><span className="text-sm font-black">地区</span><input value={options.region ?? ""} onChange={(event) => setOptions((current) => ({ ...current, region: event.target.value }))} placeholder="例如：中国、美国、全球；不填则自动判断" className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none" /></label>
@@ -779,14 +818,20 @@ function FilterBuilder({
 
 function ResearchPromptPanel({
   initialQuery = "",
+  initialSources = [],
+  onSourcesSave,
   loading,
   onSubmit,
 }: {
   initialQuery?: string;
+  initialSources?: string[];
+  onSourcesSave?: (urls: string[]) => Promise<void>;
   loading: boolean;
   onSubmit: (draft: OnboardingDraft) => void;
 }) {
   const [query, setQuery] = useState(initialQuery);
+  const [sources, setSources] = useState(initialSources.join("\n"));
+  const [sourceError, setSourceError] = useState("");
   const [options, setOptions] = useState<NaturalResearchOptions>({
     sourcePreference: "auto",
     reliabilityPreference: "balanced",
@@ -798,7 +843,10 @@ function ResearchPromptPanel({
   ];
   const submit = () => {
     const draft = inferNaturalResearchDraft(query, options);
-    onSubmit({ ...emptyFilterDraft, ...draft });
+    const parsed = parseCustomSources(sources);
+    if (parsed.errors.length) { setSourceError(parsed.errors[0]); return; }
+    setSourceError("");
+    onSubmit({ ...emptyFilterDraft, ...draft, customSources: parsed.urls });
   };
 
   return (
@@ -826,7 +874,9 @@ function ResearchPromptPanel({
       <details className="mt-4 rounded-2xl border border-[#e4e7eb] bg-white/60 p-4">
         <summary className="min-h-10 cursor-pointer list-none text-sm font-black text-[#2359ff]">更多筛选</summary>
         <div className="mt-4 grid gap-4">
-          <label><span className="text-sm font-black">时间范围</span><select value={options.freshnessWindow ?? ""} onChange={(event) => setOptions((current) => ({ ...current, freshnessWindow: event.target.value ? event.target.value as InformationFilter["freshnessWindow"] : undefined }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="">自动判断</option><option value="24h">最新</option><option value="3d">最近 3 天</option><option value="7d">最近 7 天</option><option value="30d">最近一个月</option></select></label>
+          <CustomSourcesEditor value={sources} onChange={setSources} disabled={loading} onSave={onSourcesSave} />
+              {sourceError && <p role="alert" className="text-xs text-[#ad3342]">{sourceError}</p>}
+              <label><span className="text-sm font-black">时间范围</span><select value={options.freshnessWindow ?? ""} onChange={(event) => setOptions((current) => ({ ...current, freshnessWindow: event.target.value ? event.target.value as InformationFilter["freshnessWindow"] : undefined }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="">自动判断</option><option value="24h">最新</option><option value="3d">最近 3 天</option><option value="7d">最近 7 天</option><option value="30d">最近一个月</option></select></label>
           <label><span className="text-sm font-black">来源偏好</span><select value={options.sourcePreference ?? "auto"} onChange={(event) => setOptions((current) => ({ ...current, sourcePreference: event.target.value as NaturalResearchOptions["sourcePreference"] }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="auto">自动选择</option><option value="official">优先官方和一手来源</option><option value="domestic">优先中文/国内来源</option><option value="global">优先全球来源</option></select></label>
           <label><span className="text-sm font-black">地区</span><input value={options.region ?? ""} onChange={(event) => setOptions((current) => ({ ...current, region: event.target.value }))} placeholder="例如：中国、美国、全球；不填则自动判断" className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none" /></label>
           <label><span className="text-sm font-black">排除关键词</span><input value={options.excludeKeywords ?? ""} onChange={(event) => setOptions((current) => ({ ...current, excludeKeywords: event.target.value }))} placeholder="不想看的词，用逗号隔开" className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none" /></label>
@@ -936,6 +986,15 @@ export default function HomePage() {
         activeContext.researchContextRevision,
       )
     : null;
+  const contextNotice = activeContext && activeFilterId
+    ? todayContextNotice({
+        loading,
+        error,
+        filterId: activeFilterId,
+        researchContextRevision: activeContext.researchContextRevision,
+        previousRun: lastRunByFilterId[activeFilterId] ?? null,
+      })
+    : null;
   const knowledge = useMemo<KnowledgeView>(() => activeContext && activeKnowledge
     ? { ...activeContext, evidenceHistory: activeKnowledge.evidenceHistory }
     : {
@@ -1015,6 +1074,24 @@ export default function HomePage() {
     setFilters((current) => current.map((filter) => filter.id === activeFilterId ? nextFilter : filter));
     setKnowledgeByFilterId({ ...nextKnowledgeByFilterId, [activeFilterId]: nextKnowledge });
   }, [activeFilter, activeFilterId, activeKnowledge, filters, knowledge, knowledgeByFilterId, profile]);
+  const saveSources = useCallback(async (urls: string[]) => {
+    if (!activeFilter || !activeKnowledge || !activeFilterId || loading) throw new Error("No active filter");
+    const update = updateFilterResearchConfig(activeFilter, activeKnowledge, { customSources: urls }, new Date().toISOString());
+    await saveFilterSources({
+      filterId: activeFilterId,
+      filterEntry: update.filter,
+      knowledgeFilterId: activeFilterId,
+      knowledgeEntry: update.knowledge,
+    });
+    setFilters(current => current.map(filter => filter.id === activeFilterId ? { ...filter, customSources: urls, updatedAt: update.filter.updatedAt } : filter));
+    setKnowledgeByFilterId(current => {
+      const latest = current[activeFilterId] ?? activeKnowledge;
+      return { ...current, [activeFilterId]: update.knowledge === activeKnowledge ? latest : {
+        ...latest, researchContextRevision: latest.researchContextRevision + 1, updatedAt: update.knowledge.updatedAt,
+      } };
+    });
+  }, [activeFilter, activeFilterId, activeKnowledge, filters, knowledgeByFilterId, loading]);
+
   const navigate = (nextPage: Page) => {
     window.scrollTo({ top: 0, behavior: "auto" });
     setPage(nextPage);
@@ -1035,7 +1112,7 @@ export default function HomePage() {
           const request = await fetch(url, requestInit);
           if (!request.ok) {
             const body = await request.json().catch(() => null) as { error?: string; reason?: string } | null;
-            const message = body?.error || body?.reason || "Live Web 暂时不可用";
+            const message = body?.reason || body?.error || "Live Web 暂时不可用";
             throw Object.assign(new Error(message), { status: request.status });
           }
           return (await request.json()) as InformationRunPayload;
@@ -1207,7 +1284,7 @@ export default function HomePage() {
   }, [experienceFeedback, hydrated]);
 
   const signals = useMemo(() => response?.signals || [], [response]);
-  const todayPresentation = useMemo(() => selectTodayPresentation(signals), [signals]);
+  const todayPresentation = useMemo(() => selectTodayPresentation(signals, response?.queryPlan?.requestedFreshnessWindow), [signals, response]);
   const mustRead = todayPresentation.mustRead;
   const worthWatching = todayPresentation.worthWatching;
   const usableUpdates = todayPresentation.usableUpdates;
@@ -1244,7 +1321,7 @@ export default function HomePage() {
   const applyFeedback = useCallback(
     (event: ResearchSignal, feedback: Feedback) => {
       setKnowledge((current) => {
-        const sourceTitle = event.originalTitle || event.title;
+        const sourceTitle = (event.originalTitle || event.title).replace(/\s*\r?\n\s*/g, " ").trim();
         const next = { ...current };
         if (feedback === "already_knew") {
           next.knownInformation = unique([...current.knownInformation, sourceTitle]);
@@ -1293,7 +1370,7 @@ export default function HomePage() {
           },
         ]);
       }
-      setSelected(null);
+      // Keep the detail mounted so the pending/save outcome remains visible.
     },
     [saveEvent, setKnowledge],
   );
@@ -1368,10 +1445,22 @@ export default function HomePage() {
         filterName: draft.filterName.trim() || filterUpdate.filter.filterName,
         updatedAt: now,
       };
+      // Topic switch: when the user asks a different question on the same
+      // page, the old question gap/entity echo must not leak into the new
+      // research context (it produced residue inside an unrelated paper
+      // request). Refinements of the same question still merge, preserving
+      // accumulated context.
+      const newQuestion = draft.currentQuestions[0]?.trim() ?? "";
+      const currentQuestion = activeKnowledge.currentQuestions[0]?.trim() ?? "";
+      const isTopicSwitch = Boolean(newQuestion) && newQuestion !== currentQuestion;
       const nextKnowledge = updateResearchContext(filterUpdate.knowledge, {
         currentQuestions: draft.currentQuestions,
-        informationGaps: unique([...activeKnowledge.informationGaps, ...draft.informationGaps]),
-        trackedEntities: unique([...activeKnowledge.trackedEntities, ...draft.trackedEntities]),
+        informationGaps: isTopicSwitch
+          ? draft.informationGaps
+          : unique([...activeKnowledge.informationGaps, ...draft.informationGaps]),
+        trackedEntities: isTopicSwitch
+          ? draft.trackedEntities
+          : unique([...activeKnowledge.trackedEntities, ...draft.trackedEntities]),
       }, now);
       const nextContext = composeActiveKnowledgeContext(profile, nextFilter, nextKnowledge);
       setFilters((current) => current.map((filter) => filter.id === activeFilterId ? nextFilter : filter));
@@ -1461,16 +1550,33 @@ export default function HomePage() {
       <ResearchPromptPanel
         key={activeFilter?.id ?? "new"}
         initialQuery={activeContext?.currentQuestions[0] ?? ""}
+        initialSources={activeFilter?.customSources ?? []}
+        onSourcesSave={activeFilter ? saveSources : undefined}
         loading={loading}
         onSubmit={startResearch}
       />
+
+      {response?.customSourceChecks?.length ? <section className="mt-5 rounded-2xl border border-[#e4e7eb] bg-white p-4">
+        <h2 className="text-sm font-black">本次自选来源读取情况</h2>
+        <p className="mt-1 text-xs text-[#727b87]">可读取不代表通过筛选，结果仍取决于相关性、时间和证据。</p>
+        <ul className="mt-3 grid gap-2">{response.customSourceChecks.map((check, index) => <li key={`${check.url}-${index}`} className="text-xs leading-5"><p className="break-all font-bold">{check.url}</p><p>{check.reason}</p></li>)}</ul>
+      </section> : null}
 
       <div className="mt-8 flex items-start justify-between gap-4">
         <div>
           <p className="signal-eyebrow">{todayDate}</p>
           <h1 className="signal-display mt-2 text-5xl sm:text-6xl">今日</h1>
-          {!loading && response && (() => {
-            const copy = todayResultCopy(todayPresentation.items.length, response.filteringSummary?.retrievedCount ?? 0);
+          {contextNotice && (
+            <p role="status" className="mt-3 max-w-xl text-sm leading-6 text-[#737c88]">{contextNotice.message}</p>
+          )}
+          {!loading && error && response && (
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+              <p className="text-sm font-bold text-amber-800">本次研究请求失败，以下是上次结果</p>
+              <p className="mt-1 text-xs text-amber-600">{error}</p>
+            </div>
+          )}
+          {!loading && !error && response && (() => {
+            const copy = todayResultCopy(todayPresentation.items.length, response.filteringSummary?.retrievedCount ?? 0, response.filteringSummary?.displayedCount ?? response.signals.length);
             return <><p className="mt-3 text-[22px] font-semibold tracking-[-.045em] text-[#172033]">{copy.headline}</p><p className="mt-3 max-w-xl text-sm leading-6 text-[#737c88]">{copy.supporting}</p></>;
           })()}
         </div>
@@ -1675,7 +1781,7 @@ export default function HomePage() {
                   </p>
                   <h3 className="mt-3 text-base font-black leading-7">{item.currentValue}</h3>
                   <p className="mt-2 text-sm leading-6 text-[#68727f]">
-                    {verificationLabels[(item.provenance.verificationStatus as VerificationStatus) || "verified"] || "已验证"}
+                    {accountKnowledgeVerificationLabel(item)}
                     {typeof item.provenance.reliabilityScore === "number" ? ` · 可靠性 ${item.provenance.reliabilityScore}` : ""}
                   </p>
                   {item.revision.revisionReason && <p className="mt-2 text-sm leading-6 text-[#68727f]">原因：{userFacingReason(item.revision.revisionReason)}</p>}
@@ -1685,7 +1791,7 @@ export default function HomePage() {
                       <div className="mt-2 grid gap-2">
                         {item.supportingEvidence.map((evidence) => (
                           <a key={evidence.id} href={evidence.sourceUrl} target="_blank" rel="noreferrer" className="leading-5 text-[#2359ff]">
-                            {evidence.publisher || "来源"} · {verificationLabels[(evidence.verificationStatus as VerificationStatus) || "verified"] || "已验证"}
+                            {evidence.publisher || "来源"} · {verificationLabels[evidence.verificationStatus as VerificationStatus] || "未标注验证状态"}
                           </a>
                         ))}
                       </div>
@@ -1856,6 +1962,29 @@ export default function HomePage() {
     );
   };
 
+  const persistFeedback = useCallback(async (value: Feedback, event: ResearchSignal) => {
+    if (!["already_knew", "not_useful", "changed_view", "monitor"].includes(value)) {
+      return { ok: true, skipped: true };
+    }
+    try {
+      const response = await fetch("/api/control/knowledge", {
+        method: "POST",
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: value, sourceTitle: (event.originalTitle || event.title).replace(/\s*\r?\n\s*/g, " ").trim() }),
+      });
+      const body = await response.json().catch(() => null) as { scope?: string; error?: string; code?: string } | null;
+      return {
+        ok: response.ok,
+        scope: body?.scope,
+        errorCode: response.ok ? undefined : (body?.code ?? body?.error ?? `HTTP_${response.status}`),
+      };
+    } catch (error) {
+      return { ok: false, errorCode: String(error).slice(0, 80) };
+    }
+  }, []);
+
   if (!hydrated) {
     return (
       <div className="signal-shell grid min-h-screen place-items-center text-[#172033]">
@@ -1875,6 +2004,7 @@ export default function HomePage() {
       />
     );
   }
+
 
   return (
     <div className="signal-shell text-[#172033]">
@@ -1923,6 +2053,7 @@ export default function HomePage() {
         </div>
       </nav>
 
+
       {selected && (
         <EventDetail
           event={selected}
@@ -1931,6 +2062,7 @@ export default function HomePage() {
           onClose={() => setSelected(null)}
           onSave={(note) => saveEvent(selected, note)}
           onFeedback={(value) => applyFeedback(selected, value)}
+          onFeedbackPersist={persistFeedback}
         />
       )}
       {focusOpen && mustRead.length > 0 && (

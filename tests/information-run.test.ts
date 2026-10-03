@@ -23,6 +23,21 @@ function run(overrides: Partial<InformationRun> = {}): InformationRun {
   return { ...payload(), filterId: "ai", generatedFromResearchContextRevision: 3, ...overrides };
 }
 
+test("HTTP-success payload with failed agent status is rejected, without demo substitution", async () => {
+  let demoCalls = 0;
+  await assert.rejects(runInformation({
+    filterId: "ai", researchContextRevision: 3,
+    runLive: async () => payload({ ...({ status: "failed", requestId: "signals-failed" } as object) }),
+    runDemo: async () => { demoCalls++; return payload({ dataMode: "demo" }); },
+  }), /本次研究未完成/);
+  assert.equal(demoCalls, 0);
+});
+
+test("failed historical run is never selected as current successful results", () => {
+  const failed = run({ ...({ status: "failed" } as object) });
+  assert.equal(selectCurrentInformationRun({ ai: failed }, "ai", 3), null);
+});
+
 test("run is current only for matching filter and revision", () => {
   assert.equal(isInformationRunCurrent(run(), "ai", 3), true);
   assert.equal(isInformationRunCurrent(run(), "fashion", 3), false);

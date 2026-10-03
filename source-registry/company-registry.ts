@@ -1,6 +1,7 @@
 import type { CompanySourceProfile } from "./types.ts";
+import { loadSourceExtensions, mergeCompanyRegistry } from "./config-loader.ts";
 
-export const companySourceRegistry: CompanySourceProfile[] = [
+const defaultCompanySourceRegistry: CompanySourceProfile[] = [
   {
     company: "OpenAI",
     aliases: ["openai", "codex", "chatgpt"],
@@ -73,4 +74,23 @@ export const companySourceRegistry: CompanySourceProfile[] = [
     docsUrls: ["https://api-docs.deepseek.com/"],
     githubOrgs: ["deepseek-ai"],
   },
+  {
+    company: "ComfyUI",
+    aliases: ["comfyui", "comfy ui", "comfyanonymous"],
+    domains: ["comfy.org"],
+    changelogUrls: ["https://github.com/comfyanonymous/ComfyUI/releases"],
+    newsroomUrls: [],
+    docsUrls: ["https://docs.comfy.org/"],
+    githubOrgs: ["comfyanonymous"],
+  },
 ];
+
+// Merge user-configured source extensions (source-registry/sources.json) into
+// the default registry. Config is loaded once at module import time; changes
+// require a restart or rebuild to take effect. Invalid or missing config
+// falls back to defaults only.
+const extensions = loadSourceExtensions();
+export const companySourceRegistry: CompanySourceProfile[] = mergeCompanyRegistry(
+  defaultCompanySourceRegistry,
+  extensions.entities,
+);

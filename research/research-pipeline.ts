@@ -1,3 +1,5 @@
+import { parseCustomSources, type CustomSourceCheck } from "../lib/custom-sources.ts";
+import { readCustomSource } from "../source-enrichment/custom-source.ts";
 import { socialAccessLayer, type LiveItem } from "../social/providers/index.ts";
 import { deduplicateSocialEvidence } from "../social/evidence-dedup.ts";
 import {
@@ -73,6 +75,7 @@ import type {
 type ProgressHandler = (progress: PipelineProgress) => void | Promise<void>;
 
 export type ResearchPipelineDebug = {
+  customSourceReader?: typeof readCustomSource;
   onCandidateSelectionAudit?: (audit: CandidateSelectionAudit[]) => void;
   onEligibilityAudit?: (audit: EligibilityAuditFunnel) => void;
   onPhase?: (event: { phase: string; round?: number; attemptId?: string; attemptType?: "primary" | "fallback" | "verification"; success?: boolean; itemCount?: number; errorCode?: string; diagnostic?: Record<string, unknown> }) => void;
@@ -134,11 +137,14 @@ function validRetrievalQueries(plan?: RetrievalPlan | LegacySourceSelection) {
   return [...new Set(plan.queries.map((query) => query.trim()).filter(Boolean))];
 }
 
-function normalizeRetrievalFreshness(value?: string): QueryPlan["requestedFreshnessWindow"] {
+export function normalizeRetrievalFreshness(value?: string): QueryPlan["requestedFreshnessWindow"] {
   const raw = value?.trim().toLowerCase() || "7d";
+  // Order matters: the 30d/month window must be tested before the single-digit
+  // "3" branch, otherwise "30d" is truncated to 3d and a one-month question
+  // silently searches only the last three days.
+  if (raw.includes("30") || raw.includes("month") || raw.includes("月")) return "30d";
   if (raw.includes("24") || raw.includes("day") || raw.includes("today") || raw.includes("小时")) return "24h";
   if (raw.includes("3")) return "3d";
-  if (raw.includes("30") || raw.includes("month") || raw.includes("月")) return "30d";
   return "7d";
 }
 
@@ -754,6 +760,14 @@ function primaryDomains(plan: QueryPlan) {
   if (/IPO|上市|纳指|Nasdaq|股票|投资|证券|募资|财报/i.test(need)) {
     return "(site:sec.gov OR site:nasdaq.com OR site:nyse.com OR site:investor.* OR \"Investor Relations\")";
   }
+  // Video editing / creator-tool questions: the AI vendor whitelist above
+  // excludes the whole editing ecosystem, so a short primary query plus that
+  // whitelist returned zero results. These are the industry's first-hand
+  // vendor domains (changelogs/release notes live there); candidates still
+  // have to pass topic relevance and freshness downstream.
+  if (/视频|剪辑|粗剪|镜头|video edit|rough cut|video workflow/i.test(need)) {
+    return "(site:adobe.com OR site:helpx.adobe.com OR site:blackmagicdesign.com OR site:apple.com OR site:descript.com OR site:descript.canny.io OR site:runway.com OR site:topazlabs.com OR site:pika.art OR site:opusclip.canny.io OR site:firecut.ai OR site:timebolt.io)";
+  }
   if (/AI|人工智能|大模型|Codex|Agent|开发|软件/i.test(need)) {
     return "(site:openai.com OR site:anthropic.com OR site:blog.google OR site:ai.google.dev OR site:github.com OR site:seed.bytedance.com OR site:runwayml.com OR site:microsoft.com)";
   }
@@ -808,7 +822,18 @@ function shortQueryFor(plan: QueryPlan, providerId: string, limit = 3): string {
   const keywords = retrievalTopicKeywords(plan);
   const short = keywords.filter((value) => value.split(/\s+/).length <= 3);
   const pool = short.length ? short : keywords.slice(0, limit);
-  const picked = pool.slice(0, limit).join(" ");
+  // Cap by total words (not item count): two 2-word anchors plus a 2-word
+  // modifier would otherwise exceed the short-query budget this function
+  // exists for.
+  const pickedWords: string[] = [];
+  for (const value of pool) {
+    for (const word of value.split(/\s+/)) {
+      if (pickedWords.length >= limit * 2) break;
+      pickedWords.push(word);
+    }
+    if (pickedWords.length >= limit * 2) break;
+  }
+  const picked = pickedWords.join(" ");
   const modifier = (
     {
       "hacker-news": "workflow tool",
@@ -818,9 +843,54 @@ function shortQueryFor(plan: QueryPlan, providerId: string, limit = 3): string {
   return [...new Set([picked, modifier].filter(Boolean))].join(" ").trim();
 }
 
+export // Primary (official / first-hand) queries must stay short: joining every task
+// anchor into one bag ("AI video editing automated rough cut multi-asset
+// understanding shot selection …") matched nothing in the real run — search
+// engines treat long conjunction bags as AND-ish filters. Each variant keeps
+// at most one task anchor plus a release/official intent word, so the
+// release-update intent and the official-source condition survive without
+// fusing anchors.
+const PRIMARY_QUERY_MAX_WORDS = 6;
+
+function shortPrimaryQuery(topic: string, intent: string): string {
+  return [...new Set([topic, intent].filter(Boolean))].join(" ").trim();
+}
+
+export function providerQueryFor(plan: QueryPlan, providerId: string): string {
+  const query = providerQuery(plan, providerId);
+  return query;
+}
+
+providerQueryFor.all = function primaryQueryVariants(plan: QueryPlan, providerId: string): string[] {
+  if (providerId !== "primary-web-search") {
+    const single = providerQuery(plan, providerId);
+    return single ? [single] : [];
+  }
+  const topics = retrievalTopicKeywords(plan);
+  const shortTopics = topics.filter((topic) => topic.split(/\s+/).length <= 3);
+  const anchors = (shortTopics.length ? shortTopics : topics.slice(0, 4)).slice(0, 4);
+  const intents = ["release update", "official changelog", "launch announcement"];
+  const variants: string[] = [];
+  for (const topic of anchors) {
+    for (const intent of intents) {
+      const query = shortPrimaryQuery(topic, intent);
+      if (query.split(/\s+/).length <= PRIMARY_QUERY_MAX_WORDS + 2) variants.push(query);
+    }
+    variants.push(shortPrimaryQuery(topic, ""));
+  }
+  return [...new Set(variants)].filter(Boolean).slice(0, 8);
+};
+
 export function providerQuery(plan: QueryPlan, providerId: string, fallbackQuery?: string) {
   if (providerId === "hacker-news" || providerId === "huggingface") {
     return shortQueryFor(plan, providerId, 2);
+  }
+  if (providerId === "primary-web-search") {
+    // Prefer one short anchor + one intent word; never fuse every anchor.
+    const topics = retrievalTopicKeywords(plan);
+    const shortTopic = topics.find((topic) => topic.split(/\s+/).length <= 3) || topics[0] || "";
+    const intent = (shortQueryFor(plan, "primary-web-search", 0) || "release update").split(/\s+/).slice(0, 2).join(" ");
+    return shortPrimaryQuery(shortTopic, /release|update|official|launch|changelog|发布|更新/i.test(shortTopic) ? "" : intent);
   }
   const topics = retrievalTopicKeywords(plan).slice(0, 4);
   const topic = topics.join(" ");
@@ -1078,9 +1148,13 @@ function titleTokens(title: string) {
   const parts = title
     .toLowerCase()
     .replace(/\b(reuters|bloomberg|cnbc|wsj|financial times|sec\.gov)\b/g, "")
-    .split(/[^\p{L}\p{N}]+/u)
+    .split(/[^\p{L}\p{N}.]+/u)
     .filter(Boolean);
   const tokens = parts.flatMap((part) => {
+    // Version identifiers ("v0.37.0") are the discriminative part of release
+    // titles; keeping them intact lets distinct releases stay distinct events
+    // instead of collapsing into one "duplicate" cluster.
+    if (/^v?\d+(?:\.\d+)+$/.test(part)) return [part];
     if (/[\p{Script=Han}]/u.test(part) && part.length > 3) {
       return Array.from(part)
         .slice(0, -1)
@@ -1096,6 +1170,16 @@ function titleTokens(title: string) {
 }
 
 function sameEvent(a: ResearchCandidate, b: ResearchCandidate) {
+  // Versioned release URLs of the same repo ("/releases/tag/vX.Y.Z") are
+  // distinct events: token overlap on the repo name would otherwise collapse a
+  // whole month of releases into one "duplicate" cluster.
+  const tagPattern = /\/releases\/tag\/([^/?#]+)/i;
+  const leftTag = tagPattern.exec(a.url)?.[1];
+  const rightTag = tagPattern.exec(b.url)?.[1];
+  if (leftTag && rightTag) {
+    const sameBase = a.url.slice(0, a.url.indexOf("/tag/")) === b.url.slice(0, b.url.indexOf("/tag/"));
+    if (sameBase) return leftTag.toLowerCase() === rightTag.toLowerCase();
+  }
   const left = titleTokens(a.title);
   const right = titleTokens(b.title);
   if (!left.size || !right.size) return false;
@@ -1150,11 +1234,15 @@ async function enrichDiscoveryCandidates(
     stillInsufficient: 0,
   };
   const startedAt = Date.now();
+  // One absolute deadline for the whole enrichment share: the per-candidate
+  // loop guard and every search / body fetch inside enrichDetail obey it, so a
+  // wrapper candidate cannot outlive the budget with its own fixed timeouts.
+  const deadlineAt = startedAt + remainingBudgetMs;
   const cache = new Set<string>();
   const candidatesByUrl = new Map(candidates.map((candidate) => [candidate.url, candidate]));
   const eligibleCandidates = [...candidates]
     .filter((candidate) =>
-      shouldEnrichDetail({
+      candidate.providerId !== "custom-sources" && shouldEnrichDetail({
         providerId: candidate.providerId,
         title: candidate.title,
         snippet: candidate.snippet,
@@ -1188,10 +1276,14 @@ async function enrichDiscoveryCandidates(
       canonicalId: candidate.id,
       url: candidate.url,
       title: candidate.title,
+      deadlineAt,
       metadata: {
         source: candidate.source,
         snippet: candidate.snippet,
         publishedAt: candidate.publishedAt,
+        // Publisher origin from the feed (<source url>) — the resolver needs it
+        // to locate the real article behind a Google News wrapper URL.
+        publisherUrl: candidate.publisherUrl,
       },
     });
     const existing = candidatesByUrl.get(candidate.url);
@@ -1213,6 +1305,9 @@ async function enrichDiscoveryCandidates(
       summary.detailFailed += 1;
       failures.push(`${candidate.source}: 详情页抓取失败，已保留 discovery candidate。`);
     }
+    // Actual HTTP calls (a wrapper candidate spends one search + one body
+    // fetch) are kept separate from the candidate count above.
+    summary.detailFetchCalls = (summary.detailFetchCalls ?? 0) + (result.fetchCalls ?? 0);
   }
 
   return { candidates, summary, eligibleByProvider };
@@ -1273,6 +1368,8 @@ export async function runResearchPipeline(
   let scanned = 0;
   let counts = emptyCounts();
   const sourceOutcomes: SourceExecutionOutcome[] = [];
+  const customSourceChecks: CustomSourceCheck[] = [];
+  const customSources = parseCustomSources(input.customSources);
   const markPhase = (phase: string, success = true, itemCount?: number, errorCode?: string, diagnostic?: Record<string, unknown>) =>
     debug?.onPhase?.({ phase, success, itemCount, errorCode, diagnostic });
   const remainingMs = () => Math.max(0, (debug?.deadlineAt ?? Date.now() + 30000) - Date.now());
@@ -1349,9 +1446,16 @@ export async function runResearchPipeline(
   });
 
   const domains = primaryDomains(plan);
-  const primaryQueries = providerQueries(plan, "primary-web-search", plan.searchCombinations
+  // Primary channel uses short per-anchor variants (one anchor + release/
+  // official intent). The official-domain condition and source hint are kept
+  // on every variant, so shortening never drops the first-hand requirement.
+  // Request budget unchanged: still capped at 5 queries.
+  const primaryQueries = (providerQueryFor.all(plan, "primary-web-search").length
+    ? providerQueryFor.all(plan, "primary-web-search")
+    : providerQueries(plan, "primary-web-search", plan.searchCombinations.slice(0, 5), 5)
+  )
     .slice(0, 5)
-    .map((query) => `${query}${sourceHint} ${domains}`), 5);
+    .map((query) => `${query}${sourceHint} ${domains}`);
   const primaryWebEnabled = canExecute("primary-web-search");
   markPhase("search_started", true, undefined, undefined, {
     selectedSourceType: plan.selectedSourceType,
@@ -1372,7 +1476,8 @@ export async function runResearchPipeline(
     resolvedEntities: plan.resolvedEntities?.slice(0, 10),
     providerPlan: searchProviderPlan(),
   });
-  const [primaryResult, companyRegistryResult, githubReleaseResult, officialUpdatePageResult] = await Promise.all([
+  const [customSourceResults, primaryResult, companyRegistryResult, githubReleaseResult, officialUpdatePageResult] = await Promise.all([
+    Promise.all(customSources.urls.map(url => (debug?.customSourceReader ?? readCustomSource)(url, { deadlineAt: debug?.deadlineAt }))),
     primaryWebEnabled
       ? searchQueries(primaryQueries, "primary", plan, failures, windowDays)
       : Promise.resolve(emptySearchResult()),
@@ -1386,6 +1491,34 @@ export async function runResearchPipeline(
       ? discoverOfficialUpdatePages(plan.entities)
       : Promise.resolve({ items: [], outcome: { source: "Official Update Pages", execution: "not_searched" as const, searched: false, resultCount: 0 }, failure: undefined }),
   ]);
+  const customCandidates: ResearchCandidate[] = [];
+  for (const result of customSourceResults) {
+    const { content, ...check } = result;
+    customSourceChecks.push(check);
+    if (result.status !== "readable" || !content) continue;
+    const url = result.canonicalUrl ?? result.url;
+    const retrievedAt = new Date().toISOString();
+    const item: ResearchCandidate = {
+      id: `custom-source-${encodeURIComponent(url)}`, url,
+      title: result.title || new URL(url).hostname, snippet: content,
+      source: `用户添加 · ${new URL(url).hostname}`, publishedAt: result.publishedAt,
+      firstSeenAt: retrievedAt, retrievedAt, dataOrigin: "live", channel: "社区",
+      authority: 60, origin: "community", sourceType: "industry_media",
+      providerId: "custom-sources", sourceCapability: "EVIDENCE", enrichedRawContent: content,
+    };
+    if (relevant(item, plan)) customCandidates.push(item);
+    else check.reason = "正文可读取，但与本次问题不相关，未进入候选。";
+  }
+  if (customSourceChecks.length || customSources.errors.length) {
+    sourceOutcomes.push({source: "用户添加的来源", providerId: "custom-sources",
+      searched: customSourceChecks.some(result => result.requestCount > 0),
+      execution: customCandidates.length ? "searched_with_results" : customSourceChecks.some(result => result.status === "readable") ? "searched_no_results" : customSourceChecks.some(result => result.requestCount > 0) ? "failed" : "not_searched",
+      resultCount: customCandidates.length, rawResultCount: customSourceResults.filter(result => result.status === "readable").length,
+      requestCount: customSourceResults.reduce((sum, result) => sum + result.requestCount, 0),
+    });
+  }
+  failures.push(...customSources.errors.map(reason => `用户添加的来源: ${reason}`));
+  scanned += customSourceResults.filter(result => result.status === "readable").length;
   if (githubReleaseResult.failure) failures.push(githubReleaseResult.failure);
   if (officialUpdatePageResult.failure) failures.push(officialUpdatePageResult.failure);
   const primary = unique([
@@ -1646,6 +1779,7 @@ export async function runResearchPipeline(
 
   markPhase("detail_fetch_started");
   let discoveredCandidates = unique([
+    ...customCandidates,
     ...allPrimary,
     ...arxivResult.items,
     ...trustedMedia,
@@ -1717,17 +1851,29 @@ export async function runResearchPipeline(
       };
     }
   }
+  // Enrichment budget: reserved share plus a small floor so late-discovered
+  // relevant candidates still get their canonical fetch when any time remains.
+  // The floor is clamped to the actual remaining time — an exhausted deadline
+  // still yields 0 and skips all fetches (honest degradation, no new fetches).
+  const enrichmentBudgetMs = Math.min(
+    12000,
+    Math.max(
+      remainingMs() > POST_PROCESSING_RESERVE_MS ? remainingMs() - POST_PROCESSING_RESERVE_MS : 0,
+      remainingMs() > 0 ? 3000 : 0,
+    ),
+  );
   const { candidates, summary: detailEnrichment, eligibleByProvider } = await enrichDiscoveryCandidates(
     discoveredCandidates,
     plan,
     failures,
-    Math.min(12000, Math.max(0, remainingMs() - POST_PROCESSING_RESERVE_MS)),
+    enrichmentBudgetMs,
   );
   markPhase("detail_fetch_finished", true, detailEnrichment.detailSucceeded, undefined, {
     detailAttempted: detailEnrichment.detailAttempted,
     detailSucceeded: detailEnrichment.detailSucceeded,
     detailFailed: detailEnrichment.detailFailed,
     stillInsufficient: detailEnrichment.stillInsufficient,
+    detailFetchCalls: detailEnrichment.detailFetchCalls ?? 0,
   });
   markPhase("aggregation_started");
   await emit({
@@ -1749,6 +1895,15 @@ export async function runResearchPipeline(
   markPhase("evidence_started");
   const gapTerms = filterTerms(input.informationGaps);
   const questionTerms = filterTerms(input.currentQuestions).filter((term) => !isGenericQuestionTerm(term));
+  // Software-specific presentation wording (upgrade value / license / cost /
+  // hardware) requires explicit software-release signals in the user's own
+  // question. Generic words like 发布/更新/版本 alone — or a PRODUCT_UPDATE
+  // intent — also occur in ordinary announcements, so they never qualify on
+  // their own; ambiguous contexts stay neutral.
+  const upgradeContext =
+    /\bgithub\b|\bchangelog\b|\brelease notes?\b|版本号|\bv\d+(?:\.\d+)+\b/i.test(input.currentQuestions || "") ||
+    (/升级|upgrade/i.test(input.currentQuestions || "") &&
+      /软件|应用|工具|程序|系统|插件|扩展|驱动|固件|github|版本|version|release/i.test(input.currentQuestions || ""));
   const focusAreaTerms = filterTerms(input.focusAreas);
   const trackedEntityTerms = entityFilterTerms(input.trackedEntities).filter(
     (term) =>
@@ -1757,7 +1912,13 @@ export async function runResearchPipeline(
       ),
   );
   const trackedEventTerms = filterTerms(input.trackedEvents);
-  const judgementTerms = filterTerms(input.userJudgements);
+  // Feedback labels are metadata, not matching terms. A view update is not a
+  // negative judgement; unmarked handwritten judgements keep their prior path.
+  const judgementTerms = filterTerms(input.userJudgements
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*Changed after evidence\s*:/i.test(line))
+    .map((line) => line.replace(/^\s*Not useful\s*:\s*/i, ""))
+    .join("\n"));
   const evaluatedCandidates = eventClusters
     .map((cluster) => {
       const ordered = [...cluster].sort((a, b) => {
@@ -1959,6 +2120,7 @@ export async function runResearchPipeline(
           userContext: { questionMatches, gapMatches, entityMatches },
           cleaned,
           claim,
+          upgradeContext,
         });
         return { candidate, cleaned, claim, presentation };
       });
@@ -2140,6 +2302,9 @@ export async function runResearchPipeline(
         informationType,
         knownMatches: knownMatches.map((match) => match.knownInformationItem),
         evidenceText: ordered.map((candidate) => candidate.snippet).join(" "),
+        eventAgeHours: eventFreshness.ageHours,
+        requestedFreshnessHours: freshnessWindowHours(input.freshnessWindow),
+        changeStatement: primaryPresentation?.changeStatement,
       });
       const protectedReasons: ProtectedReason[] = [
         ...(entityMatches.length ? ["tracked_entity" as const] : []),
@@ -2512,7 +2677,7 @@ export async function runResearchPipeline(
   const coverage = buildSourceCoverage(sourceOutcomes);
   const sourceOutcomesForAgent = coverage.outcomes.map((outcome) => {
     const source = outcome.source.toLowerCase();
-    const sourceType = source.includes("social") || source.includes("reddit") || source.includes("community") || source.includes("hacker news") || source.includes("product hunt")
+    const sourceType = outcome.providerId === "custom-sources" ? "GENERAL_WEB" : source.includes("social") || source.includes("reddit") || source.includes("community") || source.includes("hacker news") || source.includes("product hunt")
       ? "SOCIAL_SIGNAL"
       : source.includes("trusted") || source.includes("industry")
         ? "INDEPENDENT_MEDIA"
@@ -2523,7 +2688,7 @@ export async function runResearchPipeline(
           : source.includes("hugging face")
             ? "GENERAL_WEB"
         : "PRIMARY";
-    const providerId = source.includes("company source")
+    const providerId = outcome.providerId ?? (source.includes("company source")
       ? "company-registry"
       : source.includes("product hunt")
         ? "product-hunt"
@@ -2549,7 +2714,7 @@ export async function runResearchPipeline(
                 ? "public-web"
                 : source.includes("social")
                   ? "social-access"
-                  : "primary-web-search";
+                  : "primary-web-search");
     return {
       sourceType,
       providerId,
@@ -2562,7 +2727,17 @@ export async function runResearchPipeline(
       conflictReduction: 0,
     };
   });
+  for (const check of customSourceChecks) {
+    if (check.status !== "readable") continue;
+    const url = check.canonicalUrl ?? check.url;
+    if (!customCandidates.some(candidate => candidate.url === url)) continue;
+    const included = presentation.signals.some(signal => signal.sourceUrl === url || signal.sources.some(source => source.sourceUrl === url));
+    check.reason = included
+      ? "正文可读取，已进入本次结果；是否属于新变化请结合卡片的日期和状态判断。"
+      : "正文可读取，但未通过本次筛选；请结合筛选统计核对相关性、时间与证据要求。";
+  }
   return {
+    ...(customSourceChecks.length ? { customSourceChecks } : {}),
     signals: presentation.signals,
     status: coverage.outcomes.map((outcome) => ({
       name: outcome.source,

@@ -1,6 +1,7 @@
 import type { LiveItem } from "../social/providers/types.ts";
 import type { SourceExecutionOutcome } from "./source-coverage.ts";
 import { discardResponseBody, throwAfterDiscardingBody } from "../lib/http-response.ts";
+import { loadSourceExtensions, mergeGithubTargets } from "../source-registry/config-loader.ts";
 
 type OfficialUpdateTarget = {
   aliases: string[];
@@ -11,7 +12,7 @@ type OfficialUpdateTarget = {
 // This is deliberately a small product-entity mapping, not a release registry.
 // It gives tracked entities a stable official update surface (release, changelog,
 // or product documentation) in addition to general web discovery.
-const officialUpdateTargets: OfficialUpdateTarget[] = [
+const defaultOfficialUpdateTargets: OfficialUpdateTarget[] = [
   {
     aliases: ["openai", "codex"],
     githubRepos: ["openai/codex"],
@@ -31,7 +32,19 @@ const officialUpdateTargets: OfficialUpdateTarget[] = [
     aliases: ["deepseek", "deep seek"],
     githubRepos: ["deepseek-ai/DeepSeek-V3"],
   },
+  {
+    aliases: ["comfyui", "comfy ui"],
+    githubRepos: ["comfyanonymous/ComfyUI"],
+  },
 ];
+
+// Merge user-configured targets (source-registry/sources.json) into the
+// defaults. Loaded once at module import; changes require restart/rebuild.
+const sourceExtensions = loadSourceExtensions();
+const officialUpdateTargets: OfficialUpdateTarget[] = mergeGithubTargets(
+  defaultOfficialUpdateTargets,
+  sourceExtensions.entities,
+);
 
 type Fetcher = typeof fetch;
 
@@ -73,30 +86,22 @@ function updatePagePublishedAt(html: string) {
   return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
 }
 
-async function githubLatestRelease(repo: string, fetcher: Fetcher): Promise<LiveItem | null> {
-  const retrievedAt = new Date().toISOString();
-  const response = await fetcher(`https://api.github.com/repos/${repo}/releases/latest`, {
-    headers: {
-      Accept: "application/vnd.github+json",
-      "User-Agent": "SignalMapResearch/0.5",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-    signal: AbortSignal.timeout(10000),
-  });
-  if (response.status === 404) {
-    await discardResponseBody(response);
-    return null;
-  }
-  if (!response.ok) await throwAfterDiscardingBody(response, new Error(`GitHub returned ${response.status}`));
-  const release = (await response.json()) as {
-    id: number;
-    name?: string;
-    tag_name: string;
-    html_url: string;
-    body?: string;
-    published_at?: string;
-    created_at?: string;
-  };
+// The releases list endpoint (newest first) preserves every release inside the
+// requested freshness window, not only the latest one. A "latest-only" call
+// made a "releases in the last month" question answer with a single version.
+const GITHUB_RELEASE_LIST_LIMIT = 10;
+
+type GithubReleasePayload = {
+  id: number;
+  name?: string;
+  tag_name: string;
+  html_url: string;
+  body?: string;
+  published_at?: string;
+  created_at?: string;
+};
+
+function releaseItem(repo: string, release: GithubReleasePayload, retrievedAt: string): LiveItem {
   const publishedAt = release.published_at || release.created_at;
   return {
     id: `github-release-${release.id}`,
@@ -115,12 +120,37 @@ async function githubLatestRelease(repo: string, fetcher: Fetcher): Promise<Live
   };
 }
 
+async function githubRecentReleases(repo: string, fetcher: Fetcher): Promise<LiveItem[]> {
+  const retrievedAt = new Date().toISOString();
+  const response = await fetcher(`https://api.github.com/repos/${repo}/releases?per_page=${GITHUB_RELEASE_LIST_LIMIT}`, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      "User-Agent": "SignalMapResearch/0.5",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (response.status === 404) {
+    await discardResponseBody(response);
+    return [];
+  }
+  if (!response.ok) await throwAfterDiscardingBody(response, new Error(`GitHub returned ${response.status}`));
+  const releases = (await response.json()) as GithubReleasePayload[];
+  if (!Array.isArray(releases)) return [];
+  return releases.map((release) => releaseItem(repo, release, retrievedAt));
+}
+
 export async function discoverOfficialGithubReleases(
   entities: string[],
   fetcher: Fetcher = fetch,
 ): Promise<{ items: LiveItem[]; outcome: SourceExecutionOutcome; failure?: string }> {
+  const matched = matchedTargets(entities);
+  // A broad query with no tracked entity still falls through to all known
+  // project repos so the downstream relevance filter can select query-matching
+  // results — instead of silently returning zero candidates.
+  const targets = matched.length ? matched : officialUpdateTargets;
   const repos = Array.from(
-    new Set(matchedTargets(entities).flatMap((target) => target.githubRepos || [])),
+    new Set(targets.flatMap((target) => target.githubRepos || [])),
   ).slice(0, 4);
   if (!repos.length) {
     return {
@@ -134,9 +164,9 @@ export async function discoverOfficialGithubReleases(
       },
     };
   }
-  const settled = await Promise.allSettled(repos.map((repo) => githubLatestRelease(repo, fetcher)));
+  const settled = await Promise.allSettled(repos.map((repo) => githubRecentReleases(repo, fetcher)));
   const items = settled.flatMap((result) =>
-    result.status === "fulfilled" && result.value ? [result.value] : [],
+    result.status === "fulfilled" ? result.value : [],
   );
   const succeeded = settled.filter((result) => result.status === "fulfilled").length;
   const failed = settled.length - succeeded;

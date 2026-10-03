@@ -1,6 +1,6 @@
 # Signal Map Project Report
 
-Status date: 2026-09-22. This report records only behavior confirmed in code, tests, or prior calibration traces. It is not a product pitch that upgrades local fixtures into real-world closure.
+Status date: 2026-10-02. This report records only behavior confirmed in code, tests, or prior calibration traces. It is not a product pitch that upgrades local fixtures into real-world closure.
 
 Attribution:
 
@@ -296,6 +296,20 @@ Commands used for the gates in this cycle: `npm test`, `npm run typecheck`, `npm
 | Knowledge update | Wired | duplicate does not double-write | pending | in-memory fixture |
 | Feedback loop | Formal fixture pass (local) | `tests/agent-runner.test.ts` | pending | preference lowers attention; postgres preferences not migrated |
 | Scheduler | Present | scheduler tests exist | not closed | out of scope |
+| V1 Alpha release | **FROZEN** | full suite 422/0/3 + gates | not redeployed | tag `v1.0.0-alpha` = `431418b`; public site reachable, live build version not verifiable |
+
+## 16-bis. V1 Alpha Release and Public Deployment (2026-09)
+
+**V1 frozen.** Tag `v1.0.0-alpha` → commit `431418b` (== local HEAD == origin/master). V1 scope stops at Feedback/Preference semantics; V2 opens the durability/E2E/autonomy work.
+
+- Full suite: 422 passed / 0 failed / 3 skipped.
+- typecheck, lint, api:build, production `npm run build`, `git diff --check`: all PASS.
+- Secret boundary audit (`scripts/audit-public-boundary.mjs`): 331 files scanned, 0 credential matches, 0 client-boundary matches.
+- Database connectivity test: PASS (no credentials printed).
+
+**Public reachability smoke (read-only, no writes).** The existing public site at `https://signal.benzhenlab.com` is reachable: HTTP 200, SSL valid, no redirect; static CSS/JS return 200; unauthenticated `GET /api/control/goals?guest=true` returns **401** (no guest fallback); unauthenticated `POST /api/signals` without required input returns 400 (input validation, no data leak, no stack trace).
+
+**Honest boundary:** the workspace has **no deploy CLI, platform credentials, or upload entry** for `signal.benzhenlab.com`. Therefore the frozen `v1.0.0-alpha` was **not re-deployed from this workspace**, and the live build cannot be confirmed to equal the tag commit. This is a **DEPLOYED WITH KNOWN LIMITATION / NOT VERIFIED** state, not a claim that the frozen build is live.
 
 ## 17. Remaining Roadmap
 
@@ -352,3 +366,28 @@ Role to describe honestly: product direction, system rules, architecture choices
 - Major-change comparison. Conflict is only a local fixture that consumes an already conflicting verification status.
 - Attention calibration.
 - Proof that long-term learning changes later plans beyond the current duplicate block.
+
+## This cycle: dev-validation packaging (2026-10-02)
+
+**Cycle conclusion (dev-validation version packaged and delivered).** V1 Alpha is frozen; the dev-validation version has been packaged and delivered; ComfyUI official-version tracking passed end-to-end acceptance across login state, encrypted database, real research, and browser display. General cross-domain filtering, the feedback cross-session loop, long-term personal growth, and production deployment are still unverified, so the original product vision is not fully realized.
+
+### Test baseline (measured this cycle)
+
+- Full `npm test`: **700 tests, 695 passed, 0 failed, 5 skipped** (V1 freeze: 422/0/3).
+- Full `npm run quality` gate (typecheck / lint / test / knip / deps:check): all green (knip via `KNIP_DISABLE_RAW_TRANSFER=1`; deps:check, no violations).
+
+### What was verified this cycle
+
+- **Encrypted database (production TLS)**: `POSTGRES_SSL=true` with the official Production CA (`certs/prod-ca-2021.crt`); connection-config and TLS contract tests pass.
+- **ComfyUI official-version tracking E2E acceptance**: real frontend → login state → Node backend → real GitHub upstream → encrypted-DB persistence → page display; one real submission produced 12 events, all verified, 1 MUST_READ, 100% novel-information rate (evidence: `docs/reliability/acceptance-final-submission-4.json`).
+- **Minimal fixes this cycle** (no quality gates loosened): GitHub now uses `releases?per_page=10` to cover the whole month's versions (previously `releases/latest`, single version); the 72-hour freshness hard gate became window-aware (verification/reliability/relevance/novelty gates kept); topic switches leave zero residual entities/keywords; platform names are no longer treated as research entities.
+- **Packaged deliverable**: `signal-map-dev-validation-20261002.zip` (2026-10-02 09:36).
+
+### Parts of the original vision still unrealized (honest)
+
+| Unrealized item | Note |
+| --- | --- |
+| General cross-domain filtering | E2E acceptance covers ComfyUI official-version tracking; other domains/intents have no real-E2E evidence |
+| Feedback cross-session loop | Preferences are persisted to Postgres, but "prior feedback → changes later planning" is not closed across sessions |
+| Long-term personal growth | Whether cross-run memory actually changes later planning has evidence only in the DUPLICATE block |
+| Production deployment | No deploy entry in the workspace; live build not verified against the tag; production TLS not fully verified on a real domain |

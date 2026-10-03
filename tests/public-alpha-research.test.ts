@@ -163,14 +163,15 @@ test("background evidence outside a 24h window cannot become must read", async (
   t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => {
     const url = new URL(String(target));
     if (url.hostname === "api.github.com") {
-      return Response.json({
+      // Discovery reads the releases LIST endpoint; wrap the fixture.
+      return Response.json([{
         id: 1,
         name: "Codex workflow update",
         tag_name: "v-test",
         html_url: "https://github.com/openai/codex/releases/tag/v-test",
         body: "A major Codex workflow change with new agent behavior and release details.",
         published_at: publishedAt,
-      });
+      }]);
     }
     return emptyNetworkResponse(target);
   });
@@ -184,14 +185,15 @@ test("authenticated main research enters the existing persistent Agent loop", as
   t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => {
     const url = new URL(String(target));
     if (url.hostname === "api.github.com") {
-      return Response.json({
+      // Discovery reads the releases LIST endpoint; wrap the fixture.
+      return Response.json([{
         id: 2,
         name: "Codex current workflow release",
         tag_name: "v-current",
         html_url: "https://github.com/openai/codex/releases/tag/v-current",
         body: "Codex adds a new documented agent workflow for developers.",
         published_at: new Date().toISOString(),
-      });
+      }]);
     }
     return emptyNetworkResponse(target);
   });
@@ -240,6 +242,31 @@ test("agent failure tracing records sanitized early runAgent exceptions", async 
   assert.ok(failure.topStackFrame);
 });
 
+test("knowledge persistence failure reaches service diagnostics with its real sanitized code", async (t) => {
+  t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => {
+    const url = new URL(String(target));
+    if (url.hostname === "api.github.com") return Response.json([{
+      id: 71, name: "Codex workflow update", tag_name: "v-current",
+      html_url: "https://github.com/openai/codex/releases/tag/v-current",
+      body: "Codex adds a new documented agent workflow for developers.", published_at: new Date().toISOString(),
+    }]);
+    return emptyNetworkResponse(target);
+  });
+  const repository = new InMemorySignalRepository();
+  repository.upsertEvent = () => { throw Object.assign(new Error('database timeout {"password":"hidden-value"}'), { code: "DB_TIMEOUT" }); };
+  const phases: Array<Parameters<NonNullable<Parameters<typeof executeResearch>[0]["onPhase"]>>[0]> = [];
+  const result = await executeResearch({
+    identity: { id: "account-write-failure", mode: "authenticated" }, input,
+    context: { authenticatedUserId: "account-write-failure", filterId: "filter-write-failure" }, repository,
+    onPhase: (event) => { phases.push(event); },
+  });
+  assert.equal(result.status, "failed");
+  const failure = phases.find((event) => event.phase === "agent_failed");
+  assert.equal(failure?.errorCode, "DB_TIMEOUT");
+  assert.match(failure?.errorMessage ?? "", /database timeout/);
+  assert.doesNotMatch(failure?.errorMessage ?? "", /hidden-value/);
+});
+
 test("agent failure summary distinguishes failure results without exposing secrets", () => {
   const summary = summarizeAgentFailure(
     Object.assign(new Error("Agent returned failure result Authorization=Bearer secret-token"), { code: "UNKNOWN_RESEARCH_FAILURE" }),
@@ -259,4 +286,40 @@ test("agent failure summary can label failures after source selection", () => {
   );
   assert.equal(summary.phase, "agent_failed");
   assert.equal(summary.errorCode, "WORKER_DEADLINE");
+});
+
+test("service preserves a pre-search deadline instead of generic source failure", async (t) => {
+  let requests = 0;
+  t.mock.method(globalThis, "fetch", async () => {requests++; throw new Error("unexpected network");});
+  await assert.rejects(executeResearch({identity:{id:"deadline-contract-test",mode:"anonymous"}, input,
+    deadlineAt:Date.now()+500}),
+    (error: unknown) => !!error && typeof error === "object" && "code" in error && error.code === "WORKER_DEADLINE");
+  assert.equal(requests, 0);
+});
+
+test("HTTP deadline is described as timeout rather than source unavailability", async (t) => {
+  const keys = ["SIGNAL_MAP_GUEST_SECRET", "MODEL_PROVIDER", "DEEPSEEK_API_KEY"] as const;
+  const before = keys.map(key => process.env[key]);
+  Object.assign(process.env, {SIGNAL_MAP_GUEST_SECRET:"deadline-test-secret",MODEL_PROVIDER:"deepseek",DEEPSEEK_API_KEY:"test-only"});
+  t.after(() => keys.forEach((key,i) => {if(before[i] === undefined) delete process.env[key]; else process.env[key] = before[i];}));
+  let clock = 4000000;
+  let sources = 0;
+  t.mock.method(Date, "now", () => clock);
+  t.mock.method(console, "info", () => {});
+  t.mock.method(globalThis, "fetch", async (url: string | URL | Request) => {
+    if(String(url).includes("api.deepseek.com")) {
+      clock += 24600;
+      return Response.json({choices:[{message:{content:JSON.stringify({queries:["release"]})}}]});
+    }
+    sources++; throw new Error("source must not execute");
+  });
+  const res = await handleBackendRequest(new Request("https://signal.benzhenlab.com/api/signals",{
+    method:"POST",headers:{"Content-Type":"application/json",Origin:"https://signal.benzhenlab.com"},body:JSON.stringify(input)
+  }));
+  const body = await res.json() as {errorCode?: string; reason: string};
+  assert.equal(res.status,502);
+  assert.equal(body.errorCode,"WORKER_DEADLINE");
+  assert.match(body.reason,/时间上限/);
+  assert.doesNotMatch(body.reason,/来源检索暂时不可用/);
+  assert.equal(sources,0);
 });

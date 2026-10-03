@@ -53,10 +53,16 @@ export type ActiveKnowledgeContext = {
 export type ProviderCoverage = SourceCoverage;
 
 export type InformationRunPayload = {
+  customSourceChecks?: import("../lib/custom-sources.ts").CustomSourceCheck[];
+  status?: "completed" | "failed" | "needs_more_evidence";
+  requestId?: string;
   signals: ResearchSignal[];
   overview: ResearchOverview;
   coverage: ProviderCoverage;
   filteringSummary?: import("../research/types.ts").FilteringSummary;
+  // Query plan is part of the /api/signals response; the home page reads the
+  // requested freshness window from it to keep "today" gates window-aware.
+  queryPlan?: import("../research/types.ts").QueryPlan;
   failures: string[];
   fetchedAt: string;
   dataMode: DataMode;

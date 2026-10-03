@@ -78,6 +78,50 @@ export async function setAlphaValue<K extends AlphaKey>(
   });
 }
 
+/** 把单个过滤器的知识条目合并进整表：保留并发写入的其它字段（如反馈），仅取修订与更新时间。 */
+export function mergeKnowledgeEntry(
+  map: KnowledgeByFilterId,
+  filterId: string,
+  entry: KnowledgeByFilterId[string],
+): KnowledgeByFilterId {
+  const stored = map?.[filterId];
+  return { ...map, [filterId]: { ...(stored ?? entry), researchContextRevision: entry.researchContextRevision, updatedAt: entry.updatedAt } };
+}
+
+/** 合并过滤器数组：仅替换目标过滤器，保留并发变更的其它过滤器。 */
+export function mergeFilterEntry(filters: InformationFilter[], filterId: string, entry: InformationFilter): InformationFilter[] {
+  return (filters ?? []).map((filter) => (filter.id === filterId ? { ...filter, ...entry } : filter));
+}
+
+/**
+ * Atomically save a source-config change: within one readwrite transaction,
+ * re-read the stored maps and merge ONLY this filter's entries, so a
+ * concurrent feedback/knowledge write that lands during the async gap is
+ * preserved instead of being overwritten by a stale snapshot.
+ */
+export async function saveFilterSources(options: {
+  filterId: string;
+  filterEntry: InformationFilter;
+  knowledgeFilterId: string;
+  knowledgeEntry: KnowledgeByFilterId[string];
+}) {
+  const database = await openDatabase();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(storeName, "readwrite");
+    const store = transaction.objectStore(storeName);
+    const filtersRequest = store.get("filters");
+    const knowledgeRequest = store.get("knowledgeByFilterId");
+    transaction.oncomplete = () => { database.close(); resolve(); };
+    transaction.onerror = transaction.onabort = () => { database.close(); reject(new Error("Unable to save source configuration")); };
+    filtersRequest.onsuccess = () => {
+      store.put(mergeFilterEntry(filtersRequest.result ?? [], options.filterId, options.filterEntry), "filters");
+    };
+    knowledgeRequest.onsuccess = () => {
+      store.put(mergeKnowledgeEntry(knowledgeRequest.result ?? {}, options.knowledgeFilterId, options.knowledgeEntry), "knowledgeByFilterId");
+    };
+  });
+}
+
 async function writeMigration(snapshot: AlphaSnapshotV2) {
   const database = await openDatabase();
   return new Promise<void>((resolve, reject) => {

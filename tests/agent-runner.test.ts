@@ -4,6 +4,7 @@ import { runAgent } from "../agent/runner.ts";
 import { updateKnowledgeFromChanges } from "../agent/knowledge-updater.ts";
 import { InMemorySignalRepository } from "../information/repositories/in-memory.ts";
 import { recordsFromSignal } from "../information/rag-records.ts";
+import { knowledgeFailure } from "../agent/failure.ts";
 import type { ResearchResponse, ResearchSignal } from "../research/types.ts";
 
 const input = {
@@ -12,6 +13,38 @@ const input = {
   informationGaps: "new workflow", trackedEntities: "Codex", trackedEvents: "",
   userJudgements: "", evidenceHistory: "", freshnessWindow: "7d",
 };
+
+test("knowledge failure diagnostics redact colon, spaced, JSON and quoted credentials", () => {
+  for (const message of [
+    "timeout password: secret-one",
+    "timeout password = secret-two",
+    'timeout {"password":"secret-three"}',
+    "timeout password='secret four with spaces'",
+    'timeout authorization: "Bearer secret-five"',
+  ]) {
+    const failure = knowledgeFailure(new Error(message));
+    assert.match(failure.message, /timeout/);
+    assert.doesNotMatch(failure.message, /secret/);
+  }
+});
+
+test("knowledge write failure retains its code and sanitized cause instead of a generic failure result", async () => {
+  const repository = new InMemorySignalRepository();
+  repository.upsertEvent = () => { throw Object.assign(new Error("connection timeout password=secret postgresql://alice:secret@host/db"), { code: "DB_TIMEOUT" }); };
+  const phases: Array<import("../agent/types.ts").AgentRunOptions["onPhase"] extends ((event: infer E) => void) | undefined ? E : never> = [];
+  const result = await runAgent({
+    input, context: { authenticatedUserId: "failure-user", filterId: "failure-filter" }, repository,
+    maxRounds: 1, research: async () => response([signal()]),
+    onPhase: (event) => { phases.push(event); },
+  });
+  assert.equal(result.status, "failed");
+  const failure = (result as typeof result & { failure?: { code: string; message: string; stage: string } }).failure;
+  assert.equal(failure?.code, "DB_TIMEOUT");
+  assert.equal(failure?.stage, "knowledge");
+  assert.match(failure?.message ?? "", /connection timeout/);
+  assert.doesNotMatch(failure?.message ?? "", /alice|secret/);
+  assert.ok(phases.some((event) => event.phase === "knowledge_finished" && event.success === false && event.errorCode === "DB_TIMEOUT"));
+});
 
 function signal(overrides: Partial<ResearchSignal> = {}): ResearchSignal {
   return {
@@ -1288,4 +1321,45 @@ test("empty primary execution triggers an ordered fallback execution", async () 
   assert.equal(selected[1], "OFFICIAL");
   assert.equal(selected[2], "PRIMARY");
   assert.equal(result.status, "completed");
+});
+
+test("slow planning is cancelled and deterministic retrieval still runs", {timeout: 2000}, async () => {
+  const started = Date.now();
+  let cancelled = false;
+  let searches = 0;
+  const result = await runAgent({input, maxRounds: 1, deadlineAt: started + 9500,
+    modelAdapter: {status: "configured", planResearch: async (planning) => {
+      return new Promise((_, reject) => {
+        planning.signal?.addEventListener("abort", () => {cancelled = true; reject(new Error("cancelled"));}, {once:true});
+      });
+    }},
+    research: async (_, plan) => { searches++; assert.ok(plan.queries.length); return response([signal()]); }
+  });
+  assert.equal(searches, 1);
+  assert.equal(cancelled, true);
+  assert.notEqual(result.status, "failed");
+  assert.ok(Date.now() - started < 3000);
+});
+test("deadline before first search retains the actual failure code", async () => {
+  let searches = 0;
+  const result = await runAgent({input, deadlineAt: Date.now() + 500, maxRounds:1,
+    research: async () => { searches++; return response([signal()]); }});
+  assert.equal(searches, 0);
+  assert.equal(result.failure?.code, "WORKER_DEADLINE");
+  assert.equal(result.failure?.stage, "retrieval");
+});
+
+test("late model results cannot overwrite the deterministic plan after timeout", async () => {
+  let originalObjective = "";
+  const result = await runAgent({input,maxRounds:1,deadlineAt:Date.now()+9500,
+    modelAdapter:{status:"configured",planResearch: async () => {
+      await new Promise(resolve => setTimeout(resolve,700));
+      return {status:"configured",plan:{objective:"LATE OBJECTIVE",queries:["LATE QUERY"],preferredSourceTypes:[],maxQueries:1}};
+    }},
+    research:async (_,plan) => {originalObjective=plan.objective; return response([signal()]);}
+  });
+  await new Promise(resolve => setTimeout(resolve,250));
+  assert.equal(result.plan.objective,originalObjective);
+  assert.notEqual(result.plan.objective,"LATE OBJECTIVE");
+  assert.ok(!result.plan.queries.includes("LATE QUERY"));
 });

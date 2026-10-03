@@ -332,6 +332,7 @@ export type EvidenceAccounting = {
 };
 
 export type ResearchResponse = {
+  customSourceChecks?: import("../lib/custom-sources.ts").CustomSourceCheck[];
   signals: ResearchSignal[];
   status: Array<{ name: string; ok: boolean; state?: string }>;
   queryPlan: QueryPlan;
