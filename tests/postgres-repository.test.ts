@@ -475,3 +475,50 @@ test("Postgres filters enforce ownership and notification read stays scoped", as
   assert.match(calls[2]!.sql, /WHERE id = \$1 AND user_id = \$2 AND filter_id = \$3/);
   assert.deepEqual(calls[2]!.values.slice(0, 3), ["notification-1", "user-a", "filter-a"]);
 });
+
+// Bounded repair 2026-10-04 (requestId signals-f56f937f): the real acceptance run
+// extracted the publication date from the Adobe page (CardDate block), but the
+// evidence upsert's ON CONFLICT clause did not refresh published_at, so the
+// pre-existing evidence row kept published_at = NULL. The contract must backfill
+// the date from the new fetch without letting a missing date erase an existing one.
+test("Postgres evidence upsert backfills published_at without nulling it", async () => {
+  const row = {
+    id: "evidence-1",
+    claim_id: "claim-1",
+    source_url: "https://blog.adobe.com/en/publish/2026/09/08/post",
+    canonical_url: "https://blog.adobe.com/en/publish/2026/09/08/post",
+    publisher: "用户添加 · blog.adobe.com",
+    published_at: "2026-09-08T00:00:00.000Z",
+    source_type: "industry_media",
+    source_role: "verification",
+    source_tier: "B",
+    verification_status: "partially_verified",
+    evidence_snippet: "Generate and create directly in your timeline",
+    data_mode: "live",
+    retrieved_at: "2026-10-04T03:43:20.000Z",
+    created_at: "2026-10-04T03:43:20.000Z",
+  };
+  const { client, calls } = fakeClient([row]);
+  const repository = new PostgresSignalRepository(client);
+
+  await repository.upsertEvidence({
+    id: "evidence-1",
+    claimId: "claim-1",
+    sourceUrl: "https://blog.adobe.com/en/publish/2026/09/08/post",
+    canonicalUrl: "https://blog.adobe.com/en/publish/2026/09/08/post",
+    publisher: "用户添加 · blog.adobe.com",
+    publishedAt: "2026-09-08T00:00:00.000Z",
+    sourceType: "industry_media",
+    sourceRole: "verification",
+    sourceTier: "B",
+    verificationStatus: "partially_verified",
+    evidenceSnippet: "Generate and create directly in your timeline",
+    dataMode: "live",
+    retrievedAt: "2026-10-04T03:43:20.000Z",
+    createdAt: "2026-10-04T03:43:20.000Z",
+  });
+
+  const upsert = calls[0]!;
+  assert.match(upsert.sql, /INSERT INTO evidence/);
+  assert.match(upsert.sql, /published_at = COALESCE\(EXCLUDED\.published_at, evidence\.published_at\)/);
+});

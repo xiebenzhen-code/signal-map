@@ -1357,6 +1357,16 @@ function buildSourceDiagnostics(
   });
 }
 
+// Readable custom-source status copy. "Preserved" (in the result set and
+// library) must never be worded as "surfaced" (entering the day-queue reading
+// list) — the day queue selects a subset, so the copy points at the cards
+// instead of claiming display.
+export function customSourceReadReason(included: boolean): string {
+  return included
+    ? "正文可读取，已保留到本次结果与资料库；是否出现在今日阅读列表取决于相关性、时间与证据，请以今日卡片为准。"
+    : "正文可读取，但未通过本次筛选；请结合筛选统计核对相关性、时间与证据要求。";
+}
+
 export async function runResearchPipeline(
   input: ResearchInput,
   onProgress?: ProgressHandler,
@@ -2732,9 +2742,7 @@ export async function runResearchPipeline(
     const url = check.canonicalUrl ?? check.url;
     if (!customCandidates.some(candidate => candidate.url === url)) continue;
     const included = presentation.signals.some(signal => signal.sourceUrl === url || signal.sources.some(source => source.sourceUrl === url));
-    check.reason = included
-      ? "正文可读取，已进入本次结果；是否属于新变化请结合卡片的日期和状态判断。"
-      : "正文可读取，但未通过本次筛选；请结合筛选统计核对相关性、时间与证据要求。";
+    check.reason = customSourceReadReason(included);
   }
   return {
     ...(customSourceChecks.length ? { customSourceChecks } : {}),

@@ -290,3 +290,79 @@ test("topic mismatch exposes a stable filtering reason", () => {
   assert.equal(summary.filteredReasons.topicMismatch, 1);
   assert.equal(summary.filteringDetails?.[0]?.reason, "TOPIC_MISMATCH");
 });
+
+// --- Bounded repair 2026-10-04 (requestId signals-baa5d0df-4300-4861-8eb0-2942b70ce640) ---
+// The real run's legacy-path plan: topicProfile absent, industryKeywords carries the
+// AI-expansion phrase "release notes". topicTerms tokenized it into the bare word
+// "release", so every GitHub release title ("Release 0.162.0-alpha.11") matched and
+// 20 unrelated coding-tool releases occupied the day queue.
+
+const adobeVideoPlanLegacy: QueryPlan = {
+  originalNeed: "过去30天，Adobe Premiere和After Effects有哪些值得我测试的AI剪辑更新？优先官方依据，说明具体变化、适用条件和可测试操作；未知事项明确标注。",
+  coreKeywords: ["AI", "视频工具", "过去30天", "Adobe", "Premiere和After", "Effects有哪些值得我测试的AI剪辑更新", "优先官方依据", "说明具体变化", "适用条件和可测试操作", "未知事项明确标注", "Premiere", "After"],
+  englishKeywords: [],
+  synonyms: [],
+  entities: ["Adobe", "Premiere", "After", "Effects"],
+  aliasesConsidered: ["Adobe", "Premiere", "After", "Effects"],
+  industryKeywords: ["AI 视频与创作者工具", "official documentation", "release notes", "research", "GitHub"],
+  changeKeywords: [],
+  knowledgeAwareQueries: [],
+  searchCombinations: [],
+  topicAnchors: [],
+  topicKeywords: ["AI 视频与创作者工具", "AI 视频工具", "说明具体变化", "适用条件和可测试操作", "Adobe Premiere", "After Effects", "Adobe", "Premiere", "After", "Effects"],
+  retrievalWindows: ["30d"],
+  requestedFreshnessWindow: "30d",
+} as QueryPlan;
+
+test("document-type words cannot admit unrelated coding-tool releases (legacy path)", () => {
+  for (const text of [
+    // Real items that occupied the day queue of requestId signals-baa5d0df.
+    "Release 0.162.0-alpha.11 Release 0.162.0-alpha.11",
+    "Release Release v0.63.0-nightly.20260928.g2fe7c2d3f · google-gemini/gemini-cli · GitHub",
+    // Same defect class observed in persisted knowledge: a bare releases index page.
+    "Releases · Comfy-Org/ComfyUI",
+  ]) {
+    const relevance = assessTopicRelevance(text, adobeVideoPlanLegacy);
+    assert.equal(relevance.decision, "TOPIC_MISMATCH", text);
+    assert.equal(relevance.matchedTerms.length, 0, text);
+    assert.equal(relevance.relevanceGatePassed, false, text);
+  }
+});
+
+test("genuinely relevant Adobe material stays admissible for the same question", () => {
+  const relevance = assessTopicRelevance(
+    "Generate and create directly in your timeline with new AI-powered innovations in Premiere and After Effects Generative Media Tool Separate Crosstalk Dynamic Auto Ducking",
+    adobeVideoPlanLegacy,
+  );
+  assert.equal(relevance.decision, "MATCH");
+  assert.ok(relevance.matchedTerms.some((term) => /premiere|effects|after/i.test(term)));
+});
+
+test("broad questions still discover unspecified projects through content, not document-type words", () => {
+  const broadPlan: QueryPlan = {
+    originalNeed: "What new AI coding tools and CLI agents shipped recently that are worth testing?",
+    coreKeywords: ["AI", "coding", "tools", "cli", "agents"],
+    englishKeywords: [],
+    synonyms: [],
+    entities: [],
+    aliasesConsidered: [],
+    industryKeywords: ["AI coding tools", "GitHub"],
+    changeKeywords: [],
+    knowledgeAwareQueries: [],
+    searchCombinations: [],
+    topicAnchors: [],
+    topicKeywords: ["AI coding tools", "CLI agents"],
+    retrievalWindows: ["30d"],
+    requestedFreshnessWindow: "30d",
+  } as QueryPlan;
+  // Broad discovery falls back to the default repo set; a release whose CONTENT
+  // carries the question's topic must still pass, even though the project was
+  // never named in the question.
+  const relevance = assessTopicRelevance(
+    "Release v0.64.0-nightly * fix(core): enable autonomous plan execution for the AI coding agent in non-interactive mode",
+    broadPlan,
+  );
+  assert.equal(relevance.decision, "MATCH");
+  assert.ok(relevance.matchedTerms.length > 0);
+  assert.ok(!relevance.matchedTerms.includes("release"));
+});

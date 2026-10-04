@@ -3,6 +3,7 @@ import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
 import { isPublicSourceAddress, publicSourceUrl, type CustomSourceCheck } from "../lib/custom-sources.ts";
+import { getSourceDoHResolver } from "./doh-resolver.ts";
 
 type Address = { address: string; family: number };
 type PageResponse = { status: number; headers: Record<string, string | undefined>; body: string };
@@ -52,18 +53,68 @@ function plainText(html: string) {
 
 function extractPage(html: string) {
   const title = plainText(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "");
-  let publishedAt: string | undefined;
-  for (const meta of html.match(/<meta\b[^>]*>/gi) ?? []) {
-    if (/\b(?:property|name)=["'](?:article:published_time|datePublished|date)["']/i.test(meta)) {
-      const date = meta.match(/\bcontent=["']([^"']+)["']/i)?.[1];
-      if (date && Number.isFinite(Date.parse(date))) { publishedAt = date; break; }
-    }
-  }
+  const date = extractPublishedAt(html);
   const cleaned = html.replace(/<(script|style|nav|header|footer|form)\b[^>]*>[\s\S]*?<\/\1>/gi, " ");
   const semantic = cleaned.match(/<(article|main)\b[^>]*>([\s\S]*?)<\/\1>/i)?.[2];
   const content = plainText(semantic ?? cleaned);
-  return { title, publishedAt, content };
+  return { title, ...date, content };
 }
+
+// Publication-date extraction for pages that carry no article:published_time
+// meta. Priority: meta > JSON-LD datePublished > <time datetime> > labeled date
+// cell (e.g. the CardDate blocks used by Edge-Delivery blogs). Dates are never
+// taken from the URL path; a page without any of these structures stays unknown.
+// The priority order also decides conflicts: the highest-priority source wins
+// and the disagreement is flagged instead of silently dropped.
+const LABELED_DATE_CELL = /<div>\s*<div>\s*(?:carddate|published[- _]?date|pubdate|date)\s*<\/div>\s*<div>\s*([0-9]{4}-[0-9]{2}-[0-9]{2}(?:[T ][0-9:.-]+Z)?)\s*<\/div>/gi;
+
+function collectDateCandidates(html: string): Array<{ source: CustomSourceCheck["publishedAtSource"]; value: string; time: number }> {
+  const candidates: Array<{ source: NonNullable<CustomSourceCheck["publishedAtSource"]>; value: string; time: number }> = [];
+  const push = (source: NonNullable<CustomSourceCheck["publishedAtSource"]>, value?: string) => {
+    if (!value) return;
+    const time = Date.parse(value);
+    if (Number.isFinite(time)) candidates.push({ source, value, time });
+  };
+  for (const meta of html.match(/<meta\b[^>]*>/gi) ?? []) {
+    if (/\b(?:property|name)=["'](?:article:published_time|datePublished|date)["']/i.test(meta)) {
+      push("meta", meta.match(/\bcontent=["']([^"']+)["']/i)?.[1]);
+    }
+  }
+  for (const block of html.match(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi) ?? []) {
+    const raw = block.replace(/^<script\b[^>]*>/i, "").replace(/<\/script>$/i, "");
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      for (const node of Array.isArray(parsed) ? parsed : [parsed]) {
+        const datePublished = (node as { datePublished?: unknown })?.datePublished;
+        if (typeof datePublished === "string") push("jsonld", datePublished);
+      }
+    } catch { /* malformed JSON-LD stays a non-source, never a page failure */ }
+  }
+  for (const match of html.matchAll(/<time\b[^>]*datetime=["']([^"']+)["'][^>]*>/gi)) {
+    push("time-element", match[1]);
+  }
+  for (const match of html.matchAll(LABELED_DATE_CELL)) {
+    push("labeled-date", match[1]);
+  }
+  return candidates;
+}
+
+function extractPublishedAt(html: string): { publishedAt?: string; publishedAtSource?: CustomSourceCheck["publishedAtSource"]; publishedAtConflict?: boolean } {
+  const candidates = collectDateCandidates(html);
+  if (!candidates.length) return {};
+  const byPriority = (source: NonNullable<CustomSourceCheck["publishedAtSource"]>) =>
+    candidates.find((candidate) => candidate.source === source);
+  const best = byPriority("meta") ?? byPriority("jsonld") ?? byPriority("time-element") ?? byPriority("labeled-date");
+  if (!best) return {};
+  const bestDay = best.value.slice(0, 10);
+  const conflict = candidates.some((candidate) => candidate.value.slice(0, 10) !== bestDay);
+  // Date-only values (labeled date cells) need a full ISO timestamp; the other
+  // sources already carry their own time and pass through verbatim.
+  const normalized = best.value.length > 10 ? best.value : new Date(best.time).toISOString();
+  return { publishedAt: normalized, publishedAtSource: best.source, ...(conflict ? { publishedAtConflict: true } : {}) };
+}
+
+export { getSourceDoHResolver, createDoHLookup, resolveSourceAddresses } from "./doh-resolver.ts";
 
 export async function readCustomSource(value: string, options: ReadOptions = {}): Promise<CustomSourceResult> {
   let requestCount = 0;
@@ -81,8 +132,12 @@ export async function readCustomSource(value: string, options: ReadOptions = {})
         if (controller.signal.aborted) throw new Error("TIMEOUT");
         const url = new URL(current!);
         const host = url.hostname.replace(/^\[|\]$/g, "");
+        const sharedResolver = getSourceDoHResolver();
+        const systemLookup = sharedResolver.configured
+          ? (name: string) => sharedResolver.resolve(name)
+          : (name: string) => lookup(name, { all: true });
         const addresses = isIP(host) ? [{ address: host, family: isIP(host) }]
-          : await (options.lookup ?? (name => lookup(name, { all: true })))(host);
+          : await (options.lookup ?? systemLookup)(host);
         if (!addresses.length || addresses.some(item => !isPublicSourceAddress(item.address))) {
           return finish("blocked", "来源解析到非公开地址，未进行抓取。");
         }

@@ -430,6 +430,7 @@ export class PostgresSignalRepository implements
       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
       ON CONFLICT (claim_id, canonical_url) DO UPDATE SET
         publisher = EXCLUDED.publisher,
+        published_at = COALESCE(EXCLUDED.published_at, evidence.published_at),
         verification_status = EXCLUDED.verification_status,
         evidence_snippet = EXCLUDED.evidence_snippet,
         retrieved_at = EXCLUDED.retrieved_at

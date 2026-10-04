@@ -102,6 +102,27 @@ function intersects(left: Set<string>, right: Set<string>) {
   return false;
 }
 
+// A record's own verification snapshot decides whether seeing the same claim
+// again is "already settled" (DUPLICATE) or "the user has seen an unsettled
+// version" (upgrade). Records without a verification snapshot keep the old
+// duplicate behavior.
+function recordIsVerified(record: PersonalKnowledgeRecord): boolean {
+  const status = recordPayload(record)?.verificationStatus;
+  return typeof status !== "string" || status === "verified";
+}
+
+const VERIFICATION_RANK: Record<string, number> = {
+  unverified: 0,
+  conflicting: 0,
+  partially_verified: 1,
+  verified: 2,
+};
+
+function evidenceStrength(record: PersonalKnowledgeRecord): number {
+  const status = recordPayload(record)?.verificationStatus;
+  return VERIFICATION_RANK[typeof status === "string" ? status : ""] ?? VERIFICATION_RANK.verified;
+}
+
 type InformationGainMatch = "DUPLICATE" | "UPDATE" | undefined;
 
 function matchPersistedKnowledge(
@@ -110,6 +131,7 @@ function matchPersistedKnowledge(
   evidenceById: Map<string, EvidenceRecord>,
 ): InformationGainMatch {
   const current = identityFromSignal(signal);
+  let unsettledReseen = false;
   for (const record of records.filter((candidate) => candidate.type === "KNOWN_INFORMATION")) {
     const persisted = identityFromRecord(record, evidenceById);
     if (!persisted.claimFingerprints.size) continue;
@@ -117,10 +139,23 @@ function matchPersistedKnowledge(
     const equivalentClaimMatch = [...current.claimFingerprints].some((currentClaim) =>
       [...persisted.claimFingerprints].some((persistedClaim) => equivalentClaim(currentClaim, persistedClaim)),
     );
-    if (sameClaim || equivalentClaimMatch) return "DUPLICATE";
+    if (sameClaim || equivalentClaimMatch) {
+      if (recordIsVerified(record)) return "DUPLICATE";
+      // Partially verified / unverified / conflicting records mark exposure, not
+      // a settled fact. Only strictly stronger evidence (higher verification
+      // strength or a genuinely new source) counts as an update; the same
+      // evidence re-seen carries no information gain and must not advance a
+      // revision.
+      const bringsNewSource = [...current.sourceUrls].some((url) => !persisted.sourceUrls.has(url));
+      if (evidenceStrength(record) < (VERIFICATION_RANK[signal.verificationStatus] ?? 0) || bringsNewSource) {
+        return "UPDATE";
+      }
+      unsettledReseen = true;
+      continue;
+    }
     if (intersects(current.sourceUrls, persisted.sourceUrls)) return "UPDATE";
   }
-  return undefined;
+  return unsettledReseen ? "DUPLICATE" : undefined;
 }
 
 export function reconcileInformationGain(

@@ -107,3 +107,31 @@ test("usable updates prioritize official evidence and are capped without filling
   assert.equal(result.usableUpdates.some((event) => event.id === "social"), false);
   assert.equal(result.items.length, 3);
 });
+
+// --- Bounded repair 2026-10-04 (requestId signals-baa5d0df): the Adobe item was
+// preserved in the library but never surfaced because its extracted page had no
+// publication date → timestampStatus ≠ valid → ageHours undefined. Prove the
+// timestamp condition is the real gate (a verified in-window item with a date
+// surfaces; the identical item without one does not). Other gates unchanged. ---
+test("usable-update candidacy requires a valid timestamp; missing dates stay out", () => {
+  const withDate = signal({
+    id: "adobe-with-date",
+    title: "Generate and create directly in your timeline",
+    sourceTier: "B",
+    sourceType: "industry_media",
+    reliabilityScore: 76,
+    relevanceScore: 62,
+    noveltyScore: 86,
+    eventOccurredAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
+  });
+  const noDate = signal({
+    ...withDate,
+    id: "adobe-no-date",
+    publishedAt: undefined,
+    eventOccurredAt: undefined,
+    timestampStatus: "missing",
+  });
+  const result = selectTodayPresentation([withDate, noDate]);
+  assert.equal(result.kind, "usable_updates");
+  assert.deepEqual(result.usableUpdates.map((event) => event.id), ["adobe-with-date"]);
+});

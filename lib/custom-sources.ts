@@ -55,5 +55,9 @@ export type CustomSourceCheck = {
   canonicalUrl?: string;
   title?: string;
   publishedAt?: string;
+  /** Which page structure the publication date came from (provenance). */
+  publishedAtSource?: "meta" | "jsonld" | "time-element" | "labeled-date";
+  /** True when multiple page structures disagree on the publication date. */
+  publishedAtConflict?: boolean;
   requestCount: number;
 };

@@ -2,6 +2,7 @@ import { resolveResearchIdentity } from "../auth/request-identity.ts";
 import { withSession } from "../auth/session.ts";
 import { parseCustomSources } from "../lib/custom-sources.ts";
 import { readCustomSource } from "../source-enrichment/custom-source.ts";
+import { getSourceDoHResolver } from "../source-enrichment/doh-resolver.ts";
 
 const checksByIdentity = new Map<string, number[]>();
 let activeChecks = 0;
@@ -33,7 +34,11 @@ export function createSourceCheckHandler(reader: typeof readCustomSource = readC
     activeChecks++;
     try {
       const deadlineAt = Date.now() + 5000;
-      const results = await Promise.all(parsed.urls.map(url => reader(url, { deadlineAt })));
+      // The check endpoint consumes the SAME DoH configuration as the research
+      // pipeline: when SOURCE_DOH_URL is set, every host resolves through it.
+      const doh = getSourceDoHResolver();
+      const lookup = doh.configured ? (name: string) => doh.resolve(name) : undefined;
+      const results = await Promise.all(parsed.urls.map(url => reader(url, { deadlineAt, lookup })));
       const checks = results.map(({ content: _content, ...check }) => check);
       const headers = new Headers();
       if (identity.mode === "anonymous" && identity.setCookie) headers.append("Set-Cookie", identity.setCookie);

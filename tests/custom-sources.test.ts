@@ -33,6 +33,64 @@ test("source reader keeps article text and publication date without certifying t
   assert.doesNotMatch(result.content ?? "",/navigation account login/);
   assert.equal(result.publishedAt,"2026-10-02T08:00:00Z");
 });
+
+// --- Bounded repair 2026-10-04 (requestId signals-baa5d0df): publication-date
+// extraction for pages that carry no meta dates. Real-page material: the Adobe
+// blog renders its date ONLY as a labeled CardDate block and has no
+// article:published_time meta, no JSON-LD, no <time datetime>. The pipeline
+// therefore persisted published_at=NULL and the item could not enter the
+// day-queue freshness window. ---
+const longBody = "Adobe unveils AI-powered innovations expanding speed, flexibility, and control across Premiere and After Effects, including a Generative Media Tool for the timeline. ".repeat(4);
+const adobeLikePage = `<html><head><title>Generate and create directly in your timeline</title></head><body><article><h1>Generate and create directly in your timeline</h1><p>${longBody}</p></article><div><div>Details</div><div>Premiere Pro</div></div><div><div>CardDate</div><div>2026-09-08</div></div></body></html>`;
+
+const readPage = (body: string, url = "https://example.com/post") =>
+  readCustomSource(url, { lookup: publicLookup, request: async () => ({ status: 200, headers: { "content-type": "text/html" }, body }) });
+
+test("publication date is read from JSON-LD when meta dates are absent", async () => {
+  const body = `<html><head><title>t</title></head><body><article><p>${longBody}</p></article><script type="application/ld+json">{"@type":"BlogPosting","headline":"x","datePublished":"2026-09-08T09:00:00Z"}</script></body></html>`;
+  const result = await readPage(body);
+  assert.equal(result.status, "readable");
+  assert.equal(result.publishedAt, "2026-09-08T09:00:00Z");
+  assert.equal(result.publishedAtSource, "jsonld");
+  assert.notEqual(result.publishedAtConflict, true);
+});
+
+test("publication date is read from a labeled date block for pages without metadata", async () => {
+  const result = await readPage(adobeLikePage, "https://blog.adobe.com/en/publish/2026/09/08/generate-create-directly-in-your-timeline-with-new-ai-powered-innovations-in-premiere-after-effects");
+  assert.equal(result.status, "readable");
+  assert.equal(result.publishedAt, "2026-09-08T00:00:00.000Z");
+  assert.equal(result.publishedAtSource, "labeled-date");
+});
+
+test("time datetime elements are honored as a date source", async () => {
+  const body = `<html><head><title>t</title></head><body><article><p>${longBody}</p><time datetime="2026-09-08T10:00:00Z">Sep 8</time></article></body></html>`;
+  const result = await readPage(body);
+  assert.equal(result.publishedAt, "2026-09-08T10:00:00Z");
+  assert.equal(result.publishedAtSource, "time-element");
+});
+
+test("missing dates stay unknown and URL path dates are never used", async () => {
+  const body = `<html><head><title>t</title></head><body><article><p>${longBody}</p></article></body></html>`;
+  const result = await readPage(body, "https://blog.adobe.com/en/publish/2026/09/08/some-post");
+  assert.equal(result.status, "readable");
+  assert.equal(result.publishedAt, undefined);
+  assert.equal(result.publishedAtSource, undefined);
+});
+
+test("conflicting date sources keep the strongest source and flag the conflict", async () => {
+  const body = `<html><head><title>t</title><meta property="article:published_time" content="2026-10-02T08:00:00Z"></head><body><article><p>${longBody}</p></article><script type="application/ld+json">{"@type":"BlogPosting","datePublished":"2026-09-08T09:00:00Z"}</script></body></html>`;
+  const result = await readPage(body);
+  assert.equal(result.publishedAt, "2026-10-02T08:00:00Z");
+  assert.equal(result.publishedAtSource, "meta");
+  assert.equal(result.publishedAtConflict, true);
+});
+
+test("out-of-window dates are still extracted; windowing stays downstream", async () => {
+  const body = `<html><head><title>t</title></head><body><article><p>${longBody}</p></article><div><div>CardDate</div><div>2026-05-01</div></div></body></html>`;
+  const result = await readPage(body);
+  assert.equal(result.publishedAt, "2026-05-01T00:00:00.000Z");
+  assert.equal(result.publishedAtSource, "labeled-date");
+});
 test("private DNS targets are blocked before transport", async () => {
   let requests=0;
   const result=await readCustomSource("https://example.com/update",{lookup:async()=>[{address:"127.0.0.1",family:4}],request:async()=>{requests++;return {status:200,headers:{},body:page};}});
@@ -73,11 +131,33 @@ test("real pipeline consumes supplied links even when automatic providers exclud
   assert.equal(calls,1);
   assert.ok((response.evidenceAccounting?.discoveredCandidateCount ?? 0)>0,"custom source must enter the candidate pool");
   assert.ok(response.evidenceRecords?.some(record=>record.sourceUrl==="https://example.com/update"),"custom page body must produce evidence, even if gates reject it");
+  assert.ok(
+    response.evidenceRecords?.some(record=>record.sourceUrl==="https://example.com/update" && (record.publishedAt ?? "").startsWith("2026-10-02T08:00:00")),
+    "candidate publishedAt must reach the final evidence field (bounded repair 2026-10-04)",
+  );
   const checks=(response as typeof response & {customSourceChecks?:Array<{status:string}>}).customSourceChecks;
   assert.equal(checks?.[0]?.status,"readable");
-  assert.match(response.customSourceChecks?.[0]?.reason ?? "",/本次结果|未通过本次筛选/);
+  // Copy must distinguish fetched/preserved/surfaced: "已进入本次结果" claimed a
+  // day-queue surface that never happened for library-only items (bounded repair 2026-10-04).
+  assert.match(checks?.[0]?.reason ?? "", /已保留到本次结果与资料库|未通过本次筛选/);
+  assert.doesNotMatch(checks?.[0]?.reason ?? "", /已进入本次结果/);
   assert.ok(response.sourceOutcomes?.some(o=>o.providerId==="custom-sources" && o.executed));
   assert.ok(response.signals.every(s=>s.sourceTier!=="S"));
+});
+
+// --- Bounded repair 2026-10-04: the "included" copy claimed a day-queue surface
+// that never happened for library-only items ("已进入本次结果" while the day queue
+// showed 3 unrelated releases). The copy must distinguish fetched / preserved /
+// surfaced and never pass off library persistence as display. ---
+test("custom-source readable copy distinguishes preserved from surfaced", async () => {
+  const { customSourceReadReason } = await import("../research/research-pipeline.ts");
+  const preserved = customSourceReadReason(true);
+  assert.match(preserved, /已保留/);
+  assert.match(preserved, /今日/);
+  assert.doesNotMatch(preserved, /已进入本次结果/);
+  const rejected = customSourceReadReason(false);
+  assert.match(rejected, /未通过本次筛选/);
+  assert.doesNotMatch(rejected, /已保留|已进入/);
 });
 
 test("source-check endpoint does not run research or expose fetched content",async()=>{
