@@ -12,3 +12,14 @@ dist-api
 coverage
 .git
 .gitignore
+
+# --- cloud build context hygiene (P6.1.5 STEP 2.9) ---
+# Local run/verification logs must never enter the cloud image.
+*.log
+logs/
+tmp-*
+tmp_*
+secrets/
+cookies/
+*.pem.bak
+.env.*.local
