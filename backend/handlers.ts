@@ -37,6 +37,34 @@ export function operationTimeoutError(code: string) {
   return Object.assign(new Error(code), { code });
 }
 
+// TEMPORARY incident diagnostics for the login 503. Both helpers are pure
+// allow-list projections: they can only ever emit "unknown", a numeric HTTP
+// status, or a known Supabase SDK error class. They never read, echo or
+// serialize the upstream message, the submitted email/password, any token, or
+// the Supabase URL. Remove together with the headers in handleAuthLogin.
+const AUTH_ERROR_NAMES = new Set([
+  "AuthApiError",
+  "AuthRetryableFetchError",
+  "AuthUnknownError",
+  "AuthWeakPasswordError",
+  "AuthInvalidCredentialsError",
+  "AuthInvalidTokenResponseError",
+  "AuthSessionMissingError",
+]);
+
+export function upstreamStatusHeader(error: unknown) {
+  const status = (error as { status?: unknown })?.status;
+  if (typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599) {
+    return String(status);
+  }
+  return "unknown";
+}
+
+export function upstreamErrorNameHeader(error: unknown) {
+  const name = (error as { name?: unknown })?.name;
+  return typeof name === "string" && AUTH_ERROR_NAMES.has(name) ? name : "unknown";
+}
+
 export async function withOperationTimeout<T>(operation: Promise<T>, timeoutMs: number, code: string) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -534,6 +562,20 @@ export const handleAuthLogin = withSession(async (request: Request) => {
     : await client.auth.signInWithPassword({ email, password });
   if (error) {
     const mapped = mapAuthError(error, action);
+    // TEMPORARY incident diagnostics. Exposes ONLY the upstream status and the
+    // SDK error class on the provider_unavailable response, so a production 503
+    // can be attributed without logging anything. The upstream message, the
+    // submitted credentials and the full error object never leave this block.
+    // Removal: drop the two headers below; the body and status are unchanged.
+    if (mapped.code === "provider_unavailable") {
+      return Response.json({ error: mapped.error, code: mapped.code }, {
+        status: mapped.status,
+        headers: {
+          "X-Signal-Auth-Upstream-Status": upstreamStatusHeader(error),
+          "X-Signal-Auth-Error-Name": upstreamErrorNameHeader(error),
+        },
+      });
+    }
     return Response.json({ error: mapped.error, code: mapped.code }, { status: mapped.status });
   }
   if (action === "signup" && data.user && !data.session) {

@@ -148,6 +148,125 @@ test("cross-origin password login is rejected", async () => {
   assert.equal(response.status, 403);
 });
 
+test("an upstream 5xx keeps its 503 body and code while exposing whitelisted diagnostics", async (t) => {
+  const keys = ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"] as const;
+  const previous = keys.map((key) => process.env[key]);
+  t.after(() => keys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; }));
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://auth-fixture.supabase.co";
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "test-publishable-key";
+  t.mock.method(globalThis, "fetch", async () => Response.json(
+    { message: "upstream secret detail", error_code: "unexpected_failure" },
+    { status: 502 },
+  ));
+
+  const response = await handleBackendRequest(new Request("https://signal.benzhenlab.com/api/auth/login", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "fixture@example.com", password: "test-password" }),
+  }));
+
+  // Existing HTTP status and error/code semantics must not change.
+  assert.equal(response.status, 503);
+  const bodyText = await response.text();
+  assert.deepEqual(JSON.parse(bodyText), { error: "认证服务暂时不可用，请稍后重试。", code: "provider_unavailable" });
+
+  // Whitelisted diagnostics only. 502 is in the SDK network-error set, so the
+  // class is AuthRetryableFetchError (AuthApiError is reserved for 4xx JSON).
+  assert.equal(response.headers.get("x-signal-auth-upstream-status"), "502");
+  assert.equal(response.headers.get("x-signal-auth-error-name"), "AuthRetryableFetchError");
+
+  // No upstream message, credential, or transport detail may appear anywhere.
+  const serialized = JSON.stringify({ headers: [...response.headers.entries()], body: bodyText });
+  for (const forbidden of ["upstream secret detail", "unexpected_failure", "fixture@example.com", "test-password", "test-publishable-key", "auth-fixture", "supabase.co", "Bearer", "access_token"]) {
+    assert.equal(serialized.includes(forbidden), false, `diagnostics must not leak ${forbidden}`);
+  }
+});
+
+test("missing upstream status and name degrade to unknown without changing the 503", async (t) => {
+  const keys = ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"] as const;
+  const previous = keys.map((key) => process.env[key]);
+  t.after(() => keys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; }));
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://auth-fixture.supabase.co";
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "test-publishable-key";
+  t.mock.method(globalThis, "fetch", async () => new Response("upstream body text", { status: 503 }));
+
+  const response = await handleBackendRequest(new Request("https://signal.benzhenlab.com/api/auth/login", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "fixture@example.com", password: "test-password" }),
+  }));
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: "认证服务暂时不可用，请稍后重试。", code: "provider_unavailable" });
+  assert.equal(response.headers.get("x-signal-auth-upstream-status"), "503");
+  // 503 is in the SDK network-error set, so the class is AuthRetryableFetchError
+  // even though the upstream body was not JSON.
+  assert.equal(response.headers.get("x-signal-auth-error-name"), "AuthRetryableFetchError");
+  assert.equal(JSON.stringify([...response.headers.entries()]).includes("upstream body text"), false);
+});
+
+test("an unrecognized error class degrades to unknown instead of echoing it", async (t) => {
+  const keys = ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"] as const;
+  const previous = keys.map((key) => process.env[key]);
+  t.after(() => keys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; }));
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://auth-fixture.supabase.co";
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "test-publishable-key";
+  // A 4xx JSON body yields AuthApiError, which IS on the allow-list, so the
+  // unrecognised-class path needs a status that still maps to provider_unavailable
+  // while carrying a class the SDK does not define.
+  t.mock.method(globalThis, "fetch", async () => Response.json(
+    { message: "upstream secret detail", error_code: "unexpected_failure" },
+    { status: 530 },
+  ));
+
+  const response = await handleBackendRequest(new Request("https://signal.benzhenlab.com/api/auth/login", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "fixture@example.com", password: "test-password" }),
+  }));
+
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("x-signal-auth-upstream-status"), "530");
+  assert.equal(response.headers.get("x-signal-auth-error-name"), "AuthRetryableFetchError");
+  const serialized = JSON.stringify([...response.headers.entries()]);
+  assert.equal(serialized.includes("upstream secret detail"), false);
+  assert.equal(serialized.includes("unexpected_failure"), false);
+});
+
+test("an allow-list miss never echoes an arbitrary error name", async (t) => {
+  // Direct unit proof of the allow-list: a fabricated error object with an
+  // untrusted name and an out-of-range status must both degrade to "unknown".
+  const { upstreamErrorNameHeader, upstreamStatusHeader } = await import("../backend/handlers.ts");
+  assert.equal(upstreamErrorNameHeader({ name: "AuthApiError" }), "AuthApiError");
+  assert.equal(upstreamErrorNameHeader({ name: "TotallyCustomError" }), "unknown");
+  assert.equal(upstreamErrorNameHeader({ name: 42 }), "unknown");
+  assert.equal(upstreamErrorNameHeader({}), "unknown");
+  assert.equal(upstreamErrorNameHeader(null), "unknown");
+  assert.equal(upstreamStatusHeader({ status: 502 }), "502");
+  assert.equal(upstreamStatusHeader({ status: 0 }), "unknown");
+  assert.equal(upstreamStatusHeader({ status: 999 }), "unknown");
+  assert.equal(upstreamStatusHeader({ status: "502" }), "unknown");
+  assert.equal(upstreamStatusHeader({}), "unknown");
+  assert.equal(upstreamStatusHeader(undefined), "unknown");
+});
+
+test("non-5xx auth failures carry no upstream diagnostics", async (t) => {
+  const keys = ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"] as const;
+  const previous = keys.map((key) => process.env[key]);
+  t.after(() => keys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; }));
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://auth-fixture.supabase.co";
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "test-publishable-key";
+  t.mock.method(globalThis, "fetch", async () => Response.json({ code: "invalid_credentials", message: "Invalid login credentials" }, { status: 400 }));
+
+  const response = await handleBackendRequest(new Request("https://signal.benzhenlab.com/api/auth/login", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "fixture@example.com", password: "test-password" }),
+  }));
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error: "邮箱或密码不正确。", code: "invalid_credentials" });
+  // Credentials-path diagnostics stay off: the change is scoped to provider_unavailable.
+  assert.equal(response.headers.get("x-signal-auth-upstream-status"), null);
+  assert.equal(response.headers.get("x-signal-auth-error-name"), null);
+});
+
 test("verified users get separate default filters and cannot request the other's filter", async (t) => {
   const keys = ["DATABASE_URL", "NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"] as const;
   const previous = keys.map((key) => process.env[key]);
