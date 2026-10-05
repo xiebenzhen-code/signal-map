@@ -18,7 +18,8 @@ export function isDbBackedApiPath(pathname: string): boolean {
     pathname === "/api/signals" ||
     pathname === "/api/research/agent" ||
     pathname.startsWith("/api/control/") ||
-    pathname === "/api/diagnostics/postgres-transport"
+    pathname === "/api/diagnostics/postgres-transport" ||
+    pathname === "/api/diagnostics/supabase-auth-transport"
   );
 }
 

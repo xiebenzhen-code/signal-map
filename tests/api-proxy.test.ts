@@ -19,6 +19,7 @@ test("API proxy classifies DB-backed routes and keeps edge-safe routes local", (
     "/api/control/agent-runs",
     "/api/research/agent",
     "/api/diagnostics/postgres-transport",
+    "/api/diagnostics/supabase-auth-transport",
   ];
   const edgeSafe = [
     "/api/auth/me",
@@ -31,6 +32,29 @@ test("API proxy classifies DB-backed routes and keeps edge-safe routes local", (
   ];
   for (const path of dbBacked) assert.equal(isDbBackedApiPath(path), true, `expected DB-backed: ${path}`);
   for (const path of edgeSafe) assert.equal(isDbBackedApiPath(path), false, `expected edge-safe: ${path}`);
+});
+
+test("supabase auth transport probe is proxied to the Node runtime, never handled in workerd", async () => {
+  // The probe must measure the CloudBase Node container's network path, the
+  // same runtime that serves production login. If this route were classified
+  // as edge-safe it would execute on workerd and test the wrong network.
+  assert.equal(isDbBackedApiPath("/api/diagnostics/supabase-auth-transport"), true);
+
+  const captured: Captured = { url: "" };
+  const fakeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    captured.url = String(input);
+    captured.init = init;
+    return Response.json({ error: "Not found" }, { status: 404 });
+  };
+
+  const request = new Request("http://localhost:3000/api/diagnostics/supabase-auth-transport", {
+    method: "POST",
+    headers: { "x-signal-map-diagnostic-token": "probe-token" },
+  });
+  await proxyApiRequest(request, { upstream: "http://127.0.0.1:8080", fetchFn: fakeFetch });
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/api/diagnostics/supabase-auth-transport");
+  assert.equal(new Headers(captured.init?.headers).get("x-signal-map-diagnostic-token"), "probe-token");
 });
 
 test("API proxy forwards method, path, query, body and auth headers to the Node upstream", async () => {

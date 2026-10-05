@@ -27,6 +27,7 @@ import {
 } from "./handlers.ts";
 import { handleSourceCheck } from "./custom-sources.ts";
 import { handlePostgresTransportProbe } from "./postgres-transport-probe.ts";
+import { handleSupabaseAuthTransportProbe } from "./supabase-auth-transport-probe.ts";
 
 const port = Number.parseInt(process.env.PORT || "8080", 10);
 
@@ -86,6 +87,8 @@ export async function handleBackendRequest(request: Request) {
     response = await handleConnections();
   } else if (url.pathname === "/api/diagnostics/postgres-transport") {
     response = await handlePostgresTransportProbe(request);
+  } else if (url.pathname === "/api/diagnostics/supabase-auth-transport") {
+    response = await handleSupabaseAuthTransportProbe(request);
   } else if (url.pathname === "/api/research/plan") {
     response = await handleResearchPlan(request);
   } else if (url.pathname === "/api/research/agent") {

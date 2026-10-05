@@ -4,6 +4,7 @@ import test from "node:test";
 import { withOperationTimeout } from "../backend/handlers.ts";
 import { handleBackendRequest } from "../backend/node-server.ts";
 import { sanitizePostgresTransportError } from "../backend/postgres-transport-probe.ts";
+import { applyAuthEndpointOutcome, applyTransportFailureOutcome, runSupabaseAuthTransportProbe } from "../backend/supabase-auth-transport-probe.ts";
 
 type QueryPlanResponse = {
   queryPlan: {
@@ -15,6 +16,31 @@ type QueryPlanResponse = {
 type ErrorResponse = {
   error: string;
 };
+
+async function withSupabaseEnv<T>(env: Record<string, string | undefined>, run: () => T | Promise<T>): Promise<T> {
+  const keys = ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "NEXT_PUBLIC_SUPABASE_ANON_KEY", "SIGNAL_MAP_DIAGNOSTIC_TOKEN"] as const;
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  try {
+    return await run();
+  } finally {
+    for (const key of keys) {
+      const value = previous[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+function probeRequest(token?: string) {
+  return new Request("http://localhost/api/diagnostics/supabase-auth-transport", {
+    method: "POST",
+    headers: token ? { "x-signal-map-diagnostic-token": token } : {},
+  });
+}
 
 test("signals persistence setup returns a bounded DB_TIMEOUT instead of hanging", async () => {
   await assert.rejects(
@@ -99,6 +125,185 @@ test("postgres transport probe redacts connection secrets in error text", () => 
   assert.equal(value.includes("secret"), false);
   assert.equal(value.includes("abc"), false);
   assert.match(value, /\[redacted-database-url\]/);
+});
+
+test("supabase auth transport probe is POST only, default-off and token protected", async () => {
+  await withSupabaseEnv({ SIGNAL_MAP_DIAGNOSTIC_TOKEN: undefined }, async () => {
+    // GET is rejected before any access control decision.
+    const getResponse = await handleBackendRequest(
+      new Request("http://localhost/api/diagnostics/supabase-auth-transport"),
+    );
+    assert.equal(getResponse.status, 405);
+
+    // No token configured: the endpoint must not advertise itself at all.
+    const disabled = await handleBackendRequest(probeRequest());
+    assert.equal(disabled.status, 404);
+  });
+
+  await withSupabaseEnv({ SIGNAL_MAP_DIAGNOSTIC_TOKEN: "probe-token" }, async () => {
+    const wrongToken = await handleBackendRequest(probeRequest("not-the-token"));
+    assert.equal(wrongToken.status, 401);
+
+    const noToken = await handleBackendRequest(probeRequest());
+    assert.equal(noToken.status, 401);
+  });
+});
+
+test("supabase auth transport probe reports missing env without touching the network", async () => {
+  const report = await withSupabaseEnv({
+    NEXT_PUBLIC_SUPABASE_URL: undefined,
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: undefined,
+  }, () => runSupabaseAuthTransportProbe());
+
+  assert.equal(report.env.url, "MISSING");
+  assert.equal(report.env.key, "MISSING");
+  assert.equal(report.errorCategory, "ENV_MISSING");
+  assert.equal(report.dns.status, "NOT_RUN");
+  assert.equal(report.https.status, "NOT_RUN");
+  assert.equal(report.tls.status, "NOT_RUN");
+  assert.equal(report.hostnameVerification.status, "NOT_RUN");
+  assert.equal(report.authEndpoint.httpStatus, null);
+});
+
+test("supabase auth transport probe never leaks hostnames, urls, ips or secrets", async () => {
+  const report = await withSupabaseEnv({
+    NEXT_PUBLIC_SUPABASE_URL: "https://auth-fixture.supabase.co",
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "test-publishable-key",
+  }, () => runSupabaseAuthTransportProbe());
+
+  const serialized = JSON.stringify(report);
+  for (const forbidden of ["auth-fixture", "supabase.co", "https://", "test-publishable-key", "apikey", "Bearer"]) {
+    assert.equal(serialized.includes(forbidden), false, `report must not contain ${forbidden}`);
+  }
+  assert.equal(report.env.url, "PRESENT");
+  assert.equal(report.env.key, "PRESENT");
+});
+
+test("supabase auth transport probe exposes only the documented status shape", async () => {
+  const report = await withSupabaseEnv({
+    NEXT_PUBLIC_SUPABASE_URL: "https://auth-fixture.supabase.co",
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "test-publishable-key",
+  }, () => runSupabaseAuthTransportProbe());
+
+  assert.deepEqual(Object.keys(report).sort(), [
+    "authEndpoint", "dns", "env", "errorCategory", "hostnameVerification", "https", "tls",
+  ]);
+  for (const status of [report.dns.status, report.https.status, report.tls.status, report.hostnameVerification.status, report.authEndpoint.status]) {
+    assert.ok(["PASS", "FAIL", "NOT_RUN"].includes(status), `unexpected status ${status}`);
+  }
+  assert.ok([
+    "NONE", "ENV_MISSING", "DNS_FAILURE", "CONNECT_TIMEOUT", "CONNECTION_REFUSED",
+    "TLS_FAILURE", "HOSTNAME_FAILURE", "AUTH_HTTP_ERROR", "UPSTREAM_SERVER_ERROR", "UNKNOWN",
+  ].includes(report.errorCategory));
+});
+
+test("an HTTP error response still counts as a reachable transport path", () => {
+  // 401/403/404 prove DNS -> TCP -> TLS -> hostname -> HTTP all succeeded.
+  for (const status of [401, 403, 404]) {
+    const report = applyAuthEndpointOutcome({
+      env: { url: "PRESENT", key: "PRESENT" },
+      dns: { status: "PASS", durationMs: 1 },
+      https: { status: "PASS", durationMs: 1 },
+      tls: { status: "NOT_RUN" },
+      hostnameVerification: { status: "NOT_RUN" },
+      authEndpoint: { status: "NOT_RUN", httpStatus: null },
+      errorCategory: "NONE",
+    }, status);
+
+    assert.equal(report.tls.status, "PASS");
+    assert.equal(report.hostnameVerification.status, "PASS");
+    assert.equal(report.authEndpoint.status, "PASS");
+    assert.equal(report.authEndpoint.httpStatus, status);
+    // 401/403 mean the endpoint rejected the request; 404 means the path or
+    // resource is unavailable. None of them proves anything about the key.
+    assert.equal(report.errorCategory, "AUTH_HTTP_ERROR");
+  }
+});
+
+test("a 5xx upstream response is never reported as a credential or config finding", () => {
+  // The transport still succeeded, so DNS/TCP/TLS/hostname all stay PASS, but
+  // a server-side or intermediary failure must not be collapsed into the
+  // auth/config category.
+  for (const status of [500, 502, 503]) {
+    const report = applyAuthEndpointOutcome({
+      env: { url: "PRESENT", key: "PRESENT" },
+      dns: { status: "PASS", durationMs: 1 },
+      https: { status: "PASS", durationMs: 1 },
+      tls: { status: "NOT_RUN" },
+      hostnameVerification: { status: "NOT_RUN" },
+      authEndpoint: { status: "NOT_RUN", httpStatus: null },
+      errorCategory: "NONE",
+    }, status);
+
+    assert.equal(report.tls.status, "PASS");
+    assert.equal(report.hostnameVerification.status, "PASS");
+    assert.equal(report.authEndpoint.httpStatus, status);
+    assert.equal(report.authEndpoint.status, "FAIL");
+    assert.equal(report.errorCategory, "UPSTREAM_SERVER_ERROR");
+  }
+});
+
+test("a hostname mismatch is not reported as a certificate chain failure", () => {
+  // Node validates the chain before the name, so an altname mismatch means
+  // certificate verification actually succeeded.
+  const report = applyTransportFailureOutcome({
+    env: { url: "PRESENT", key: "PRESENT" },
+    dns: { status: "PASS", durationMs: 1 },
+    https: { status: "FAIL", durationMs: 1 },
+    tls: { status: "NOT_RUN" },
+    hostnameVerification: { status: "NOT_RUN" },
+    authEndpoint: { status: "NOT_RUN", httpStatus: null },
+    errorCategory: "NONE",
+  }, "HOSTNAME_FAILURE");
+
+  assert.equal(report.errorCategory, "HOSTNAME_FAILURE");
+  assert.equal(report.tls.status, "PASS");
+  assert.equal(report.hostnameVerification.status, "FAIL");
+});
+
+test("a certificate chain failure is not reported as a hostname mismatch", () => {
+  const report = applyTransportFailureOutcome({
+    env: { url: "PRESENT", key: "PRESENT" },
+    dns: { status: "PASS", durationMs: 1 },
+    https: { status: "FAIL", durationMs: 1 },
+    tls: { status: "NOT_RUN" },
+    hostnameVerification: { status: "NOT_RUN" },
+    authEndpoint: { status: "NOT_RUN", httpStatus: null },
+    errorCategory: "NONE",
+  }, "TLS_FAILURE");
+
+  assert.equal(report.errorCategory, "TLS_FAILURE");
+  assert.equal(report.tls.status, "FAIL");
+  assert.equal(report.hostnameVerification.status, "FAIL");
+});
+
+test("a non-TLS transport failure leaves TLS and hostname unverified", () => {
+  for (const category of ["CONNECT_TIMEOUT", "CONNECTION_REFUSED", "UNKNOWN"] as const) {
+    const report = applyTransportFailureOutcome({
+      env: { url: "PRESENT", key: "PRESENT" },
+      dns: { status: "PASS", durationMs: 1 },
+      https: { status: "FAIL", durationMs: 1 },
+      tls: { status: "NOT_RUN" },
+      hostnameVerification: { status: "NOT_RUN" },
+      authEndpoint: { status: "NOT_RUN", httpStatus: null },
+      errorCategory: "NONE",
+    }, category);
+
+    assert.equal(report.errorCategory, category);
+    assert.equal(report.tls.status, "NOT_RUN");
+    assert.equal(report.hostnameVerification.status, "NOT_RUN");
+  }
+});
+
+test("an HTTP error response is not reported as a transport failure", async () => {
+  const report = await withSupabaseEnv({
+    NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:1",
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "test-publishable-key",
+  }, () => runSupabaseAuthTransportProbe());
+
+  // An unreachable loopback port must not be mistaken for an HTTP-level answer.
+  assert.notEqual(report.authEndpoint.status, "PASS");
+  assert.notEqual(report.errorCategory, "AUTH_HTTP_ERROR");
 });
 
 test("standalone backend accepts anonymous POST signal runs without URL query state", async (t) => {
