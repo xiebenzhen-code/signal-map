@@ -8,14 +8,24 @@ dist-api
 .vinext
 .sites-package-stage*
 *.tar.gz
+**/*.zip
 *.zip
+**/*.bak
+*.bak
 coverage
 .git
 .gitignore
 
 # --- cloud build context hygiene (P6.1.5 STEP 2.9) ---
 # Local run/verification logs must never enter the cloud image.
+**/*.log
 *.log
+**/.workbuddy/
+.workbuddy/
+**/.zwork/
+.zwork/
+**/outputs/
+outputs/
 logs/
 tmp-*
 tmp_*
