@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "node:http";
 import { once } from "node:events";
+import { gzipSync, brotliCompressSync, deflateSync, createGzip, constants as zlibConstants } from "node:zlib";
 import { proxyApiRequest } from "../backend/api-proxy.ts";
 
 async function listen(server) {
@@ -14,6 +15,127 @@ async function stop(server) {
   server.closeAllConnections();
   await new Promise(resolve => server.close(resolve));
 }
+
+test("compression: real Node fetch removes decoded encoding/length and preserves response contracts", async t => {
+  const fixture = Buffer.from('{"user":null}');
+  const codecs = { gzip: gzipSync, br: brotliCompressSync, deflate: deflateSync, identity: value => value };
+  const cookies = ["fixture.0=first; Path=/; HttpOnly; Secure; SameSite=Lax",
+    "fixture.1=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax",
+    "expiry=local; Expires=Wed, 21 Oct 2037 07:28:00 GMT; Path=/"];
+  const publicOrigin = "https://preview.example.invalid";
+  let calls = 0;
+  const upstream = createServer((req, res) => {
+    calls++;
+    assert.equal(req.headers.origin, publicOrigin);
+    const url = new URL(req.url, "http://fixture.invalid");
+    const coding = url.searchParams.get("coding");
+    const body = codecs[coding](fixture);
+    const status = Number(url.searchParams.get("status"));
+    res.writeHead(status, {
+      "Content-Type": "application/json", "Cache-Control": "no-store",
+      Vary: "Origin, Accept-Encoding", "Access-Control-Allow-Origin": publicOrigin,
+      "Set-Cookie": cookies, "Content-Length": String(body.length),
+      ...(coding === "identity" ? {} : { "Content-Encoding": coding }),
+      ...(status === 302 ? { Location: "/destination" } : {}),
+    });
+    res.end(body);
+  });
+  const origin = await listen(upstream);
+  t.after(() => stop(upstream));
+  for (const [coding, compress] of Object.entries(codecs)) {
+    for (const status of [200, 429, 503, 302]) {
+      const response = await proxyApiRequest(new Request(publicOrigin +
+        `/api/auth/me?coding=${coding}&status=${status}`, {
+        headers: { "Accept-Encoding": coding, Origin: publicOrigin },
+      }), { upstream: origin });
+      assert.equal(response.status, status, `${coding}/${status}`);
+      assert.equal(response.headers.get("content-encoding"), null, `${coding}/${status}: decoded body encoding`);
+      assert.equal(response.headers.get("content-length"), coding === "identity" ? String(fixture.length) : null,
+        `${coding}/${status}: compressed length must not describe decoded bytes (${compress(fixture).length})`);
+      assert.equal(response.headers.get("content-type"), "application/json");
+      assert.equal(response.headers.get("cache-control"), "no-store");
+      assert.equal(response.headers.get("vary"), "Origin, Accept-Encoding");
+      assert.equal(response.headers.get("access-control-allow-origin"), publicOrigin);
+      assert.deepEqual(response.headers.getSetCookie(), cookies);
+      assert.equal(response.headers.get("location"), status === 302 ? "/destination" : null);
+      assert.deepEqual(Buffer.from(await response.arrayBuffer()), fixture);
+    }
+  }
+  assert.equal(calls, 16, "redirects stay manual; each matrix request reaches upstream once");
+});
+
+test("compression: HEAD/204/304 and injected bodyless responses retain representation metadata", async t => {
+  const upstream = createServer((req, res) => {
+    const status = req.method === "HEAD" ? 200 : Number(req.url.slice(1));
+    res.writeHead(status, { "Content-Encoding": "gzip", "Content-Length": "33",
+      "Cache-Control": "no-store", Vary: "Accept-Encoding" });
+    res.end();
+  });
+  const origin = await listen(upstream);
+  t.after(() => stop(upstream));
+  for (const [method, status] of [["HEAD", 200], ["GET", 204], ["GET", 304]]) {
+    const response = await proxyApiRequest(new Request(`https://preview.example.invalid/${status}`, { method }),
+      { upstream: origin });
+    assert.equal(response.status, status);
+    assert.equal(response.body, null);
+    assert.equal(response.headers.get("content-encoding"), "gzip");
+    assert.equal(response.headers.get("content-length"), "33");
+  }
+  const bodyless = await proxyApiRequest(new Request("https://preview.example.invalid/empty"), {
+    upstream: origin, fetchFn: async () => new Response(null, {
+      headers: { "Content-Encoding": "gzip", "Content-Length": "33" },
+    }),
+  });
+  assert.equal(bodyless.body, null);
+  assert.equal(bodyless.headers.get("content-encoding"), "gzip");
+  assert.equal(bodyless.headers.get("content-length"), "33");
+});
+
+test("compression: injected raw bytes are not assumed to be Node-decoded", async () => {
+  const bytes = gzipSync(Buffer.from("local compressed fixture"));
+  const response = await proxyApiRequest(new Request("https://preview.example.invalid/raw"), {
+    upstream: "http://127.0.0.1:8080", fetchFn: async () => new Response(bytes, {
+      headers: { "Content-Encoding": "gzip", "Content-Length": String(bytes.length) },
+    }),
+  });
+  assert.equal(response.headers.get("content-encoding"), "gzip");
+  assert.equal(response.headers.get("content-length"), String(bytes.length));
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes);
+});
+
+test("compression: decoded gzip response remains streaming before upstream completion", async t => {
+  let finish;
+  const finished = new Promise(resolve => { finish = resolve; });
+  const first = '{"fixture":';
+  const upstream = createServer(async (_req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json", "Content-Encoding": "gzip",
+      "Cache-Control": "no-store" });
+    const compressor = createGzip();
+    compressor.pipe(res);
+    compressor.write(first);
+    compressor.flush(zlibConstants.Z_SYNC_FLUSH);
+    await finished;
+    compressor.end("true}");
+  });
+  const origin = await listen(upstream);
+  t.after(async () => { finish(); await stop(upstream); });
+  const response = await proxyApiRequest(new Request("https://preview.example.invalid/stream"), { upstream: origin });
+  assert.equal(response.headers.get("content-encoding"), null);
+  assert.equal(response.headers.get("content-length"), null);
+  const reader = response.body.getReader();
+  let timer;
+  try {
+    const chunk = await Promise.race([reader.read(), new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("proxy buffered the unfinished stream")), 2000);
+    })]);
+    assert.equal(chunk.done, false);
+    assert.equal(Buffer.from(chunk.value).toString(), first);
+    finish();
+    let tail = "";
+    while (true) { const next = await reader.read(); if (next.done) break; tail += Buffer.from(next.value).toString(); }
+    assert.equal(first + tail, '{"fixture":true}');
+  } finally { clearTimeout(timer); finish(); reader.releaseLock(); }
+});
 
 test("real HTTP proxy → Node API → Supabase substitute keeps public recovery target", async t => {
   const keys = ["NODE_ENV", "SIGNAL_MAP_ALLOWED_ORIGIN", "NEXT_PUBLIC_SUPABASE_URL",

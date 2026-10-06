@@ -64,6 +64,15 @@ export async function proxyApiRequest(
     const doFetch = options.fetchFn ?? fetch;
     const upstreamResponse = await doFetch(upstreamUrl, init);
     const responseHeaders = new Headers(upstreamResponse.headers);
+    // Node fetch decodes these bodies but retains the compressed wire headers.
+    // Injected fetch implementations may instead return raw encoded bytes.
+    const encoding = responseHeaders.get("content-encoding")?.trim();
+    if (!options.fetchFn && globalThis.process?.versions?.node &&
+      request.method !== "HEAD" && upstreamResponse.body !== null &&
+      encoding && /^(gzip|br|deflate)$/i.test(encoding)) {
+      responseHeaders.delete("content-encoding");
+      responseHeaders.delete("content-length");
+    }
     const location = responseHeaders.get("location");
     if (upstreamResponse.status >= 300 && upstreamResponse.status < 400 && location) {
       const target = new URL(location, upstreamUrl);
