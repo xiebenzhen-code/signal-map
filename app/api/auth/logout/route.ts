@@ -1,5 +1,5 @@
-import { handleAuthLogout } from "@/backend/handlers";
+import { proxyApiRequest } from "@/backend/api-proxy";
 
 export async function POST(request: Request) {
-  return handleAuthLogout(request);
+  return proxyApiRequest(request);
 }

@@ -606,7 +606,19 @@ export const handleAuthPasswordReset = withSession(async (request: Request) => {
   if (!email || !email.includes("@")) return Response.json({ error: "请输入有效邮箱" }, { status: 400 });
   const { client } = requestSession(request);
   if (!client) return Response.json({ error: "Supabase Auth 尚未配置" }, { status: 503 });
-  const origin = new URL(request.url).origin;
+  // Email destinations are server configuration, never client Host/Origin or
+  // forwarded headers. Development retains its existing local request fallback.
+  const configuredOrigin = process.env.SIGNAL_MAP_ALLOWED_ORIGIN;
+  const production = process.env.NODE_ENV === "production";
+  if (production && !configuredOrigin) throw new Error("Public auth origin required");
+  const originUrl = new URL(configuredOrigin ?? new URL(request.url).origin);
+  if (configuredOrigin !== undefined && (configuredOrigin !== originUrl.origin ||
+    originUrl.username || originUrl.password ||
+    (originUrl.protocol !== "https:" && (production || originUrl.protocol !== "http:" ||
+      !["localhost", "127.0.0.1", "[::1]"].includes(originUrl.hostname))))) {
+    throw new Error("Invalid public auth origin");
+  }
+  const origin = originUrl.origin;
   const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo: `${origin}/auth/reset-password` });
   if (error) {
     const mapped = mapAuthError(error, "login");
