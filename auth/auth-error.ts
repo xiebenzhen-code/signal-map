@@ -1,4 +1,4 @@
-type AuthErrorLike = { code?: string; message?: string; status?: number };
+type AuthErrorLike = { code?: string; message?: string; name?: string; status?: number; cause?: unknown };
 
 export function mapAuthError(error: AuthErrorLike, action: "login" | "signup") {
   const code = String(error.code || "").toLowerCase();
@@ -24,7 +24,8 @@ export function mapAuthError(error: AuthErrorLike, action: "login" | "signup") {
   if (code === "signup_disabled") {
     return { status: 403, code, error: "当前站点尚未开放注册。" };
   }
-  if ((error.status || 0) >= 500) {
+  const transportFailure = error.status === 0 && /fetch failed|failed to fetch|networkerror|network request failed|load failed|econn(?:refused|reset|timedout)|enotfound|etimedout/i.test(message);
+  if ((error.status || 0) >= 500 || error.status === 0 || error.name === "AuthRetryableFetchError" || transportFailure) {
     return { status: 503, code: "provider_unavailable", error: "认证服务暂时不可用，请稍后重试。" };
   }
   return {

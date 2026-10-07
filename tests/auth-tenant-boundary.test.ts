@@ -19,7 +19,15 @@ test("auth errors remain actionable without exposing provider details", () => {
   assert.deepEqual(mapAuthError({ code: "user_already_exists", status: 422 }, "signup"), {
     status: 409, code: "user_exists", error: "该邮箱已注册，请直接登录。",
   });
-  assert.equal(mapAuthError({ code: "invalid_credentials", status: 400 }, "login").code, "invalid_credentials");
+  assert.deepEqual(mapAuthError({ code: "invalid_credentials", status: 400 }, "login"), {
+    status: 401, code: "invalid_credentials", error: "邮箱或密码不正确。",
+  });
+  assert.deepEqual(mapAuthError({ name: "AuthRetryableFetchError", status: 0 }, "login"), {
+    status: 503, code: "provider_unavailable", error: "认证服务暂时不可用，请稍后重试。",
+  });
+  assert.deepEqual(mapAuthError({ name: "TypeError", status: 0, cause: new Error("fetch failed") }, "login"), {
+    status: 503, code: "provider_unavailable", error: "认证服务暂时不可用，请稍后重试。",
+  });
   assert.equal(mapAuthError({ code: "weak_password", status: 400 }, "signup").code, "password_policy");
   assert.equal(mapAuthError({ code: "over_email_send_rate_limit", status: 429 }, "signup").code, "rate_limited");
   assert.equal(mapAuthError({ code: "unexpected_failure", status: 503 }, "login").code, "provider_unavailable");
