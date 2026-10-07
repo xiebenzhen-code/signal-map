@@ -65,6 +65,34 @@ export function upstreamErrorNameHeader(error: unknown) {
   return typeof name === "string" && AUTH_ERROR_NAMES.has(name) ? name : "unknown";
 }
 
+const FINGERPRINT_VALUE = /^[A-Za-z0-9_.-]{1,64}$/;
+
+function safeFingerprintValue(value: unknown) {
+  if (value === undefined || value === null) return "none";
+  const normalized = typeof value === "number" && Number.isFinite(value) ? String(value) : typeof value === "string" ? value : "none";
+  return FINGERPRINT_VALUE.test(normalized) ? normalized : "none";
+}
+
+function fingerprintCause(error: unknown) {
+  const cause = (error as { cause?: unknown })?.cause;
+  if (!cause || typeof cause !== "object") return { name: "none", code: "none" };
+  const causeRecord = cause as { name?: unknown; code?: unknown };
+  return { name: safeFingerprintValue(causeRecord.name), code: safeFingerprintValue(causeRecord.code) };
+}
+
+export function authErrorFingerprintHeaders(error: unknown) {
+  const value = error as { name?: unknown; status?: unknown; code?: unknown; constructor?: { name?: unknown } };
+  const cause = fingerprintCause(error);
+  return {
+    "X-Signal-Auth-Error-Name": safeFingerprintValue(value?.name),
+    "X-Signal-Auth-Error-Status": safeFingerprintValue(value?.status),
+    "X-Signal-Auth-Error-Code": safeFingerprintValue(value?.code),
+    "X-Signal-Auth-Error-Constructor": safeFingerprintValue(value?.constructor?.name),
+    "X-Signal-Auth-Cause-Name": cause.name,
+    "X-Signal-Auth-Cause-Code": cause.code,
+  };
+}
+
 export async function withOperationTimeout<T>(operation: Promise<T>, timeoutMs: number, code: string) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -574,6 +602,12 @@ export const handleAuthLogin = withSession(async (request: Request) => {
           "X-Signal-Auth-Upstream-Status": upstreamStatusHeader(error),
           "X-Signal-Auth-Error-Name": upstreamErrorNameHeader(error),
         },
+      });
+    }
+    if (mapped.code === "auth_failed") {
+      return Response.json({ error: mapped.error, code: mapped.code }, {
+        status: mapped.status,
+        headers: authErrorFingerprintHeaders(error),
       });
     }
     return Response.json({ error: mapped.error, code: mapped.code }, { status: mapped.status });

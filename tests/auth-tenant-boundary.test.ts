@@ -255,7 +255,35 @@ test("an allow-list miss never echoes an arbitrary error name", async (t) => {
   assert.equal(upstreamStatusHeader(undefined), "unknown");
 });
 
-test("non-5xx auth failures carry no upstream diagnostics", async (t) => {
+test("auth_failed exposes only bounded safe fingerprint headers", async (t) => {
+  const keys = ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"] as const;
+  const previous = keys.map((key) => process.env[key]);
+  t.after(() => keys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; }));
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://auth-fixture.supabase.co";
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "test-publishable-key";
+  t.mock.method(globalThis, "fetch", async () => Response.json({ code: "unexpected_failure" }, { status: 400 }));
+
+  const response = await handleBackendRequest(new Request("https://signal.benzhenlab.com/api/auth/login", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "fixture@example.com", password: "test-password" }),
+  }));
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error: "登录未完成，请检查邮箱和密码。", code: "auth_failed" });
+  assert.equal(response.headers.get("x-signal-auth-error-name"), "AuthApiError");
+  assert.equal(response.headers.get("x-signal-auth-error-status"), "400");
+  // auth-js may discard the upstream `code` field for this response shape.
+  assert.equal(response.headers.get("x-signal-auth-error-code"), "none");
+  assert.equal(response.headers.get("x-signal-auth-error-constructor"), "AuthApiError");
+  assert.equal(response.headers.get("x-signal-auth-cause-name"), "none");
+  assert.equal(response.headers.get("x-signal-auth-cause-code"), "none");
+  const serialized = JSON.stringify([...response.headers.entries()]);
+  for (const forbidden of ["fixture@example.com", "test-password", "test-publishable-key", "auth-fixture", "supabase.co", "unexpected message", "access_token", "Bearer"]) {
+    assert.equal(serialized.includes(forbidden), false, `fingerprint must not leak ${forbidden}`);
+  }
+});
+
+test("invalid_credentials keeps its response and has no fingerprint headers", async (t) => {
   const keys = ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"] as const;
   const previous = keys.map((key) => process.env[key]);
   t.after(() => keys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; }));
