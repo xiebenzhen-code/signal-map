@@ -41,10 +41,48 @@ function proxyErrorMetadata(error: unknown) {
   const codes = ["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN",
     "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT", "UND_ERR_SOCKET",
     "ERR_INVALID_CHAR", "ERR_HTTP_INVALID_HEADER_VALUE", "ERR_INVALID_ARG_TYPE", "ERR_HTTP_HEADERS_SENT",
+    "UPSTREAM_BODY_TOO_LARGE", "UPSTREAM_BODY_TIMEOUT",
     "CERT_HAS_EXPIRED", "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "DEPTH_ZERO_SELF_SIGNED_CERT"];
   return { errorClass: typeof value?.name === "string" && names.includes(value.name) ? value.name : "OTHER",
     errorCode: typeof value?.code === "string" && codes.includes(value.code) ? value.code : "OTHER",
     causeCode: typeof value?.cause?.code === "string" && codes.includes(value.cause.code) ? value.cause.code : "OTHER" };
+}
+
+// Login responses are small. Finish reading before exposing a successful response
+// or Cookie to the framework; streaming errors otherwise occur outside this catch.
+async function readLoginResponseBody(response: Response): Promise<ArrayBuffer | null> {
+  if (!response.body) return null;
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(Object.assign(new Error("Login response read timed out"), {
+      name: "TimeoutError", code: "UPSTREAM_BODY_TIMEOUT",
+    })), 8000);
+  });
+  try {
+    while (true) {
+      const { done, value } = await Promise.race([reader.read(), deadline]);
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > 64 * 1024) throw Object.assign(new Error("Login response exceeds limit"), {
+        code: "UPSTREAM_BODY_TOO_LARGE",
+      });
+      chunks.push(value);
+    }
+    const body = new Uint8Array(bytes);
+    let offset = 0;
+    for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
+    return body.buffer;
+  } catch (error) {
+    // Cancellation itself may stall. It must not defeat the response deadline.
+    void reader.cancel().catch(() => {});
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    reader.releaseLock();
+  }
 }
 
 export function isDbBackedApiPath(pathname: string): boolean {
@@ -132,8 +170,20 @@ export async function proxyApiRequest(
         responseHeaders.set("location", url.origin + target.pathname + target.search + target.hash);
       }
     }
+    let responseBody: BodyInit | null = upstreamResponse.body;
+    if (request.method === "POST" && url.pathname === "/api/auth/login") {
+      stage = "response_body";
+      responseBody = await readLoginResponseBody(upstreamResponse);
+      // These describe the upstream connection, not the buffered downstream body.
+      const connectionHeaders = (responseHeaders.get("connection") ?? "").split(",");
+      for (const name of [...connectionHeaders, "connection", "keep-alive", "proxy-connection",
+        "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding",
+        "upgrade", "content-length"]) {
+        if (name.trim()) responseHeaders.delete(name.trim());
+      }
+    }
     stage = "response_construct";
-    const response = new Response(upstreamResponse.body, {
+    const response = new Response(responseBody, {
       status: upstreamResponse.status,
       statusText: upstreamResponse.statusText,
       headers: responseHeaders,
