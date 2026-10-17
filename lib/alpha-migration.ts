@@ -79,7 +79,7 @@ function normalizeScope(value?: string): SourceScope {
 
 function normalizeFreshness(value?: string): FreshnessWindow {
   if (value === "1d" || value === "24h") return "24h";
-  if (value === "3d" || value === "30d") return value;
+  if (value === "3d" || value === "30d" || value === "90d") return value;
   return "7d";
 }
 
@@ -91,7 +91,7 @@ export function isNormalizedInformationFilter(value: unknown): value is Informat
     typeof filter.filterName === "string" &&
     typeof filter.industry === "string" &&
     Array.isArray(filter.focusAreas) &&
-    ["24h", "3d", "7d", "30d"].includes(String(filter.freshnessWindow)) &&
+    ["24h", "3d", "7d", "30d", "90d"].includes(String(filter.freshnessWindow)) &&
     ["domestic", "global", "hybrid", "custom"].includes(String(filter.sourceScope)) &&
     !("identity" in filter) &&
     !("knownInformation" in filter) &&

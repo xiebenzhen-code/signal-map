@@ -3,6 +3,7 @@ import type { CandidateSelectionAudit } from "../research/candidate-selection.ts
 import type { EligibilityAuditFunnel } from "../research/research-pipeline.ts";
 import { runTaskPlannedAgent } from "../agent/task-runner.ts";
 import { createEnvironmentModelAdapter } from "../agent/model-adapter.ts";
+import { createModelUsageCollector } from "../agent/models/usage-observation.ts";
 import { createSignalTracer, createSignalsRequestId, type SignalTracePhase } from "./signals-trace.ts";
 import { requestSession, resolveAuthContext, withSession } from "../auth/session.ts";
 import { feedbackKnowledgeRecord, feedbackScope, type FeedbackKind } from "./feedback-records.ts";
@@ -207,6 +208,9 @@ export const handleSignals = withSession(async (request: Request) => {
   if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
   const requestId = createSignalsRequestId(request.headers.get("X-Signal-Map-Request-Id"));
   const tracer = createSignalTracer(requestId);
+  const modelUsage = createModelUsageCollector((event) => {
+    console.info(JSON.stringify({ event: "model_call", requestId, ...event }));
+  });
   const deadlineAt = Date.now() + 25000;
   const markPhase: NonNullable<AgentRunOptions["onPhase"]> = (event) => {
     const allowed = [
@@ -304,7 +308,7 @@ export const handleSignals = withSession(async (request: Request) => {
     const result = await executeResearch({ identity, input, context, repository,
       onPhase: markPhase,
       deadlineAt,
-      modelAdapter: createEnvironmentModelAdapter(), debug: includeEligibilityAudit
+      modelAdapter: createEnvironmentModelAdapter({ onCall: modelUsage.record }), debug: includeEligibilityAudit
       ? {
           onPhase: markPhase,
           deadlineAt,
@@ -327,8 +331,8 @@ export const handleSignals = withSession(async (request: Request) => {
           },
         }
       : includeEligibilityAudit
-        ? { ...result, requestId, debug: { candidateSelectionAudit, eligibilityFunnel } }
-        : { ...result, requestId, researchMode: identity.mode }, {
+        ? { ...result, requestId, modelUsage: modelUsage.snapshot(), debug: { candidateSelectionAudit, eligibilityFunnel } }
+        : { ...result, requestId, modelUsage: modelUsage.snapshot(), researchMode: identity.mode }, {
       headers: { "Cache-Control": "no-store", "X-Signal-Map-Request-Id": requestId },
     });
     if (identity.mode === "anonymous" && identity.setCookie) response.headers.append("Set-Cookie", identity.setCookie);
@@ -345,6 +349,7 @@ export const handleSignals = withSession(async (request: Request) => {
     const response = Response.json(
       {
         error: "Research Pipeline 未能完成。",
+        modelUsage: modelUsage.snapshot(),
         reason: errorCode === "WORKER_DEADLINE" ? "本次研究达到时间上限，尚未完成，请稍后重新尝试。" : "本轮来源检索暂时不可用，请稍后再试。",
         requestId,
         errorCode,

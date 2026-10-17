@@ -214,7 +214,7 @@ test("live sample type stays compatible with the discovery item contract", () =>
   assert.ok(sample);
 });
 
-test("broad discovery (empty entities) falls through to all known GitHub targets", async () => {
+test("broad coding discovery can search known GitHub targets when the subject supports it", async () => {
   // Use an injected fetcher so we don't depend on real GitHub API availability.
   const fakeFetcher = (async (url: string | URL | Request) => {
     const u = String(url);
@@ -228,9 +228,20 @@ test("broad discovery (empty entities) falls through to all known GitHub targets
       created_at: "2026-09-29T00:00:00Z",
     }]), { status: 200, headers: { "Content-Type": "application/json" } });
   }) as typeof fetch;
-  const result = await discoverOfficialGithubReleases([], fakeFetcher);
+  const result = await discoverOfficialGithubReleases([], fakeFetcher, "new AI coding tools and CLI agents");
   assert.equal(result.outcome.searched, true, "broad discovery must search known repos");
   assert.ok(result.items.length > 0, `broad discovery must return items, got ${result.items.length}`);
   // Verify it tried more than one repo (broad fallback)
   assert.ok(result.items.length >= 2, `should search multiple default repos, got ${result.items.length}`);
+});
+
+test("unknown non-coding entities do not fetch unrelated default AI repositories", async () => {
+  let requests = 0;
+  const result = await discoverOfficialGithubReleases(["Shopify"], (async () => {
+    requests += 1;
+    return Response.json([]);
+  }) as typeof fetch, "Shopify checkout payments changes");
+  assert.equal(requests, 0);
+  assert.equal(result.outcome.searched, false);
+  assert.deepEqual(result.items, []);
 });

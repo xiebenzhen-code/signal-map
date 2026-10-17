@@ -363,6 +363,7 @@ const changeKeywords = [
 ];
 
 function normalizeFreshnessWindow(value: string): QueryPlan["requestedFreshnessWindow"] {
+  if (/90d|90\s*(?:天|days?)|3\s*个月/i.test(value)) return "90d";
   if (/24h|1d|24\s*小时/i.test(value)) return "24h";
   if (/3d|3\s*天/i.test(value)) return "3d";
   if (/30d|30\s*天|1\s*月/i.test(value)) return "30d";

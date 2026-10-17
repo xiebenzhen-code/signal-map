@@ -139,6 +139,7 @@ function validRetrievalQueries(plan?: RetrievalPlan | LegacySourceSelection) {
 
 export function normalizeRetrievalFreshness(value?: string): QueryPlan["requestedFreshnessWindow"] {
   const raw = value?.trim().toLowerCase() || "7d";
+  if (/90d|90\s*(?:天|days?)|3\s*个月/.test(raw)) return "90d";
   // Order matters: the 30d/month window must be tested before the single-digit
   // "3" branch, otherwise "30d" is truncated to 3d and a one-month question
   // silently searches only the last three days.
@@ -1495,7 +1496,7 @@ export async function runResearchPipeline(
       ? searchDirectProvider("Company Source Registry", () => companyRegistrySearch(plan), "primary", plan, failures, "company-registry")
       : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "Company Source Registry", execution: "not_searched" as const, searched: false, resultCount: 0 } }),
     canExecute("github-releases")
-      ? discoverOfficialGithubReleases(plan.entities)
+      ? discoverOfficialGithubReleases(plan.entities, fetch, plan.originalNeed)
       : Promise.resolve({ items: [], outcome: { source: "GitHub Releases", execution: "not_searched" as const, searched: false, resultCount: 0 }, failure: undefined }),
     canExecute("official-update-pages")
       ? discoverOfficialUpdatePages(plan.entities)
@@ -1828,7 +1829,7 @@ export async function runResearchPipeline(
       recordOutcome(arxivFall.outcome);
     }
     if (!canExecute("github-releases")) {
-      const gh = await discoverOfficialGithubReleases(plan.entities);
+      const gh = await discoverOfficialGithubReleases(plan.entities, fetch, plan.originalNeed);
       technicalFallback.push(...gh.items.map((item) => ({ ...item, sourceType: "primary" as const })));
       recordOutcome(gh.outcome);
       if (gh.failure) failures.push(gh.failure);

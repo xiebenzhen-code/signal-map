@@ -143,12 +143,14 @@ async function githubRecentReleases(repo: string, fetcher: Fetcher): Promise<Liv
 export async function discoverOfficialGithubReleases(
   entities: string[],
   fetcher: Fetcher = fetch,
+  subject = "",
 ): Promise<{ items: LiveItem[]; outcome: SourceExecutionOutcome; failure?: string }> {
   const matched = matchedTargets(entities);
-  // A broad query with no tracked entity still falls through to all known
-  // project repos so the downstream relevance filter can select query-matching
-  // results — instead of silently returning zero candidates.
-  const targets = matched.length ? matched : officialUpdateTargets;
+  // Discovery is broad within the question's subject, not across unrelated
+  // industries. General web/paper/community discovery remains independent.
+  const broadCoding = entities.every((entity) => /^(?:AI|CLI|tools?|coding|agents?)$/i.test(entity)) &&
+    /coding|code|CLI|编程|代码|开发工具/i.test(subject);
+  const targets = matched.length ? matched : broadCoding ? officialUpdateTargets : [];
   const repos = Array.from(
     new Set(targets.flatMap((target) => target.githubRepos || [])),
   ).slice(0, 4);

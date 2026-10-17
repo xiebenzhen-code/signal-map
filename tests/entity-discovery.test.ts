@@ -10,6 +10,13 @@ const input = (entity: string, question: string) => ({
   trackedEntities: entity, trackedEvents: "", userJudgements: "", evidenceHistory: "", freshnessWindow: "7d",
 });
 
+test("90-day questions survive query and retrieval plan normalization", async () => {
+  const { normalizeRetrievalFreshness } = await import("../research/research-pipeline.ts");
+  const plan = planQuery({ ...input("Node.js", "Node.js 22 security updates past 90 days"), freshnessWindow: "90d" });
+  assert.equal(plan.requestedFreshnessWindow, "90d");
+  assert.equal(normalizeRetrievalFreshness("90d"), "90d");
+});
+
 test("DeepSeek, OpenAI, and Anthropic use the same registry-backed entity resolution", () => {
   for (const entity of ["DeepSeek", "OpenAI", "Anthropic"]) {
     const plan = planQuery(input(entity, `${entity} updates`));
