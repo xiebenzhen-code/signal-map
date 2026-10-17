@@ -1,7 +1,7 @@
 import type { ResearchOverview, ResearchSignal } from "../research/types.ts";
 import type { SourceCoverage } from "../research/source-coverage.ts";
 
-export type FreshnessWindow = "24h" | "3d" | "7d" | "30d";
+export type FreshnessWindow = "24h" | "3d" | "7d" | "30d" | "90d";
 export type SourceScope = "domestic" | "global" | "hybrid" | "custom";
 type DataMode = "live" | "demo" | "mixed";
 
@@ -53,6 +53,7 @@ export type ActiveKnowledgeContext = {
 export type ProviderCoverage = SourceCoverage;
 
 export type InformationRunPayload = {
+  modelUsage?: ReturnType<ReturnType<typeof import("../agent/models/usage-observation.ts").createModelUsageCollector>["snapshot"]>;
   customSourceChecks?: import("../lib/custom-sources.ts").CustomSourceCheck[];
   status?: "completed" | "failed" | "needs_more_evidence";
   requestId?: string;

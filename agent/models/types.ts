@@ -19,5 +19,17 @@ export interface ModelAdapter {
   synthesizeEvidence(input: EvidenceSynthesisInput): Promise<EvidenceSynthesisResult>;
 }
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
-export type AdapterOptions = { env?: Record<string, string | undefined>; fetch?: FetchLike };
+export type ModelCallObservation = {
+  provider: "openai" | "deepseek";
+  model: string;
+  stage: "planning" | "synthesis";
+  durationMs: number;
+  httpStatus: number | null;
+  transportStatus: "completed" | "error";
+  errorCode: ModelErrorCode | null;
+  usage: { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null } | null;
+  cost: null;
+};
+export type AdapterOptions = { env?: Record<string, string | undefined>; fetch?: FetchLike;
+  onCall?: (event: ModelCallObservation) => void };
 export type ParsedConclusion = { claim: string; evidenceIds: string[]; sourceUrls: string[]; confidence: number; verificationStatus: VerificationStatus; statementType: "FACT" | "INTERPRETATION" | "SIGNAL" };
