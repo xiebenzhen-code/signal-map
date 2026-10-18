@@ -1,5 +1,50 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+
+test("per-request usage summary keeps missing tokens unknown and observers isolated", async () => {
+  const { createModelUsageCollector } = await import("../agent/models/usage-observation.ts");
+  const usage = createModelUsageCollector();
+  const adapter = createModelAdapter({ env: { OPENAI_API_KEY: "test" }, onCall: usage.record,
+    fetch: async () => Response.json({ output_text: JSON.stringify({ queries: [] }) }) });
+  await adapter.planResearch({ userQuery: "q", relatedKnowledge: [], existingEvidence: [], previousQueries: [], round: 1 });
+  assert.equal(usage.snapshot().callCount, 1);
+  assert.equal(usage.snapshot().usageCompleteness, "none");
+  assert.equal(usage.snapshot().reportedTotalTokens, null);
+  assert.equal(usage.snapshot().cost, null);
+  const isolated = createModelAdapter({ env: { OPENAI_API_KEY: "test" }, onCall: () => { throw new Error("sink failed"); },
+    fetch: async () => Response.json({ output_text: JSON.stringify({ queries: [] }) }) });
+  assert.equal((await isolated.planResearch({ userQuery: "q", relatedKnowledge: [], existingEvidence: [], previousQueries: [], round: 1 })).status, "configured");
+});
+
+test("model transport reports provider usage without prompts or credentials", async () => {
+  const events: unknown[] = [];
+  const adapter = createModelAdapter({ env: { MODEL_PROVIDER: "openai", OPENAI_API_KEY: "secret-key" },
+    onCall: (event) => events.push(event), fetch: async () => Response.json({
+      output_text: JSON.stringify({ objective: "secret-question", queries: ["secret-query"] }),
+      usage: { input_tokens: 12, output_tokens: 7, total_tokens: 19 },
+    }) });
+  await adapter.planResearch({ userQuery: "secret-question", relatedKnowledge: [], existingEvidence: [], previousQueries: [], round: 1 });
+  assert.equal(events.length, 1);
+  const event = events[0] as Record<string, unknown>;
+  assert.equal(event.provider, "openai");
+  assert.equal(event.stage, "planning");
+  assert.equal(event.httpStatus, 200);
+  assert.deepEqual(event.usage, { inputTokens: 12, outputTokens: 7, totalTokens: 19 });
+  assert.equal(event.cost, null);
+  assert.doesNotMatch(JSON.stringify(events), /secret-key|secret-question|secret-query|Bearer/);
+});
+
+test("failed calls and unreported token usage remain observable and unknown", async () => {
+  const events: unknown[] = [];
+  const adapter = createModelAdapter({ env: { MODEL_PROVIDER: "deepseek", DEEPSEEK_API_KEY: "secret" },
+    onCall: (event) => events.push(event), fetch: async () => new Response("provider secret", { status: 503 }) });
+  const result = await adapter.planResearch({ userQuery: "q", relatedKnowledge: [], existingEvidence: [], previousQueries: [], round: 1 });
+  assert.equal(result.status, "error");
+  assert.equal(events.length, 1);
+  assert.equal((events[0] as Record<string, unknown>).usage, null);
+  assert.equal((events[0] as Record<string, unknown>).errorCode, "model_unavailable");
+  assert.doesNotMatch(JSON.stringify(events), /provider secret/);
+});
 import { createModelAdapter } from "../agent/model-adapter.ts";
 
 const input = { userQuery: "What changed?", relatedKnowledge: [], existingEvidence: [], previousQueries: [], round: 1 };

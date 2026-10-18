@@ -190,6 +190,30 @@ export type AgentRunOptions = {
   maxQueriesPerRound?: number;
   maxEvidenceItems?: number;
   maxExecutionTimeMs?: number;
+  /**
+   * Run-wide cap on provider-query combinations (one provider asked one query
+   * under one set of result-affecting params). Each combination is charged when
+   * its retrieval slice actually starts, including one that fails or whose
+   * result is unknown.
+   *
+   * This is a logical retrieval cap, NOT a hard limit on HTTP requests: the
+   * pipeline may issue more than one HTTP call per combination and that is not
+   * observable from the runner.
+   */
+  maxResearchRequests?: number;
+  /**
+   * Run-wide cap on retrieval slice calls that may actually start. One slice is
+   * one research call over one (providers x queries) shape. A slice that never
+   * starts — earlier slice threw, deadline closed, allowance exhausted — is not
+   * charged.
+   *
+   * Defaults to maxResearchPlanAttempts when set, otherwise the previous plan
+   * opportunity count. `maxResearchPlanAttempts` is accepted as a deprecated
+   * alias of this option.
+   */
+  maxResearchRetrievalSlices?: number;
+  /** @deprecated Alias of maxResearchRetrievalSlices. */
+  maxResearchPlanAttempts?: number;
   availableSourceCapabilities?: SourceCapability[];
   currentGoal?: { type?: string; objective?: string };
   modelAdapter?: {

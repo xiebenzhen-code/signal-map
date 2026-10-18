@@ -27,6 +27,24 @@ const videoPlan: QueryPlan = {
   requestedFreshnessWindow: "30d",
 };
 
+test("cross-industry relevance requires subject evidence, not generic documentation", () => {
+  const plan: QueryPlan = { ...videoPlan, topicProfile: undefined,
+    originalNeed: "Shopify checkout payments updates", coreKeywords: ["Shopify", "checkout", "payments"],
+    entities: ["Shopify"], industryKeywords: ["official documentation"], englishKeywords: [], synonyms: [] };
+  assert.equal(assessTopicRelevance("Anthropic SDK documentation adds execution_identity", plan).decision, "TOPIC_MISMATCH");
+  assert.equal(assessTopicRelevance("Anthropic payment documentation", plan).decision, "TOPIC_MISMATCH");
+  assert.equal(assessTopicRelevance("Shopify checkout payments adds support for a payment method", plan).decision, "MATCH");
+});
+
+test("entity relevance preserves an existing resolved alias without admitting another entity", () => {
+  const plan: QueryPlan = { ...videoPlan, topicProfile: undefined,
+    originalNeed: "ComfyUI official release updates", coreKeywords: ["ComfyUI"], entities: ["ComfyUI"],
+    aliasesConsidered: ["ComfyUI", "comfy ui"], resolvedEntities: [{ canonicalEntity: "ComfyUI", aliasesConsidered: ["ComfyUI", "comfy ui"] }],
+    industryKeywords: [], englishKeywords: [], synonyms: [] };
+  assert.equal(assessTopicRelevance("Comfy UI adds new custom node functionality", plan).decision, "MATCH");
+  assert.equal(assessTopicRelevance("Anthropic SDK documentation adds nodes", plan).decision, "TOPIC_MISMATCH");
+});
+
 function signal(overrides: Partial<ResearchSignal> = {}): ResearchSignal {
   return {
     id: "signal-1",

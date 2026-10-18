@@ -41,3 +41,19 @@ test("advanced region and exclude hints stay bounded to existing fields", () => 
   assert.ok(domestic.informationGaps.some((gap) => gap.includes("教程, 课程")));
   assert.deepEqual(domestic.customSources, []);
 });
+
+test("cross-industry questions retain explicit time, named entity and neutral scope", () => {
+  const question = "我维护Node.js 22生产服务。过去90天有哪些官方安全更新？";
+  const draft = inferNaturalResearchDraft(question);
+  assert.equal(draft.freshnessWindow, "90d");
+  assert.deepEqual(draft.currentQuestions, [question]);
+  assert.ok(draft.trackedEntities.includes("Node.js"));
+  assert.doesNotMatch(draft.industry, /AI|人工智能/);
+  assert.doesNotMatch(inferNaturalResearchDraft("Shopify有哪些已发布的支付变化？").industry, /AI|人工智能/);
+  assert.equal(inferNaturalResearchDraft("past 90 days Node.js security updates").freshnessWindow, "90d");
+});
+
+test("unsupported explicit windows are reported rather than silently becoming seven days", () => {
+  assert.throws(() => inferNaturalResearchDraft("过去45天的Shopify支付变化"), /45.*暂不支持/);
+  assert.throws(() => inferNaturalResearchDraft("past 190 days Node.js updates"), /190.*暂不支持/);
+});

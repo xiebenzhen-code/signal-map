@@ -1,0 +1,37 @@
+export type RegisteredFeed = {
+  id: string;
+  name: string;
+  url: string;
+  publisherHosts: string[];
+  aliases: string[];
+  topics: string[];
+  official: boolean;
+  /** Transport evidence only, never a claim-quality certification. */
+  cloudVerified: boolean;
+};
+
+export const registeredFeeds: RegisteredFeed[] = [
+  {id: "shopify", name: "Shopify Developer Changelog", url: "https://shopify.dev/changelog/feed.xml", publisherHosts: ["shopify.dev"], aliases: ["shopify"], topics: [], official: true, cloudVerified: false},
+  {id: "nodejs", name: "Node.js Blog", url: "https://nodejs.org/en/feed/blog.xml", publisherHosts: ["nodejs.org"], aliases: ["node.js", "nodejs"], topics: [], official: true, cloudVerified: false},
+  {id: "nasa", name: "NASA", url: "https://www.nasa.gov/feed/", publisherHosts: ["nasa.gov"], aliases: ["nasa", "美国宇航局"], topics: ["天文", "航天", "astronomy", "space exploration"], official: true, cloudVerified: true},
+  {id: "github", name: "GitHub Blog", url: "https://github.blog/feed/", publisherHosts: ["github.blog"], aliases: ["github", "copilot"], topics: [], official: true, cloudVerified: false},
+  {id: "mozilla", name: "Mozilla Hacks", url: "https://hacks.mozilla.org/feed/", publisherHosts: ["mozilla.org"], aliases: ["mozilla", "firefox"], topics: ["web standards", "浏览器标准"], official: true, cloudVerified: false},
+  {id: "openai", name: "OpenAI News", url: "https://openai.com/news/rss.xml", publisherHosts: ["openai.com"], aliases: ["openai", "chatgpt"], topics: [], official: true, cloudVerified: false},
+  {id: "ithome", name: "IT之家", url: "https://www.ithome.com/rss/", publisherHosts: ["ithome.com"], aliases: ["it之家", "ithome"], topics: ["国内科技", "国产手机", "数码", "新能源汽车", "人工智能", "ai行业"], official: false, cloudVerified: true},
+  {id: "sspai", name: "少数派", url: "https://sspai.com/feed", publisherHosts: ["sspai.com"], aliases: ["少数派", "sspai"], topics: ["数字生活", "效率工具", "数码", "软件体验", "digital lifestyle"], official: false, cloudVerified: true},
+  {id: "gcores", name: "机核", url: "https://www.gcores.com/rss", publisherHosts: ["gcores.com"], aliases: ["机核", "gcores"], topics: ["游戏", "电子游戏", "独立游戏", "video games"], official: false, cloudVerified: false},
+  {id: "ruanyifeng", name: "阮一峰的网络日志", url: "https://www.ruanyifeng.com/blog/atom.xml", publisherHosts: ["ruanyifeng.com"], aliases: ["阮一峰", "ruanyifeng"], topics: ["科技周刊", "程序员", "前端开发", "开源工具"], official: false, cloudVerified: false},
+];
+
+function contains(text: string, term: string) {
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return /[\u3400-\u9fff]/u.test(term) ? text.includes(term) : new RegExp(`(?:^|[^a-z0-9])${escaped}(?=$|[^a-z0-9])`, "i").test(text);
+}
+
+export function selectRegisteredFeeds(input: {entities: string[]; query: string; selectedSourceType?: string}): RegisteredFeed[] {
+  const text = `${input.entities.join(" ")} ${input.query}`.toLowerCase();
+  const available = registeredFeeds.filter(feed => !["OFFICIAL", "PRIMARY"].includes(input.selectedSourceType ?? "") || feed.official);
+  const exact = available.filter(feed => feed.aliases.some(alias => contains(text, alias)));
+  // Named publishers outrank broad subject matches. An unknown question never selects the entire catalogue.
+  return (exact.length ? exact : available.filter(feed => feed.topics.some(topic => contains(text, topic)))).slice(0, 3);
+}

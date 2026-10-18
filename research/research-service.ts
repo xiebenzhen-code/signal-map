@@ -4,6 +4,7 @@ import { runAgent } from "../agent/runner.ts";
 import { toRetrievalPlan } from "../agent/retrieval-plan.ts";
 import type { AgentRunOptions } from "../agent/types.ts";
 import { safeFailureText } from "../agent/failure.ts";
+import type { FeedReadCache } from "./registered-feeds.ts";
 
 type ResearchExecution = {
   identity: { id: string; mode: "anonymous" | "authenticated" };
@@ -60,6 +61,7 @@ export async function executeResearch({ identity, input, debug, context, reposit
   let tracedAgentFailure = false;
   let progressedPastSourceSelection = false;
   const attemptsByRound = new Map<number, number>();
+  const feedCache: FeedReadCache = new Map();
   const tracePhase: AgentRunOptions["onPhase"] = (event) => {
     if ([
       "source_selection_finished",
@@ -102,7 +104,7 @@ export async function executeResearch({ identity, input, debug, context, reposit
         return runResearchPipeline(
           researchInput,
           undefined,
-          { ...debug, onPhase: pipelinePhase, deadlineAt },
+          { ...debug, feedCache, onPhase: pipelinePhase, deadlineAt },
           toRetrievalPlan(plan),
         );
       },

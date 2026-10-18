@@ -20,10 +20,10 @@ const strategySources: Record<Exclude<ResearchStrategy, "STOP">, SourceSelection
 
 const providerIds: Record<SourceSelectionType, string[]> = {
   MEMORY: [],
-  OFFICIAL: ["company-registry", "official-update-pages", "github-releases"],
-  PRIMARY: ["primary-web-search", "reverse-primary", "arxiv"],
-  GENERAL_WEB: ["public-web", "product-hunt", "hacker-news", "huggingface"],
-  INDEPENDENT_MEDIA: ["trusted-media", "industry-media"],
+  OFFICIAL: ["company-registry", "official-update-pages", "github-releases", "registered-feeds"],
+  PRIMARY: ["primary-web-search", "reverse-primary", "arxiv", "registered-feeds"],
+  GENERAL_WEB: ["public-web", "product-hunt", "hacker-news", "huggingface", "registered-feeds"],
+  INDEPENDENT_MEDIA: ["trusted-media", "industry-media", "registered-feeds"],
   SOCIAL_SIGNAL: ["social-access", "reddit"],
 };
 
@@ -98,13 +98,30 @@ function hasResolvedEntities(input: { resolvedEntities?: Array<{ canonicalEntity
   return Boolean(input.resolvedEntities?.some((entity) => entity.canonicalEntity?.trim()));
 }
 
+// Recognizing an entity is not the same as the dedicated official adapters
+// being able to execute for it. Shopify, for example, resolves as an entity but
+// has no company-registry profile, no official GitHub target and no official
+// update page, so an entity-only check locked the run into three providers that
+// all reported not_searched. Coverage must therefore be asserted explicitly by
+// the caller; when it is unknown we keep the previous entity-resolved behavior
+// so unrelated callers are unaffected.
+function hasOfficialCoverage(input: {
+  resolvedEntities?: Array<{ canonicalEntity?: string }>;
+  officiallyCoveredEntities?: string[];
+}) {
+  if (input.officiallyCoveredEntities === undefined) return hasResolvedEntities(input);
+  const covered = new Set(input.officiallyCoveredEntities.map((entity) => entity.trim().toLowerCase()).filter(Boolean));
+  return (input.resolvedEntities ?? []).some((entity) => covered.has((entity.canonicalEntity ?? "").trim().toLowerCase()));
+}
+
 function shouldStartWithDiscovery(input: {
   strategy: ResearchStrategy;
   sourceProfile?: SourceProfile;
   resolvedEntities?: Array<{ canonicalEntity?: string }>;
+  officiallyCoveredEntities?: string[];
 }) {
   if (input.strategy !== "INITIAL") return false;
-  if (hasResolvedEntities(input)) return false;
+  if (hasOfficialCoverage(input)) return false;
   const preferred = input.sourceProfile?.preferredSourceTypes.flatMap((type) => profileSourceMap[type]) ?? [];
   return preferred[0] === "OFFICIAL";
 }
@@ -123,6 +140,7 @@ export function selectSource(input: {
   previousSourceOutcomes?: SourceOutcome[];
   sourceProfile?: SourceProfile;
   resolvedEntities?: Array<{ canonicalEntity?: string; aliasesConsidered?: string[] }>;
+  officiallyCoveredEntities?: string[];
 }): SourceSelection {
   if (input.strategy === "STOP") {
     return { fallbackSourceTypes: [], allowedProviderIds: [], reason: "策略要求停止研究", sourceGap: false };
@@ -165,7 +183,9 @@ export function selectSource(input: {
 
     reason: primarySourceType
       ? discoveryMode
-        ? `${input.sourceProfile?.intent ?? "GENERAL_RESEARCH"} + ${input.strategy} 无明确实体，先使用 ${primarySourceType} 发现候选，再用 ${availableVerificationSourceTypes.join(" / ") || "OFFICIAL / PRIMARY"} 验证`
+        ? hasResolvedEntities(input)
+          ? `${input.sourceProfile?.intent ?? "GENERAL_RESEARCH"} + ${input.strategy} 已识别实体但专用官方来源无覆盖，先使用 ${primarySourceType} 发现官方页面，再用 ${availableVerificationSourceTypes.join(" / ") || "OFFICIAL / PRIMARY"} 验证`
+          : `${input.sourceProfile?.intent ?? "GENERAL_RESEARCH"} + ${input.strategy} 无明确实体，先使用 ${primarySourceType} 发现候选，再用 ${availableVerificationSourceTypes.join(" / ") || "OFFICIAL / PRIMARY"} 验证`
         : `${input.sourceProfile?.intent ?? "GENERAL_RESEARCH"} + ${input.strategy} 优先使用 ${primarySourceType}`
       : `${input.sourceProfile?.intent ?? input.strategy} 没有可用来源能力`,
     sourceGap: !primarySourceType,
@@ -174,4 +194,9 @@ export function selectSource(input: {
   };
 }
 
-export { profileSourceMap, strategySources };
+export { profileSourceMap, strategySources, providerIds };
+
+/** Provider ids bound to a single source type, for pinning one fallback attempt. */
+export function providerIdsFor(type: SourceSelectionType) {
+  return providerIds[type];
+}

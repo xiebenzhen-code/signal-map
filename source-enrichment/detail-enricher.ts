@@ -16,6 +16,7 @@ export function sourceCapability(providerId: string | undefined): SourceCapabili
   if (providerId === undefined) return "EVIDENCE";
   if (providerId === "product-hunt") return "DISCOVERY";
   if (providerId === "huggingface") return "DISCOVERY";
+  if (providerId === "registered-feeds") return "DISCOVERY";
   if (providerId === "company-registry" || providerId === "official-update-pages") return "EVIDENCE";
   if (providerId === "github-releases") return "BOTH";
   return "EVIDENCE";

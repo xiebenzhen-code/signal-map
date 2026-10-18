@@ -120,14 +120,7 @@ function stripInstructionClauses(value: string) {
 }
 
 function topicAnchorsFor(input: ResearchInput) {
-  const source = stripInstructionClauses([
-    input.industry,
-    input.focusAreas,
-    input.currentQuestions,
-    input.informationGaps,
-    input.trackedEntities,
-    input.trackedEvents,
-  ].filter(Boolean).join("；"));
+  const source = stripInstructionClauses(retrievalTextFields(input).join("；"));
   return topicAnchorRules
     .filter((rule) => rule.patterns.some((pattern) => pattern.test(source)))
     .map((rule) => rule.anchor);
@@ -162,14 +155,7 @@ function isTopicPhrase(value: string) {
 }
 
 function topicKeywordsFor(input: ResearchInput, englishKeywords: string[], topicAnchors: string[]) {
-  const sourceSegments = [
-    input.industry,
-    input.focusAreas,
-    input.currentQuestions,
-    input.informationGaps,
-    input.trackedEntities,
-    input.trackedEvents,
-  ].flatMap((value) =>
+  const sourceSegments = retrievalTextFields(input).flatMap((value) =>
     stripInstructionClauses(value || "")
       .split(/[，,、；;：:\n.!！？?]+/u)
       .map((segment) => segment.trim())
@@ -221,7 +207,7 @@ function topicProfileFor(
   topicKeywords: string[],
 ): TopicProfile | undefined {
   const candidates = unique([
-    input.industry,
+    searchTermSource(input.industry),
     ...topicAnchors,
     ...topicKeywords,
   ]).map((value) => value.trim().replace(/\s+/g, " "))
@@ -363,6 +349,7 @@ const changeKeywords = [
 ];
 
 function normalizeFreshnessWindow(value: string): QueryPlan["requestedFreshnessWindow"] {
+  if (/90d|90\s*(?:天|days?)|3\s*个月/i.test(value)) return "90d";
   if (/24h|1d|24\s*小时/i.test(value)) return "24h";
   if (/3d|3\s*天/i.test(value)) return "3d";
   if (/30d|30\s*天|1\s*月/i.test(value)) return "30d";
@@ -376,17 +363,57 @@ function knownEntitySubjects(value: string, entities: string[]) {
   );
 }
 
+// Placeholder labels produced when the intent classifier finds no better
+// category ("个人关注方向", "值得关注的新变化"). They describe the absence of a
+// classification, not the user's subject, so injecting them into a real search
+// query only adds noise — the observed Shopify queries literally contained
+// "个人关注方向 product launch release" and some had lost the entity entirely.
+// They stay available for display and source-profile selection, but never enter
+// retrieval terms.
+const genericFallbackLabels = new Set([
+  "个人关注方向",
+  "值得关注的新变化",
+  "general research",
+  "general interest",
+]);
+
+function searchTermSource(value: string | undefined) {
+  const trimmed = (value ?? "").trim();
+  return genericFallbackLabels.has(trimmed) ? "" : trimmed;
+}
+
+// Same placeholder filtering for the keyword/anchor inputs. These feed retrieval
+// terms as well, so the generic label must be dropped here too — otherwise the
+// placeholder reappears as a topic keyword (observed "个人关注方向 product
+// launch release").
+// "围绕…寻找有证据支持的新变化" is a template instruction, not a subject.
+// stripInstructionClauses covers the imperative forms but not this framing, so
+// core keywords reject these fragments explicitly.
+const instructionFragmentPattern = /寻找有证据支持的新变化|^[”"」』]|[“「『"]$/;
+
+function retrievalTextFields(input: ResearchInput) {
+  return [input.industry, input.focusAreas, input.currentQuestions, input.informationGaps, input.trackedEntities, input.trackedEvents]
+    .map((value) => searchTermSource(value))
+    .filter(Boolean);
+}
+
 export function planQuery(input: ResearchInput): QueryPlan {
   const originalNeed = semanticNeed(input);
   const entityScope = entityText(input);
   const matched = expansions.filter((item) => item.test.test(originalNeed));
+  const industryTerm = searchTermSource(input.industry);
+    // Instruction clauses ("围绕…寻找有证据支持的新变化") describe how to search,
+  // not what to search for. They must not become retrieval keywords. Baseline
+  // only avoided them by accident: the generic labels happened to fill the
+  // leading slots of this capped list, so once those labels are no longer
+  // emitted the fragments moved into range. Strip them explicitly instead of
+  // relying on the incidental ordering.
   const coreKeywords = unique([
-    input.industry,
-    ...tokens(input.focusAreas),
-    ...tokens(input.currentQuestions),
-    ...tokens(input.informationGaps),
-    ...tokens(input.trackedEntities),
-    ...tokens(input.trackedEvents),
+    industryTerm,
+    ...retrievalTextFields(input)
+      .filter((value) => !genericFallbackLabels.has(value))
+      .flatMap((value) => tokens(stripInstructionClauses(value)))
+      .filter((keyword) => !instructionFragmentPattern.test(keyword)),
   ], 10);
   const englishKeywords = unique(
     matched.flatMap((item) => item.english).concat(
@@ -408,7 +435,7 @@ export function planQuery(input: ResearchInput): QueryPlan {
   const aliasesConsidered = unique(resolvedEntities.flatMap((entity) => entity.aliasesConsidered));
   const knownSubjects = knownEntitySubjects(input.knownInformation, entities);
   const industryKeywords = unique([
-    input.industry,
+    industryTerm,
     ...(/IPO|上市|纳指|股票|投资|金融|证券/i.test(originalNeed)
       ? ["SEC filing", "Investor Relations", "Nasdaq", "NYSE", "prospectus"]
       : []),
@@ -445,10 +472,12 @@ export function planQuery(input: ResearchInput): QueryPlan {
       `${entity} official announcement`,
       `${entity} latest update`,
     ]),
-    ...buildDiversifiedQueries(topicAnchors, topicKeywords, input.industry, 5),
+    ...buildDiversifiedQueries(topicAnchors, topicKeywords, industryTerm, 5),
     ...englishKeywords.map((keyword) => `${keyword} latest update`),
-    `${input.industry} 官方公告`,
-    `${input.industry} 权威媒体`,
+    // A classified industry term adds a real retrieval angle. Without one, the
+    // entity already anchors these queries, so emitting the bare placeholder
+    // would only produce entity-free filler searches.
+    ...(industryTerm ? [`${industryTerm} 官方公告`, `${industryTerm} 权威媒体`] : []),
     ...coreKeywords.slice(0, 4).flatMap((keyword) =>
       englishKeywords.slice(0, 3).map((english) => `${keyword} ${english}`),
     ),

@@ -43,6 +43,9 @@ const GENERIC_TERMS = new Set([
   "what",
   "with",
   "official documentation",
+  "documentation",
+  "docs",
+  "document",
 ]);
 
 const PROFILE_GENERIC_TERMS = new Set([
@@ -257,8 +260,11 @@ export function assessTopicRelevance(text: string, plan: QueryPlan): TopicReleva
   }
   const terms = topicTerms(plan);
   const legacyMatchedTerms = terms.filter((term) => matches(normalizedText, term));
+  const entities = [...plan.entities, ...(plan.resolvedEntities ?? []).flatMap((entity) =>
+    [entity.canonicalEntity, ...entity.aliasesConsidered])].map(normalize).filter(meaningful);
+  const hasEntityMatch = entities.some((term) => matches(normalizedText, term));
   const hasTopicTerms = terms.length > 0;
-  const decision = !hasTopicTerms || legacyMatchedTerms.length > 0
+  const decision = (!entities.length || hasEntityMatch) && (!hasTopicTerms || legacyMatchedTerms.length > 0)
     ? "MATCH"
     : "TOPIC_MISMATCH";
   return {

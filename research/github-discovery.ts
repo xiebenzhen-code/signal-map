@@ -53,6 +53,20 @@ function matchedTargets(entities: string[]) {
   return officialUpdateTargets.filter((target) => target.aliases.some((alias) => normalized.has(alias)));
 }
 
+/**
+ * Entities for which the dedicated official adapters can actually execute.
+ *
+ * This is deliberately separate from entity recognition: an entity can resolve
+ * fine and still have no official GitHub target and no official update page,
+ * in which case the OFFICIAL source group can only report `not_searched`.
+ * Registry-only coverage is not sufficient either — an entity may have official
+ * update pages without a company-registry profile — so callers must combine both
+ * signals rather than trusting entity resolution.
+ */
+export function officialTargetCoverage(entities: string[]) {
+  return Array.from(new Set(matchedTargets(entities).flatMap((target) => target.aliases.slice(0, 1))));
+}
+
 function decodeHtml(value: string) {
   return value
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
@@ -143,12 +157,14 @@ async function githubRecentReleases(repo: string, fetcher: Fetcher): Promise<Liv
 export async function discoverOfficialGithubReleases(
   entities: string[],
   fetcher: Fetcher = fetch,
+  subject = "",
 ): Promise<{ items: LiveItem[]; outcome: SourceExecutionOutcome; failure?: string }> {
   const matched = matchedTargets(entities);
-  // A broad query with no tracked entity still falls through to all known
-  // project repos so the downstream relevance filter can select query-matching
-  // results — instead of silently returning zero candidates.
-  const targets = matched.length ? matched : officialUpdateTargets;
+  // Discovery is broad within the question's subject, not across unrelated
+  // industries. General web/paper/community discovery remains independent.
+  const broadCoding = entities.every((entity) => /^(?:AI|CLI|tools?|coding|agents?)$/i.test(entity)) &&
+    /coding|code|CLI|编程|代码|开发工具/i.test(subject);
+  const targets = matched.length ? matched : broadCoding ? officialUpdateTargets : [];
   const repos = Array.from(
     new Set(targets.flatMap((target) => target.githubRepos || [])),
   ).slice(0, 4);

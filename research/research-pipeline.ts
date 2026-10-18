@@ -1,5 +1,6 @@
 import { parseCustomSources, type CustomSourceCheck } from "../lib/custom-sources.ts";
 import { readCustomSource } from "../source-enrichment/custom-source.ts";
+import { retrieveRegisteredFeeds, type FeedReadCache } from "./registered-feeds.ts";
 import { socialAccessLayer, type LiveItem } from "../social/providers/index.ts";
 import { deduplicateSocialEvidence } from "../social/evidence-dedup.ts";
 import {
@@ -75,6 +76,7 @@ import type {
 type ProgressHandler = (progress: PipelineProgress) => void | Promise<void>;
 
 export type ResearchPipelineDebug = {
+  feedCache?: FeedReadCache;
   customSourceReader?: typeof readCustomSource;
   onCandidateSelectionAudit?: (audit: CandidateSelectionAudit[]) => void;
   onEligibilityAudit?: (audit: EligibilityAuditFunnel) => void;
@@ -139,6 +141,7 @@ function validRetrievalQueries(plan?: RetrievalPlan | LegacySourceSelection) {
 
 export function normalizeRetrievalFreshness(value?: string): QueryPlan["requestedFreshnessWindow"] {
   const raw = value?.trim().toLowerCase() || "7d";
+  if (/90d|90\s*(?:天|days?)|3\s*个月/.test(raw)) return "90d";
   // Order matters: the 30d/month window must be tested before the single-digit
   // "3" branch, otherwise "30d" is truncated to 3d and a one-month question
   // silently searches only the last three days.
@@ -1083,7 +1086,7 @@ function webSearchOutcome(
   result: { items: ResearchCandidate[]; attempted: number; successful: number; engine?: string; fallbackTried?: boolean },
 ): SourceExecutionOutcome {
   if (!result.attempted) {
-    return { source, execution: "not_searched", searched: false, resultCount: 0, requestCount: 0 };
+    return { source, execution: "not_searched", blockedBy: "budget", searched: false, resultCount: 0, requestCount: 0 };
   }
   if (!result.successful) {
     return {
@@ -1325,18 +1328,19 @@ function buildSourceDiagnostics(
     ...candidates.map((candidate) => candidate.providerId).filter(Boolean) as string[],
   ]);
   return [...providerIds].map((providerId) => {
-    const outcome = sourceOutcomes.find((candidate) => candidate.providerId === providerId) || sourceOutcomes.find((candidate) =>
-      providerId === "product-hunt" && candidate.source.toLowerCase() === "product hunt",
-    );
+    const matchingOutcomes = sourceOutcomes.filter(candidate => candidate.providerId === providerId ||
+      (providerId === "product-hunt" && !candidate.providerId && candidate.source.toLowerCase() === "product hunt"));
+    const outcome = matchingOutcomes[0];
+    const sumOutcomes = (field: "rawResultCount" | "normalizedCandidateCount" | "rejectedRawCount") => matchingOutcomes.reduce((sum, item) => sum + (item[field] ?? (field === "rejectedRawCount" ? 0 : item.resultCount)), 0);
     const providerCandidates = candidates.filter((candidate) => candidate.providerId === providerId);
     const detailAttempted = providerCandidates.filter((candidate) => candidate.detailEnrichment?.attempted).length;
     const detailSucceeded = providerCandidates.filter((candidate) => candidate.detailEnrichment?.status === "SUCCESS").length;
     const detailFailed = providerCandidates.filter((candidate) => candidate.detailEnrichment?.status === "FETCH_FAILED").length;
     return {
       providerId,
-      rawProviderResultCount: outcome?.rawResultCount ?? outcome?.resultCount ?? 0,
-      normalizedCandidateCount: outcome?.normalizedCandidateCount ?? outcome?.resultCount ?? 0,
-      rejectedRawCount: outcome?.rejectedRawCount ?? 0,
+      rawProviderResultCount: sumOutcomes("rawResultCount"),
+      normalizedCandidateCount: sumOutcomes("normalizedCandidateCount"),
+      rejectedRawCount: sumOutcomes("rejectedRawCount"),
       normalizationRejectionReasons: outcome?.normalizationRejectionReasons,
       normalizationRejectedSamples: outcome?.normalizationRejectedSamples,
       candidateAdmissionRejectionReasons: outcome?.candidateAdmissionRejectionReasons,
@@ -1486,20 +1490,22 @@ export async function runResearchPipeline(
     resolvedEntities: plan.resolvedEntities?.slice(0, 10),
     providerPlan: searchProviderPlan(),
   });
-  const [customSourceResults, primaryResult, companyRegistryResult, githubReleaseResult, officialUpdatePageResult] = await Promise.all([
+  const [customSourceResults, primaryResult, companyRegistryResult, githubReleaseResult, officialUpdatePageResult, feedResult] = await Promise.all([
     Promise.all(customSources.urls.map(url => (debug?.customSourceReader ?? readCustomSource)(url, { deadlineAt: debug?.deadlineAt }))),
     primaryWebEnabled
       ? searchQueries(primaryQueries, "primary", plan, failures, windowDays)
       : Promise.resolve(emptySearchResult()),
     canExecute("company-registry")
       ? searchDirectProvider("Company Source Registry", () => companyRegistrySearch(plan), "primary", plan, failures, "company-registry")
-      : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "Company Source Registry", execution: "not_searched" as const, searched: false, resultCount: 0 } }),
+      : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "Company Source Registry", execution: "not_searched" as const, blockedBy: "source_selection" as const, searched: false, resultCount: 0 } }),
     canExecute("github-releases")
-      ? discoverOfficialGithubReleases(plan.entities)
-      : Promise.resolve({ items: [], outcome: { source: "GitHub Releases", execution: "not_searched" as const, searched: false, resultCount: 0 }, failure: undefined }),
+      ? discoverOfficialGithubReleases(plan.entities, fetch, plan.originalNeed)
+      : Promise.resolve({ items: [], outcome: { source: "GitHub Releases", execution: "not_searched" as const, blockedBy: "source_selection" as const, searched: false, resultCount: 0 }, failure: undefined }),
     canExecute("official-update-pages")
       ? discoverOfficialUpdatePages(plan.entities)
-      : Promise.resolve({ items: [], outcome: { source: "Official Update Pages", execution: "not_searched" as const, searched: false, resultCount: 0 }, failure: undefined }),
+      : Promise.resolve({ items: [], outcome: { source: "Official Update Pages", execution: "not_searched" as const, blockedBy: "source_selection" as const, searched: false, resultCount: 0 }, failure: undefined }),
+    retrieveRegisteredFeeds({entities: plan.entities, query: plan.originalNeed, selectedSourceType: plan.selectedSourceType,
+      allowed: canExecute("registered-feeds"), reader: debug?.customSourceReader, deadlineAt: debug?.deadlineAt, cache: debug?.feedCache}),
   ]);
   const customCandidates: ResearchCandidate[] = [];
   for (const result of customSourceResults) {
@@ -1532,6 +1538,7 @@ export async function runResearchPipeline(
   if (githubReleaseResult.failure) failures.push(githubReleaseResult.failure);
   if (officialUpdatePageResult.failure) failures.push(officialUpdatePageResult.failure);
   const primary = unique([
+    ...feedResult.items.filter(item => item.sourceType === "primary"),
     ...companyRegistryResult.items,
     ...officialUpdatePageResult.items
       .filter((item) => relevant(item, plan))
@@ -1543,10 +1550,13 @@ export async function runResearchPipeline(
   ]);
   sourceOutcomes.push(primaryWebEnabled
     ? webSearchOutcome("Primary Sources", primaryResult)
-    : { source: "Primary Sources", execution: "not_searched" as const, searched: false, resultCount: 0 });
+    : { source: "Primary Sources", execution: "not_searched" as const, blockedBy: "source_selection" as const, searched: false, resultCount: 0 });
   sourceOutcomes.push(companyRegistryResult.outcome);
   sourceOutcomes.push(githubReleaseResult.outcome);
   sourceOutcomes.push(officialUpdatePageResult.outcome);
+  sourceOutcomes.push(...feedResult.outcomes);
+  failures.push(...feedResult.failures);
+  scanned += feedResult.outcomes.reduce((sum, outcome) => sum + (outcome.rawResultCount ?? 0), 0);
   scanned += primaryResult.scanned + companyRegistryResult.items.length;
   counts = { ...counts, candidates: primary.length, primary: primary.length };
   if (!primary.length) {
@@ -1612,16 +1622,16 @@ export async function runResearchPipeline(
   const [productHuntResult, hackerNewsResult, huggingFaceResult, arxivResult] = await Promise.all([
     canExecute("product-hunt") && remainingMs() > RETRIEVAL_RESERVATION_MS
       ? searchDirectProvider("Product Hunt", () => productHuntSearch(providerQuery(plan, "product-hunt", plan.searchCombinations[0])), "social", plan, failures, "product-hunt")
-      : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "Product Hunt", execution: "not_searched" as const, searched: false, resultCount: 0 } }),
+      : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "Product Hunt", execution: "not_searched" as const, blockedBy: "source_selection" as const, searched: false, resultCount: 0 } }),
     canExecute("hacker-news")
       ? searchDirectProvider("Hacker News", () => hackerNewsSearch(providerQuery(plan, "hacker-news", plan.searchCombinations[0])), "social", plan, failures, "hacker-news")
-      : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "Hacker News", execution: "not_searched" as const, searched: false, resultCount: 0 } }),
+      : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "Hacker News", execution: "not_searched" as const, blockedBy: "source_selection" as const, searched: false, resultCount: 0 } }),
     canExecute("huggingface") && remainingMs() > RETRIEVAL_RESERVATION_MS
       ? searchDirectProvider("Hugging Face", () => huggingFaceSearch(providerQuery(plan, "huggingface", plan.searchCombinations[0])), "industry_media", plan, failures, "huggingface")
-      : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "Hugging Face", execution: "not_searched" as const, searched: false, resultCount: 0 } }),
+      : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "Hugging Face", execution: "not_searched" as const, blockedBy: "source_selection" as const, searched: false, resultCount: 0 } }),
     canExecute("arxiv")
       ? searchDirectProvider("arXiv", () => arxivSearch(providerQuery(plan, "arxiv", plan.searchCombinations[0])), "primary", plan, failures, "arxiv")
-      : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "arXiv", execution: "not_searched" as const, searched: false, resultCount: 0 } }),
+      : Promise.resolve({ items: [] as ResearchCandidate[], outcome: { source: "arXiv", execution: "not_searched" as const, blockedBy: "source_selection" as const, searched: false, resultCount: 0 } }),
   ]);
   sourceOutcomes.push(productHuntResult.outcome, hackerNewsResult.outcome, huggingFaceResult.outcome, arxivResult.outcome);
   scanned += productHuntResult.items.length + hackerNewsResult.items.length + huggingFaceResult.items.length + arxivResult.items.length;
@@ -1691,6 +1701,7 @@ export async function runResearchPipeline(
       ? {
           source: "Reddit",
           execution: "not_searched" as const,
+          blockedBy: "source_selection" as const,
           searched: false,
           resultCount: 0,
         }
@@ -1790,6 +1801,7 @@ export async function runResearchPipeline(
   markPhase("detail_fetch_started");
   let discoveredCandidates = unique([
     ...customCandidates,
+    ...feedResult.items.filter(item => item.sourceType !== "primary"),
     ...allPrimary,
     ...arxivResult.items,
     ...trustedMedia,
@@ -1828,7 +1840,7 @@ export async function runResearchPipeline(
       recordOutcome(arxivFall.outcome);
     }
     if (!canExecute("github-releases")) {
-      const gh = await discoverOfficialGithubReleases(plan.entities);
+      const gh = await discoverOfficialGithubReleases(plan.entities, fetch, plan.originalNeed);
       technicalFallback.push(...gh.items.map((item) => ({ ...item, sourceType: "primary" as const })));
       recordOutcome(gh.outcome);
       if (gh.failure) failures.push(gh.failure);

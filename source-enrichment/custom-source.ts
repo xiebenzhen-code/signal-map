@@ -9,18 +9,35 @@ type Address = { address: string; family: number };
 type PageResponse = { status: number; headers: Record<string, string | undefined>; body: string };
 export type CustomSourceResult = CustomSourceCheck & { content?: string };
 type ReadOptions = {
+  format?: "feed";
   deadlineAt?: number;
   lookup?: (host: string) => Promise<Address[]>;
   request?: (url: URL, address: Address, signal: AbortSignal) => Promise<PageResponse>;
 };
 const MAX_BYTES = 512 * 1024;
+const DEFAULT_READ_BUDGET_MS = 5000;
+/**
+ * A feed is a bulk transfer, not a page fetch: shopify.dev's changelog feed is
+ * ~1.87 MB and a complete read takes seconds. The old 5s cap matched the page
+ * reader, so a reachable first-party feed was reported as a transport failure
+ * (`FEED_TIMEOUT`) before its first byte was judged. The window stays hard-bounded
+ * and is still clamped by the run deadline, so this widens no total budget.
+ */
+const FEED_READ_BUDGET_MS = 12000;
+/**
+ * Below this there is no honest way to distinguish "slow DNS" from "no budget
+ * left", and a read that starts now can only be cut off again. Reporting it as a
+ * failure invents an upstream error; `not_searched` lets the caller record the
+ * real reason (budget) instead.
+ */
+const FEED_MIN_USEFUL_MS = 2000;
 
 /** Pin the validated address at socket creation, retaining the original Host/SNI. */
-function pinnedRequest(url: URL, address: Address, signal: AbortSignal): Promise<PageResponse> {
+function pinnedRequest(url: URL, address: Address, signal: AbortSignal, feed = false): Promise<PageResponse> {
   return new Promise((resolve, reject) => {
     const request = (url.protocol === "https:" ? httpsRequest : httpRequest)(url, {
       signal, agent: false,
-      headers: { "User-Agent": "SignalMapResearch/0.4", Accept: "text/html,text/plain" },
+      headers: { "User-Agent": "SignalMapResearch/0.4", Accept: feed ? "application/rss+xml,application/atom+xml,application/xml,text/xml" : "text/html,text/plain" },
       lookup: (_host, options, callback) => {
         if (typeof options === "object" && options.all) callback(null, [address] as never);
         else callback(null, address.address, address.family);
@@ -34,7 +51,7 @@ function pinnedRequest(url: URL, address: Address, signal: AbortSignal): Promise
       const chunks: Buffer[] = [];
       response.on("data", (chunk: Buffer) => {
         size += chunk.length;
-        if (size > MAX_BYTES) { response.destroy(new Error("PAGE_TOO_LARGE")); return; }
+        if (size > (feed ? 2 * 1024 * 1024 : MAX_BYTES)) { response.destroy(new Error("PAGE_TOO_LARGE")); return; }
         chunks.push(chunk);
       });
       response.on("error", reject);
@@ -120,8 +137,14 @@ export async function readCustomSource(value: string, options: ReadOptions = {})
   let requestCount = 0;
   const finish = (status: CustomSourceCheck["status"], reason: string): CustomSourceResult =>
     ({ url: publicSourceUrl(value) ?? "", status, reason, requestCount });
-  const deadlineAt = Math.min(options.deadlineAt ?? Date.now() + 5000, Date.now() + 5000);
-  if (deadlineAt <= Date.now()) return finish("not_searched", "本轮时间不足，尚未读取这个来源。");
+  // The default window is mode-aware on both sides: a caller that passes no
+  // deadline must get the feed window too, otherwise the min() below silently
+  // collapses a feed read back to the page budget.
+  const readBudgetMs = options.format === "feed" ? FEED_READ_BUDGET_MS : DEFAULT_READ_BUDGET_MS;
+  const deadlineAt = Math.min(options.deadlineAt ?? Date.now() + readBudgetMs, Date.now() + readBudgetMs);
+  const remainingBudgetMs = deadlineAt - Date.now();
+  if (remainingBudgetMs <= 0) return finish("not_searched", options.format === "feed" ? "FEED_BUDGET_EXHAUSTED" : "本轮时间不足，尚未读取这个来源。");
+  if (options.format === "feed" && remainingBudgetMs < FEED_MIN_USEFUL_MS) return finish("not_searched", "FEED_BUDGET_EXHAUSTED");
   let current = publicSourceUrl(value);
   if (!current) return finish("blocked", "仅支持不含账号密码的公开网页链接。");
   const controller = new AbortController();
@@ -139,11 +162,11 @@ export async function readCustomSource(value: string, options: ReadOptions = {})
         const addresses = isIP(host) ? [{ address: host, family: isIP(host) }]
           : await (options.lookup ?? systemLookup)(host);
         if (!addresses.length || addresses.some(item => !isPublicSourceAddress(item.address))) {
-          return finish("blocked", "来源解析到非公开地址，未进行抓取。");
+          return finish("blocked", options.format === "feed" ? "FEED_PRIVATE_ADDRESS" : "来源解析到非公开地址，未进行抓取。");
         }
         if (controller.signal.aborted) throw new Error("TIMEOUT");
         requestCount++;
-        const response = await (options.request ?? pinnedRequest)(url, addresses[0], controller.signal);
+        const response = await (options.request ?? ((target, address, signal) => pinnedRequest(target, address, signal, options.format === "feed")))(url, addresses[0], controller.signal);
         if ([301, 302, 303, 307, 308].includes(response.status)) {
           const location = response.headers.location;
           const next = location ? publicSourceUrl(new URL(location, url).href) : undefined;
@@ -151,9 +174,14 @@ export async function readCustomSource(value: string, options: ReadOptions = {})
           current = next;
           continue;
         }
-        if ([401, 403].includes(response.status)) return finish("login_required", "页面需要登录或限制访问，未读取正文。");
-        if (response.status !== 200) return finish("failed", "页面未能读取，请检查链接或稍后再试。");
+        if ([401, 403].includes(response.status)) return finish("login_required", options.format === "feed" ? `FEED_HTTP_${response.status}` : "页面需要登录或限制访问，未读取正文。");
+        if (response.status !== 200) return finish("failed", options.format === "feed" ? `FEED_HTTP_${response.status}` : "页面未能读取，请检查链接或稍后再试。");
         const type = response.headers["content-type"] ?? "";
+        if (options.format === "feed") {
+          if (!/(?:application\/(?:rss\+xml|atom\+xml|xml)|text\/xml)(?:\s*;|$)/i.test(type)) return finish("failed", "FEED_CONTENT_TYPE_UNSUPPORTED");
+          if (Buffer.byteLength(response.body) > 2 * 1024 * 1024) return finish("failed", "FEED_TOO_LARGE");
+          return {...finish("readable", "订阅内容已读取，仍需解析与筛选。"), canonicalUrl: url.href, content: response.body};
+        }
         if (!/text\/html|text\/plain|application\/xhtml\+xml/i.test(type)) {
           return finish("failed", "当前仅支持公开网页正文，不支持这种文件类型。");
         }
@@ -165,9 +193,11 @@ export async function readCustomSource(value: string, options: ReadOptions = {})
       return finish("failed", "页面跳转过多，已停止抓取。");
     };
     return await Promise.race([work(), new Promise<CustomSourceResult>(resolve => {
-      timer = setTimeout(() => { controller.abort(); resolve(finish("failed", "读取超时，请稍后再检查。")); }, Math.max(1, deadlineAt - Date.now()));
+      timer = setTimeout(() => { controller.abort(); resolve(finish("failed", options.format === "feed" ? "FEED_TIMEOUT" : "读取超时，请稍后再检查。")); }, Math.max(1, deadlineAt - Date.now()));
     })]);
-  } catch {
-    return finish("failed", "页面读取失败，可能暂时不可达或正文过大。");
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? String(error.code) : error instanceof Error ? error.message : "UNKNOWN";
+    const safeCode = ["ENOTFOUND", "EAI_AGAIN", "ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "PAGE_TOO_LARGE", "TIMEOUT"].includes(code) ? code : "READ_FAILED";
+    return finish("failed", options.format === "feed" ? `FEED_${safeCode}` : "页面读取失败，可能暂时不可达或正文过大。");
   } finally { if (timer !== undefined) clearTimeout(timer); }
 }

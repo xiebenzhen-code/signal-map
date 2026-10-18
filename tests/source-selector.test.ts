@@ -24,7 +24,7 @@ test("strategy maps to the expected primary source", () => {
 
 test("selection exposes provider bindings instead of query intent only", () => {
   const selection = selectSource({ strategy: "ESCALATE_SOURCE" });
-  assert.deepEqual(selection.allowedProviderIds, ["company-registry", "official-update-pages", "github-releases"]);
+  assert.deepEqual(selection.allowedProviderIds, ["company-registry", "official-update-pages", "github-releases", "registered-feeds"]);
 });
 
 test("broad product update without entity starts with discovery sources instead of official-only", () => {
@@ -52,7 +52,7 @@ test("explicit product update entity can still prefer official verification sour
 
   assert.equal(selection.discoveryMode, false);
   assert.equal(selection.primarySourceType, "OFFICIAL");
-  assert.deepEqual(selection.allowedProviderIds, ["company-registry", "official-update-pages", "github-releases"]);
+  assert.deepEqual(selection.allowedProviderIds, ["company-registry", "official-update-pages", "github-releases", "registered-feeds"]);
 });
 
 test("discovered entity can route into official or primary verification", () => {

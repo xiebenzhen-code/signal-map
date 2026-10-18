@@ -33,6 +33,7 @@ import {
   selectCurrentInformationRun,
 } from "@/information/run-information";
 import { createResearchRequest } from "@/information/research-request";
+import { createBrowserResearchObservation } from "@/information/browser-observation";
 import {
   inferNaturalResearchDraft,
   type NaturalResearchOptions,
@@ -741,7 +742,9 @@ function FilterBuilder({
     "这个方向最近有什么重要变化？",
   ];
   const submit = () => {
-    const draft = inferNaturalResearchDraft(query, options);
+    let draft: ReturnType<typeof inferNaturalResearchDraft>;
+    try { draft = inferNaturalResearchDraft(query, options); }
+    catch (error) { setSourceError(error instanceof Error ? error.message : "无法识别时间范围"); return; }
     const parsed = parseCustomSources(sources);
     if (parsed.errors.length) { setSourceError(parsed.errors[0]); return; }
     setSourceError("");
@@ -792,14 +795,14 @@ function FilterBuilder({
             <summary className="min-h-10 cursor-pointer list-none text-sm font-black text-[#2359ff]">更多筛选</summary>
             <div className="mt-4 grid gap-4">
               <CustomSourcesEditor value={sources} onChange={setSources} />
-              {sourceError && <p role="alert" className="text-xs text-[#ad3342]">{sourceError}</p>}
-              <label><span className="text-sm font-black">时间范围</span><select value={options.freshnessWindow ?? ""} onChange={(event) => setOptions((current) => ({ ...current, freshnessWindow: event.target.value ? event.target.value as InformationFilter["freshnessWindow"] : undefined }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="">自动判断</option><option value="24h">最新</option><option value="3d">最近 3 天</option><option value="7d">最近 7 天</option><option value="30d">最近一个月</option></select></label>
+              <label><span className="text-sm font-black">时间范围</span><select value={options.freshnessWindow ?? ""} onChange={(event) => setOptions((current) => ({ ...current, freshnessWindow: event.target.value ? event.target.value as InformationFilter["freshnessWindow"] : undefined }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="">自动判断</option><option value="24h">最新</option><option value="3d">最近 3 天</option><option value="7d">最近 7 天</option><option value="30d">最近一个月</option><option value="90d">最近三个月</option></select></label>
               <label><span className="text-sm font-black">来源偏好</span><select value={options.sourcePreference ?? "auto"} onChange={(event) => setOptions((current) => ({ ...current, sourcePreference: event.target.value as NaturalResearchOptions["sourcePreference"] }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="auto">自动选择</option><option value="official">优先官方和一手来源</option><option value="domestic">优先中文/国内来源</option><option value="global">优先全球来源</option></select></label>
               <label><span className="text-sm font-black">地区</span><input value={options.region ?? ""} onChange={(event) => setOptions((current) => ({ ...current, region: event.target.value }))} placeholder="例如：中国、美国、全球；不填则自动判断" className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none" /></label>
               <label><span className="text-sm font-black">排除关键词</span><input value={options.excludeKeywords ?? ""} onChange={(event) => setOptions((current) => ({ ...current, excludeKeywords: event.target.value }))} placeholder="不想看的词，用逗号隔开" className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none" /></label>
               <label><span className="text-sm font-black">最低可信度</span><select value={options.reliabilityPreference ?? "balanced"} onChange={(event) => setOptions((current) => ({ ...current, reliabilityPreference: event.target.value as NaturalResearchOptions["reliabilityPreference"] }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="balanced">正常过滤</option><option value="reliable">优先较可靠来源</option><option value="strict">只看证据更充分的信息</option></select></label>
             </div>
           </details>
+          {sourceError && <p role="alert" className="mt-3 text-sm text-[#ad3342]">{sourceError}</p>}
           <div className="flex gap-3 pt-1">
             <button
               onClick={submit}
@@ -842,7 +845,9 @@ function ResearchPromptPanel({
     "这个方向最近有什么重要变化？",
   ];
   const submit = () => {
-    const draft = inferNaturalResearchDraft(query, options);
+    let draft: ReturnType<typeof inferNaturalResearchDraft>;
+    try { draft = inferNaturalResearchDraft(query, options); }
+    catch (error) { setSourceError(error instanceof Error ? error.message : "无法识别时间范围"); return; }
     const parsed = parseCustomSources(sources);
     if (parsed.errors.length) { setSourceError(parsed.errors[0]); return; }
     setSourceError("");
@@ -875,14 +880,14 @@ function ResearchPromptPanel({
         <summary className="min-h-10 cursor-pointer list-none text-sm font-black text-[#2359ff]">更多筛选</summary>
         <div className="mt-4 grid gap-4">
           <CustomSourcesEditor value={sources} onChange={setSources} disabled={loading} onSave={onSourcesSave} />
-              {sourceError && <p role="alert" className="text-xs text-[#ad3342]">{sourceError}</p>}
-              <label><span className="text-sm font-black">时间范围</span><select value={options.freshnessWindow ?? ""} onChange={(event) => setOptions((current) => ({ ...current, freshnessWindow: event.target.value ? event.target.value as InformationFilter["freshnessWindow"] : undefined }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="">自动判断</option><option value="24h">最新</option><option value="3d">最近 3 天</option><option value="7d">最近 7 天</option><option value="30d">最近一个月</option></select></label>
+              <label><span className="text-sm font-black">时间范围</span><select value={options.freshnessWindow ?? ""} onChange={(event) => setOptions((current) => ({ ...current, freshnessWindow: event.target.value ? event.target.value as InformationFilter["freshnessWindow"] : undefined }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="">自动判断</option><option value="24h">最新</option><option value="3d">最近 3 天</option><option value="7d">最近 7 天</option><option value="30d">最近一个月</option><option value="90d">最近三个月</option></select></label>
           <label><span className="text-sm font-black">来源偏好</span><select value={options.sourcePreference ?? "auto"} onChange={(event) => setOptions((current) => ({ ...current, sourcePreference: event.target.value as NaturalResearchOptions["sourcePreference"] }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="auto">自动选择</option><option value="official">优先官方和一手来源</option><option value="domestic">优先中文/国内来源</option><option value="global">优先全球来源</option></select></label>
           <label><span className="text-sm font-black">地区</span><input value={options.region ?? ""} onChange={(event) => setOptions((current) => ({ ...current, region: event.target.value }))} placeholder="例如：中国、美国、全球；不填则自动判断" className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none" /></label>
           <label><span className="text-sm font-black">排除关键词</span><input value={options.excludeKeywords ?? ""} onChange={(event) => setOptions((current) => ({ ...current, excludeKeywords: event.target.value }))} placeholder="不想看的词，用逗号隔开" className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none" /></label>
           <label><span className="text-sm font-black">最低可信度</span><select value={options.reliabilityPreference ?? "balanced"} onChange={(event) => setOptions((current) => ({ ...current, reliabilityPreference: event.target.value as NaturalResearchOptions["reliabilityPreference"] }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dde2e7] bg-white px-4 text-base outline-none"><option value="balanced">正常过滤</option><option value="reliable">优先较可靠来源</option><option value="strict">只看证据更充分的信息</option></select></label>
         </div>
       </details>
+      {sourceError && <p role="alert" className="mt-3 text-sm text-[#ad3342]">{sourceError}</p>}
       <button
         onClick={submit}
         disabled={loading || !query.trim()}
@@ -950,6 +955,7 @@ export default function HomePage() {
   const [followStatus, setFollowStatus] = useState("");
   const [selected, setSelected] = useState<ResearchSignal | null>(null);
   const [loading, setLoading] = useState(false);
+  const researchObservation = useRef<ReturnType<typeof createBrowserResearchObservation>>(null);
   const [error, setError] = useState("");
   const [hydrated, setHydrated] = useState(false);
   const [focusOpen, setFocusOpen] = useState(false);
@@ -1098,6 +1104,8 @@ export default function HomePage() {
   };
 
   const refreshToday = useCallback(async (state: ActiveKnowledgeContext, filter: InformationFilter) => {
+    researchObservation.current?.complete("incomplete");
+    researchObservation.current = createBrowserResearchObservation();
     setLoading(true);
     setError("");
     try {
@@ -1109,6 +1117,7 @@ export default function HomePage() {
         allowDemoFallback: false,
         runLive: async () => {
           const { url, ...requestInit } = createResearchRequest(state);
+          researchObservation.current?.request(new Headers(requestInit.headers).get("X-Signal-Map-Request-Id") ?? "");
           const request = await fetch(url, requestInit);
           if (!request.ok) {
             const body = await request.json().catch(() => null) as { error?: string; reason?: string } | null;
@@ -1122,12 +1131,26 @@ export default function HomePage() {
       const current = currentResearchContextRef.current;
       if (current.filterId !== result.filterId || current.researchContextRevision !== result.generatedFromResearchContextRevision) return;
       setLastRunByFilterId((runs) => ({ ...runs, [result.filterId]: result }));
+      if (researchObservation.current) researchObservation.current.outcome = "completed";
     } catch (requestError) {
+      if (researchObservation.current) researchObservation.current.outcome = "failed";
       setError(requestError instanceof Error ? requestError.message : "暂时无法完成信息过滤");
     } finally {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    const observation = researchObservation.current;
+    if (!observation) return;
+    const frame = requestAnimationFrame(() => {
+      const element = document.querySelector(`[data-research-state="${loading ? "loading" : error ? "error" : "ready"}"]`);
+      if (!element || !element.getClientRects().length || document.visibilityState !== "visible") return;
+      if (loading) observation.feedback();
+      else if (observation.outcome) observation.complete(observation.outcome);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [loading, error]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1546,7 +1569,7 @@ export default function HomePage() {
   }).format(new Date());
 
   const renderToday = () => (
-    <main className="signal-page mx-auto max-w-[760px] px-4 pb-32 pt-8 sm:px-6 sm:pt-12">
+    <main data-research-state={loading ? "loading" : error ? "error" : "ready"} className="signal-page mx-auto max-w-[760px] px-4 pb-32 pt-8 sm:px-6 sm:pt-12">
       <ResearchPromptPanel
         key={activeFilter?.id ?? "new"}
         initialQuery={activeContext?.currentQuestions[0] ?? ""}
@@ -1924,7 +1947,7 @@ export default function HomePage() {
 
           <details className={accordionClass}>
             <summary className={summaryClass}><span>我的认知</span><ChevronRight size={18}/></summary>
-            <div className="mt-5 grid gap-5">{listField("focusAreas", "关注领域", "每行一项")}{listField("currentQuestions", "当前问题", "尚未解决的问题")}{listField("knownInformation", "已知信息", "已确认的事实")}{listField("informationGaps", "信息缺口", "仍缺少的证据")}{listField("trackedEntities", "关注实体", "公司、产品、人物")}{listField("trackedEvents", "关注事件", "持续观察的事件")}{listField("userJudgements", "我的判断", "当前判断")}<label><span className="text-sm font-black">信息时效范围</span><select value={knowledge.freshnessWindow} onChange={(event) => setKnowledge((current) => ({ ...current, freshnessWindow: event.target.value as InformationFilter["freshnessWindow"] }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] bg-white px-4 text-base"><option value="24h">24 小时</option><option value="3d">3 天</option><option value="7d">7 天</option><option value="30d">30 天</option></select></label><button onClick={() => { if (!activeFilter || !activeContext) return; setPage("today"); void refreshToday(activeContext, activeFilter); }} className="min-h-12 rounded-xl bg-[#2359ff] text-sm font-black text-white">保存并重新判断今日信息</button></div>
+            <div className="mt-5 grid gap-5">{listField("focusAreas", "关注领域", "每行一项")}{listField("currentQuestions", "当前问题", "尚未解决的问题")}{listField("knownInformation", "已知信息", "已确认的事实")}{listField("informationGaps", "信息缺口", "仍缺少的证据")}{listField("trackedEntities", "关注实体", "公司、产品、人物")}{listField("trackedEvents", "关注事件", "持续观察的事件")}{listField("userJudgements", "我的判断", "当前判断")}<label><span className="text-sm font-black">信息时效范围</span><select value={knowledge.freshnessWindow} onChange={(event) => setKnowledge((current) => ({ ...current, freshnessWindow: event.target.value as InformationFilter["freshnessWindow"] }))} className="mt-2 min-h-12 w-full rounded-xl border border-[#dfe3e7] bg-white px-4 text-base"><option value="24h">24 小时</option><option value="3d">3 天</option><option value="7d">7 天</option><option value="30d">30 天</option><option value="90d">90 天</option></select></label><button onClick={() => { if (!activeFilter || !activeContext) return; setPage("today"); void refreshToday(activeContext, activeFilter); }} className="min-h-12 rounded-xl bg-[#2359ff] text-sm font-black text-white">保存并重新判断今日信息</button></div>
           </details>
 
           <details className={accordionClass}>

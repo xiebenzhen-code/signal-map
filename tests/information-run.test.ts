@@ -1,5 +1,27 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+
+test("browser observations distinguish visible feedback from HTTP completion and preserve unknowns", async () => {
+  const { createResearchObservation } = await import("../information/browser-observation.ts");
+  let now = 100;
+  const records: unknown[] = [];
+  const observed = createResearchObservation(() => now, (event) => records.push(event));
+  now = 180;
+  observed.feedback();
+  observed.request("signals-test");
+  now = 2100;
+  observed.complete("completed");
+  observed.complete("completed");
+  assert.equal(records.length, 1);
+  assert.deepEqual(records[0], { stage: "browser_research", requestId: "signals-test", firstFeedbackMs: 80,
+    visibleCompletionMs: 2000, outcome: "completed", longTaskCount: null, maxLongTaskMs: null });
+  const unknown: unknown[] = [];
+  createResearchObservation(() => 10, (event) => unknown.push(event)).complete("failed");
+  assert.equal((unknown[0] as Record<string, unknown>).firstFeedbackMs, null);
+  const incomplete: unknown[] = [];
+  createResearchObservation(() => 60000, (event) => incomplete.push(event)).complete("incomplete");
+  assert.equal((incomplete[0] as Record<string, unknown>).visibleCompletionMs, null);
+});
 import {
   isInformationRunCurrent,
   runInformation,

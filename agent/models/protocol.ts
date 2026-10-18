@@ -1,5 +1,5 @@
 import type { EvidenceBoundSynthesis } from "../evidence-synthesis.ts";
-import type { ParsedConclusion } from "./types.ts";
+import type { ParsedConclusion, ModelCallObservation, AdapterOptions } from "./types.ts";
 import { discardResponseBody } from "../../lib/http-response.ts";
 
 export function parseJsonObject(value: string): Record<string, unknown> {
@@ -24,13 +24,19 @@ export function modelTimeoutMs(env: Record<string, string | undefined> = process
   return Number.isFinite(configured) && configured > 0 ? configured : 8000;
 }
 
-export async function callJsonEndpoint(fetchImpl: (input: string, init: RequestInit) => Promise<Response>, endpoint: string, apiKey: string, body: unknown, timeoutMs = modelTimeoutMs(), externalSignal?: AbortSignal) {
+export async function callJsonEndpoint(fetchImpl: (input: string, init: RequestInit) => Promise<Response>, endpoint: string, apiKey: string, body: unknown, timeoutMs = modelTimeoutMs(), externalSignal?: AbortSignal,
+  observation?: { provider: ModelCallObservation["provider"]; model: string; stage: ModelCallObservation["stage"]; onCall: AdapterOptions["onCall"] }) {
+  const started = Date.now();
+  let httpStatus: number | null = null;
+  let usage: ModelCallObservation["usage"] = null;
+  let errorCode: ModelCallObservation["errorCode"] = null;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const signal = externalSignal ? AbortSignal.any([controller.signal, externalSignal]) : controller.signal;
   let response: Response;
   try {
     response = await fetchImpl(endpoint, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify(body), signal });
+    httpStatus = response.status;
     if (!response.ok) {
       await discardResponseBody(response);
       if (response.status === 401 || response.status === 403) throw new Error("authentication_error");
@@ -41,6 +47,11 @@ export async function callJsonEndpoint(fetchImpl: (input: string, init: RequestI
       throw new Error("provider_error");
     }
     const bodyJson = await response.json() as Record<string, unknown>;
+    if (bodyJson.usage && typeof bodyJson.usage === "object") {
+      const raw = bodyJson.usage as Record<string, unknown>;
+      const count = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+      usage = { inputTokens: count(raw.input_tokens ?? raw.prompt_tokens), outputTokens: count(raw.output_tokens ?? raw.completion_tokens), totalTokens: count(raw.total_tokens) };
+    }
     if (typeof bodyJson.output_text === "string") return bodyJson.output_text;
     const choices = Array.isArray(bodyJson.choices) ? bodyJson.choices : [];
     const message = choices[0] && typeof choices[0] === "object" ? (choices[0] as Record<string, unknown>).message : undefined;
@@ -50,9 +61,17 @@ export async function callJsonEndpoint(fetchImpl: (input: string, init: RequestI
     if (text) return text;
     throw new Error("malformed_response");
   } catch (error) {
-    if (signal.aborted || error instanceof Error && error.name === "AbortError") throw new Error("timeout");
+    errorCode = signal.aborted || error instanceof Error && error.name === "AbortError" ? "timeout" : normalizeModelError(error);
+    if (errorCode === "timeout") throw new Error("timeout");
     throw error;
-  } finally { clearTimeout(timeout); }
+  } finally {
+    clearTimeout(timeout);
+    if (observation?.onCall) {
+      // Telemetry must never break a research request or expose provider bodies.
+      try { observation.onCall({ provider: observation.provider, model: observation.model.replace(/[^a-zA-Z0-9._:/-]/g, "").slice(0, 100), stage: observation.stage,
+        durationMs: Date.now() - started, httpStatus, transportStatus: errorCode ? "error" : "completed", errorCode, usage, cost: null }); } catch { /* observer isolation */ }
+    }
+  }
 }
 export function normalizeModelError(error: unknown): "authentication_error" | "quota_error" | "rate_limit" | "model_unavailable" | "timeout" | "malformed_response" | "schema_validation_error" | "provider_error" {
   const message = error instanceof Error ? error.message : "";

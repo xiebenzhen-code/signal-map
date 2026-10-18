@@ -44,12 +44,16 @@ function installFetch(overrides: Record<string, () => Response>) {
 }
 
 test("Evidence Entry: a fresh, claim-valid candidate reaches Evidence evaluation", async () => {
+  // Relative, not a fixed calendar date: the fixture must stay inside the 30-day
+  // window the test declares, otherwise it silently starts testing a stale-record
+  // path and the assertion about the Evidence gate becomes meaningless.
+  const threeDaysAgo = new Date(Date.now() - 3 * 86400_000).toISOString();
   const restore = installFetch({
     // Fresh (within the 30-day window) + topically relevant + carries a canonical URL.
     "hn.algolia.com": () =>
       new Response(
         '{"hits":[{"objectID":"1","title":"Show HN: Palmier Pro - Open-source macOS video editor built for AI",' +
-          '"url":"https://example.com/palmier-pro","created_at":"2026-09-15T00:00:00Z","points":5,"author":"x"}]}',
+          `"url":"https://example.com/palmier-pro","created_at":"${threeDaysAgo}","points":5,"author":"x"}]}`,
         { status: 200 },
       ),
     // Canonical body carries a body-level event fact ("launches") so the claim is VALID.

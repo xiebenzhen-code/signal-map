@@ -222,6 +222,10 @@ test("JOB_SEARCH fallback stays inside planned fallback sources instead of switc
 test("JOB_SEARCH can use the existing public-web provider for general web job results", async () => {
   const originalFetch = globalThis.fetch;
   const urls: string[] = [];
+  // Relative, not a fixed calendar date: a hardcoded pubDate drifts out of the
+  // 30-day freshness window and the test then fails for a reason unrelated to
+  // what it asserts (public-web participation).
+  const recentPubDate = new Date(Date.now() - 2 * 86400_000).toUTCString();
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
     urls.push(url);
@@ -231,7 +235,7 @@ test("JOB_SEARCH can use the existing public-web provider for general web job re
         <link>https://jobs.example.com/aigc-video-producer</link>
         <description>Open role with apply link, remote option, video generation workflow skills.</description>
         <source url="https://jobs.example.com">Example Jobs</source>
-        <pubDate>Wed, 09 Sep 2026 00:00:00 GMT</pubDate>
+        <pubDate>${recentPubDate}</pubDate>
       </item></channel></rss>
     `;
     return new Response(xml, { status: 200, headers: { "content-type": "application/rss+xml" } });

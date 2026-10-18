@@ -153,15 +153,29 @@ test("stops after one round when reliable evidence is sufficient", async () => {
   assert.equal(result.evaluation.decision, "STOP");
 });
 
-test("continues from social-only evidence and caps at maxRounds", async () => {
+test("continues from social-only evidence and stops before repeating an identical attempt", async () => {
   let calls = 0;
+  const signatures: string[] = [];
   const result = await runAgent({
     input, maxRounds: 3,
-    research: async () => { calls += 1; return response([signal({ sourceType: "social", sourceTier: "C", informationType: "SIGNAL", verificationStatus: "unverified", attentionDecision: "WORTH_WATCHING" })]); },
+    research: async (_input, plan) => {
+      calls += 1;
+      const queries = (plan?.queries ?? []).map((query) => query.trim().toLowerCase()).sort();
+      for (const provider of plan?.allowedProviderIds ?? []) signatures.push(`${provider}|${queries.join(" ")}`);
+      return response([signal({ sourceType: "social", sourceTier: "C", informationType: "SIGNAL", verificationStatus: "unverified", attentionDecision: "WORTH_WATCHING" })]);
+    },
   });
-  assert.equal(calls, 3);
-  assert.equal(result.rounds, 3);
+  // maxRounds is still the round ceiling, but a round that would re-issue an
+  // identical provider + query + params combination no longer spends a
+  // request: with social-only evidence every round selects the same OFFICIAL
+  // group on the same queries, so the third round has nothing new to ask for.
+  assert.ok(calls >= 2 && calls <= 3, `unexpected request count: ${calls}`);
   assert.equal(result.status, "needs_more_evidence");
+  assert.deepEqual(
+    Array.from(new Set(signatures.filter((signature, index) => signatures.indexOf(signature) !== index))),
+    [],
+    `an identical attempt was repeated: ${JSON.stringify(signatures)}`,
+  );
 });
 
 test("CONTINUE persists evidence only and delays formal attention", async () => {
@@ -332,7 +346,11 @@ test("primary attempt source evidence is merged before empty fallback", async ()
     },
   });
 
-  assert.equal(calls, 2);
+  // Declared fallbacks are now all attempted until one yields evidence or the
+  // deadline runs out, so this is no longer pinned to exactly two calls. The
+  // assertions below still pin what this test is actually about: that primary
+  // evidence is merged first and the empty fallback does not discard it.
+  assert.ok(calls >= 2);
   assert.equal(result.status, "needs_more_evidence");
   assert.equal(result.response?.sourceOutcomes?.reduce((count, outcome) => count + outcome.newEvidenceCount, 0), 12);
   assert.equal(result.response?.evidenceAccounting?.producedEvidenceCount, 2);

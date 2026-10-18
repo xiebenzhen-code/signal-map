@@ -10,16 +10,249 @@ import { createResearchPlan } from "./query-planner.ts";
 import { ResearchRunState, mergeRoundAttempts, type EvidencePreservationSnapshot } from "./research-run-state.ts";
 import { toRetrievalPlan } from "./retrieval-plan.ts";
 import { chooseResearchStrategy } from "./research-policy.ts";
-import { selectSource } from "./source-selector.ts";
+import { providerIdsFor, selectSource } from "./source-selector.ts";
+import { officiallyCoveredEntities } from "../source-registry/resolver.ts";
+import { officialTargetCoverage } from "../research/github-discovery.ts";
 import { classifyIntent } from "../intent/classifier.ts";
 import { mapIntentOutput } from "../intent/output-mapping.ts";
 import { sourceProfileForIntent } from "../intent/source-profiles.ts";
-import type { AgentRunOptions, AgentRunResult, AgentState, AgentStep, AgentTraceEntry, ResearchStrategy, SourceOutcome } from "./types.ts";
+import type { AgentRunOptions, AgentRunResult, AgentState, AgentStep, AgentTraceEntry, ResearchStrategy, SourceOutcome, SourceExecutionPlan, SourceSelectionType, ResearchPlan } from "./types.ts";
 
 const now = () => new Date().toISOString();
 
+// Entity recognition is not official-source coverage. Shopify resolves as an
+// entity but has no company-registry profile, no official GitHub target and no
+// official update page, so treating "entity resolved" as "official can execute"
+// locked the run into three providers that all reported not_searched.
+function officialCoverageEntities(resolvedEntities: ResearchPlan["resolvedEntities"], originalNeed = "") {
+  const entities = (resolvedEntities ?? []).map((entity) => entity.canonicalEntity ?? "").filter(Boolean);
+  // Coverage means "a dedicated official adapter can execute here", which needs
+  // both signals: a company-registry profile (changelog/newsroom/docs) and an
+  // official update target (GitHub releases / update pages). Checking only one
+  // either hides usable official sources or invents coverage that does not exist.
+  return Array.from(new Set([
+    ...officiallyCoveredEntities({ entities, query: originalNeed }),
+    ...officialTargetCoverage(entities),
+  ])).map((entity) => entity.toLowerCase());
+}
+
 function appendLines(existing: string, values: string[]) {
   return [...new Set([existing, ...values].flatMap((value) => value.split(/\r?\n/)).map((value) => value.trim()).filter(Boolean))].join("\n");
+}
+
+// A retrieval attempt is identified at the level the provider actually runs:
+// one provider asked one normalized query under one set of result-affecting
+// parameters. Grouping a whole query set into a single signature is wrong in
+// both directions — A/q1 followed by A/[q1,q2] looks brand new and re-requests
+// q1, and A/q1 followed by A+B/q1 looks new as soon as B is added even though A
+// is a repeat.
+//
+// Three counts are deliberately kept apart, because they mean different things
+// and only one of them is enforceable here:
+//
+//   plan attempts  — how many times a research plan actually started.
+//   provider units — how many (provider x query) combinations were dispatched.
+//                    This is the only layer the runner can cap.
+//   HTTP requests  — issued inside the retrieval pipeline. Not observable from
+//                    the runner, so it is never claimed as bounded here.
+//
+// Admission is separate from execution: admitting a plan reserves nothing, and a
+// unit is only recorded once its provider call has actually started. A source
+// the plan merely allowed is therefore never counted as executed.
+//
+// The ledger is scoped to a single runAgent call on purpose. A process-wide or
+// cross-user set would leak one run's coverage into an unrelated question.
+export type AttemptUnit = { providerId: string; query: string; signature: string };
+
+export class AttemptLedger {
+  private readonly started = new Set<string>();
+  private readonly maxUnits: number;
+  private readonly maxSlices: number;
+  private startedSlices = 0;
+  private usedUnits = 0;
+
+  constructor(maxUnits: number, maxSlices: number) {
+    this.maxUnits = maxUnits;
+    this.maxSlices = maxSlices;
+  }
+
+  static normalizeQuery(query: string) {
+    return query.trim().toLowerCase().replace(/\s+/g, " ").replace(/[“”‘’]/g, "");
+  }
+
+  /** The (provider x query) combinations a plan would actually dispatch. */
+  static units(plan: ResearchPlan): AttemptUnit[] {
+    // Only genuinely result-affecting parameters belong in the signature. The
+    // selected source type and the provider list describe how the run routed the
+    // attempt, not what a given provider would return; including them would make
+    // every re-pinned fallback look like a new combination.
+    const params = [
+      plan.freshnessWindow ?? "",
+      JSON.stringify(plan.retrievalWindows ?? {}),
+    ].join("~");
+    const providers = plan.allowedProviderIds?.length
+      ? plan.allowedProviderIds
+      : ["*"];
+    const queries = Array.from(new Set(
+      (plan.queries ?? []).map(AttemptLedger.normalizeQuery).filter(Boolean),
+    ));
+    const units: AttemptUnit[] = [];
+    for (const providerId of providers) {
+      for (const query of queries) {
+        units.push({ providerId, query, signature: `${providerId}|${query}|${params}` });
+      }
+    }
+    return units;
+  }
+
+  /**
+   * Reserves nothing. Reports which combinations are still new and how many the
+   * remaining unit budget can still afford.
+   *
+   * `reserveUnits` is the capacity a caller must leave for rounds that may still
+   * run. The ledger spans the whole research, so without a reservation the first
+   * round can spend the entire allowance on one wide batch and leave the
+   * escalation round with nothing to execute: a community-only first round then
+   * "completes" without ever attempting verification. Reserving does not add
+   * budget — it only defers part of the same total to the later round.
+   */
+  admit(plan: ResearchPlan, reserveUnits = 0) {
+    const all = AttemptLedger.units(plan);
+    if (!all.length) {
+      return { allowed: false as const, reason: "no_retrievable_unit" as const, admitted: [] as AttemptUnit[], duplicates: [] as AttemptUnit[] };
+    }
+    const fresh = all.filter((unit) => !this.started.has(unit.signature));
+    if (!fresh.length) {
+      return { allowed: false as const, reason: "duplicate_attempt" as const, admitted: [] as AttemptUnit[], duplicates: all };
+    }
+    if (this.startedSlices + 1 > this.maxSlices) {
+      return { allowed: false as const, reason: "slice_budget_exhausted" as const, admitted: [] as AttemptUnit[], duplicates: [] as AttemptUnit[] };
+    }
+    const remaining = this.maxUnits - this.usedUnits;
+    if (remaining <= 0) {
+      return { allowed: false as const, reason: "request_budget_exhausted" as const, admitted: [] as AttemptUnit[], duplicates: [] as AttemptUnit[] };
+    }
+    // A single combination is still admitted when the reservation would leave
+    // nothing: making no attempt at all is never better than a partial one, and
+    // the cap itself is still never exceeded.
+    const affordable = Math.max(1, remaining - Math.max(0, reserveUnits));
+    // Partial admission is deliberate: a batch that only partly fits still gets
+    // its new combinations executed, and the next admission observes the
+    // remaining zero. A batch can never buy its way past the cap.
+    const admitted = fresh.slice(0, affordable);
+    return {
+      allowed: true as const,
+      reason: (admitted.length < fresh.length ? "truncated_by_unit_budget" : undefined) as "truncated_by_unit_budget" | undefined,
+      admitted,
+      duplicates: all.filter((unit) => !admitted.some((keep) => keep.signature === unit.signature)),
+    };
+  }
+
+  /**
+   * Called immediately before one retrieval slice starts, not when the whole
+   * admitted batch was released. Per-slice is the honest boundary: a slice that
+   * never runs — because an earlier slice threw, the deadline closed, or the
+   * allowance ran out — must not be recorded as started.
+   */
+  markSliceStarted(units: AttemptUnit[]) {
+    for (const unit of units) this.started.add(unit.signature);
+    this.startedSlices += 1;
+    this.usedUnits += units.length;
+  }
+
+  /** Whether one more retrieval slice may still start, before it starts. */
+  canStartSlice(unitCount: number) {
+    if (this.startedSlices + 1 > this.maxSlices) return false;
+    return this.usedUnits + unitCount <= this.maxUnits;
+  }
+
+  get startedSliceCount() {
+    return this.startedSlices;
+  }
+
+  get maxSliceCount() {
+    return this.maxSlices;
+  }
+
+  get providerQueryUnits() {
+    return this.usedUnits;
+  }
+
+  get maxProviderQueryUnits() {
+    return this.maxUnits;
+  }
+}
+
+/**
+ * Rebuilds executable plan slices from the admitted units.
+ *
+ * A plan's shape is (providers x queries), so the admitted set has to be
+ * expressed as slices of that shape — passing a filtered provider list with the
+ * full query list would re-introduce exactly the cross-product the ledger just
+ * removed (A/q2 plus B/q1 has no faithful expression as {providers} x
+ * {queries}).
+ *
+ * Providers that admitted exactly the same query set share one slice:
+ * (providers x queries) then reproduces the admitted set exactly, so a plan
+ * asking several providers the same question still costs a single research
+ * call, as before this change. Providers whose admitted query sets differ get
+ * their own slice instead of a widened cross product.
+ *
+ * The slice key must not be a joined string: a normalized query can contain
+ * spaces, so joining and re-splitting would silently change the query.
+ *
+ * Each slice carries the exact units it will dispatch, so the caller can charge
+ * only that slice when it actually starts.
+ *
+ * This goes through the one existing research execution chain; no second
+ * executor is introduced.
+ */
+export type RetrievalSlice = { plan: ResearchPlan; units: AttemptUnit[] };
+
+export function scopeRetrievalSlices(plan: ResearchPlan, units: AttemptUnit[]): RetrievalSlice[] {
+  const queriesByProvider = new Map<string, Set<string>>();
+  for (const unit of units) {
+    const bucket = queriesByProvider.get(unit.providerId) ?? new Set<string>();
+    bucket.add(unit.query);
+    queriesByProvider.set(unit.providerId, bucket);
+  }
+  const slices = new Map<string, RetrievalSlice>();
+  for (const [providerId, queries] of queriesByProvider) {
+    const ordered = [...queries].sort();
+    const key = JSON.stringify(ordered);
+    const existing = slices.get(key);
+    if (existing) {
+      existing.plan.allowedProviderIds = providerId === "*"
+        ? (plan.allowedProviderIds ? [...plan.allowedProviderIds] : undefined)
+        : [...(existing.plan.allowedProviderIds ?? []), providerId];
+      existing.units.push(...units.filter((unit) => unit.providerId === providerId));
+      continue;
+    }
+    slices.set(key, {
+      plan: {
+        ...plan,
+        allowedProviderIds: providerId === "*"
+          ? (plan.allowedProviderIds ? [...plan.allowedProviderIds] : undefined)
+          : [providerId],
+        queries: [...ordered],
+      },
+      units: units.filter((unit) => unit.providerId === providerId),
+    });
+  }
+  return Array.from(slices.values());
+}
+
+export function scopePlansByProvider(plan: ResearchPlan, units: AttemptUnit[]): ResearchPlan[] {
+  return scopeRetrievalSlices(plan, units).map((slice) => slice.plan);
+}
+
+/** Honest counts for diagnostics: what was admitted, not what HTTP did. */
+export function attemptUnitCounts(units: AttemptUnit[]) {
+  return {
+    providerQueryUnits: units.length,
+    admittedProviders: Array.from(new Set(units.map((unit) => unit.providerId))),
+    admittedQueries: Array.from(new Set(units.map((unit) => unit.query))),
+  };
 }
 
 function sourceOutcomesFromResponse(response: ResearchResponse): SourceOutcome[] {
@@ -172,6 +405,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     availableSourceCapabilities: options.availableSourceCapabilities,
     sourceProfile,
     resolvedEntities: plan.resolvedEntities,
+    officiallyCoveredEntities: officialCoverageEntities(plan.resolvedEntities, plan.objective),
   });
   markPhase("source_selection_finished", true, bootstrapSelection.allowedProviderIds.length, undefined, {
     strategy: bootstrapStrategy,
@@ -205,8 +439,48 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     "STOP", "REFRESH", "DEEPEN", "BROADEN", "ESCALATE_SOURCE", "VERIFY_CONFLICT", "INITIAL",
   ].includes(strategy));
   let rounds = 0;
-  const budgetDiagnostics = (snapshot: BudgetSnapshot, extra: Record<string, unknown> = {}) => ({
-    remainingDeadlineMsBeforeRound: snapshot.remainingDeadlineMs,
+  // One ledger per research run. Two independent caps, deliberately not
+  // conflated with the deadline and not conflated with each other:
+  //   maxResearchProviderQueries — (provider x query) combinations actually
+  //     dispatched. HTTP requests issued inside the pipeline are NOT observable
+  //     from the runner and are never claimed as bounded.
+  //   maxResearchRetrievalSlices — how many retrieval slice calls may actually
+  //     start. One slice is one executeResearch call, which is the honest unit:
+  //     it is neither a plan nor an HTTP request.
+  //
+  // The approved budget was expressed in plan opportunities, and every plan
+  // opportunity used to execute all of its (provider x query) combinations. The
+  // default below restates that same allowance rather than adding any:
+  // sliceCap x maxQueriesPerRound combinations, with the slice cap keeping the
+  // previous plan-opportunity number. It is a tightening, not a grant.
+  const retrievalSliceCap = options.maxResearchRetrievalSlices ?? options.maxResearchPlanAttempts ?? Math.max(maxRounds * 4, 6);
+  const maxProviderQueryUnits = options.maxResearchRequests ?? retrievalSliceCap * Math.max(maxQueries, 1);
+  const ledger = new AttemptLedger(maxProviderQueryUnits, retrievalSliceCap);
+  /**
+   * Capacity the current round must leave untouched for the rounds that may
+   * still run. The allowance spans the whole research, so without a reservation
+   * one round — its primary batch plus its fallback batches — can spend all of
+   * it, and the escalation round then answers `request_budget_exhausted` instead
+   * of attempting verification. This defers part of the same total; it never
+   * grants extra. Half of what is left is the upper bound so an explicitly small
+   * budget still spends most of itself in the round that needs it.
+   */
+  const reserveForLaterRounds = (round: number) => {
+    const remaining = ledger.maxProviderQueryUnits - ledger.providerQueryUnits;
+    return Math.min(
+      Math.max(maxRounds - round, 0) * Math.max(maxQueries, 1),
+      Math.floor(remaining / 2),
+    );
+  };
+  const ledgerDiagnostics = () => ({
+    // Both are logical counts observed at the runner boundary. Neither is the
+    // number of HTTP requests the retrieval pipeline issues internally.
+    researchRetrievalSliceCalls: ledger.startedSliceCount,
+    maxResearchRetrievalSlices: ledger.maxSliceCount,
+    researchProviderQueryUnits: ledger.providerQueryUnits,
+    maxResearchProviderQueries: ledger.maxProviderQueryUnits,
+  });
+  const budgetDiagnostics = (snapshot: BudgetSnapshot, extra: Record<string, unknown> = {}) => ({    remainingDeadlineMsBeforeRound: snapshot.remainingDeadlineMs,
     canStartModelPlanning: snapshot.canStartModelPlanning,
     canStartRetrieval: snapshot.canStartRetrieval,
     cumulativeEvidenceCount: runState.cumulativeEvidenceCount,
@@ -241,6 +515,85 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     roundResponse.outputMode = sourceProfile.outputMode;
     roundResponse.intentOutput = mapIntentOutput(roundResponse, sourceProfile);
     return roundResponse;
+  };
+  /**
+   * The one place a retrieval slice is started.
+   *
+   * Per slice, in this order: check the shared deadline, check the remaining
+   * slice allowance and the remaining provider-query allowance, then charge only
+   * this slice's units, then run it. A slice that is never entered — because the
+   * budget closed, the deadline shut, or an earlier slice threw — is never
+   * charged. A slice that did start stays charged even if it fails or its result
+   * is unknown, and is not retried inside this research.
+   *
+   * Shared by the primary and the fallback path so neither can drift into a
+   * second executor.
+   */
+  const runRetrievalSlices = async (input: {
+    plan: ResearchPlan;
+    admitted: AttemptUnit[];
+    attemptType: "primary" | "fallback";
+    round: number;
+    execute: (scopedPlan: ResearchPlan) => Promise<ResearchResponse>;
+    merge: (response: ResearchResponse) => EvidencePreservationSnapshot;
+    setPhaseContext: () => void;
+  }) => {
+    const slices = scopeRetrievalSlices(input.plan, input.admitted);
+    let merged: ResearchResponse | undefined;
+    const executedProviderIds = new Set<string>();
+    let stopReason: "WORKER_DEADLINE" | "RESEARCH_REQUEST_BUDGET_EXHAUSTED" | undefined;
+    let stopStage: string | undefined;
+    for (const [index, slice] of slices.entries()) {
+      const sliceBudget = input.round === 1 ? budget : new BudgetManager({ deadlineAt, attempt: input.round });
+      const snapshot = sliceBudget.snapshot();
+      if (!snapshot.canStartRetrieval) {
+        // Deadline closed before this slice. It never starts, so it is not
+        // charged, and the reason is reported rather than silently swallowed.
+        markPhase("budget_checked", false, merged?.signals.length ?? 0, "WORKER_DEADLINE", budgetDiagnostics(snapshot, {
+          round: input.round,
+          stage: "slice_deadline_closed",
+          attemptType: input.attemptType,
+          notStartedSliceIndex: index,
+          notStartedSliceUnits: slice.units.length,
+          ...ledgerDiagnostics(),
+        }));
+        stopReason = "WORKER_DEADLINE";
+        stopStage = "slice_deadline_closed";
+        break;
+      }
+      if (!ledger.canStartSlice(slice.units.length)) {
+        markPhase("budget_checked", false, merged?.signals.length ?? 0, "RESEARCH_REQUEST_BUDGET_EXHAUSTED", budgetDiagnostics(snapshot, {
+          round: input.round,
+          stage: "slice_budget_exhausted",
+          attemptType: input.attemptType,
+          notStartedSliceIndex: index,
+          notStartedSliceUnits: slice.units.length,
+          ...attemptUnitCounts(slice.units),
+          ...ledgerDiagnostics(),
+        }));
+        stopReason = "RESEARCH_REQUEST_BUDGET_EXHAUSTED";
+        stopStage = "slice_budget_exhausted";
+        break;
+      }
+      input.setPhaseContext();
+      // Charged immediately before the call: a started slice is spent even if it
+      // fails or its result is unknown.
+      ledger.markSliceStarted(slice.units);
+      markPhase("budget_checked", true, merged?.signals.length, undefined, budgetDiagnostics(snapshot, {
+        round: input.round,
+        stage: "slice_started",
+        attemptType: input.attemptType,
+        sliceIndex: index,
+        sliceCount: slices.length,
+        ...attemptUnitCounts(slice.units),
+        ...ledgerDiagnostics(),
+      }));
+      const response = prepareRoundResponse(await input.execute(slice.plan));
+      input.merge(response);
+      merged = merged ? prepareRoundResponse(mergeRoundAttempts(merged, response)) : response;
+      for (const unit of slice.units) executedProviderIds.add(unit.providerId);
+    }
+    return { merged, executedProviderIds, startedSlices: slices.length, stopReason, stopStage };
   };
   const initialPlanningBudget = budget.snapshot();
   markPhase("budget_checked", true, undefined, undefined, budgetDiagnostics(initialPlanningBudget, { round: 1, stage: "initial_planning" }));
@@ -295,58 +648,172 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       if (!retrievalBudget.canStartRetrieval) {
         throw Object.assign(new Error("Worker deadline budget exhausted before research"), { code: "WORKER_DEADLINE" });
       }
+      // The ledger spans the whole research, not one round, so a
+      // (provider x query) combination that already started cannot be requested
+      // again later. Admission reserves nothing; only markSliceStarted() inside
+      // runRetrievalSlices, which runs immediately before each slice's provider
+      // call, records anything.
+      // Leave the still-to-come rounds an executable attempt. Without this the
+      // first round's wide batch can consume the whole run-wide allowance and the
+      // escalation round has nothing left to start, so a community-only result
+      // "completes" without any verification attempt. The reservation never adds
+      // budget: it only defers part of the same total, and is capped at half of
+      // what is left so an explicitly small budget still spends most of itself
+      // immediately.
+      const admitPrimary = ledger.admit(plan, reserveForLaterRounds(round));
+      if (!admitPrimary.allowed) {
+        if (admitPrimary.reason === "request_budget_exhausted" || admitPrimary.reason === "slice_budget_exhausted") {
+          markPhase("budget_checked", false, runState.cumulativeEvidenceCount, "RESEARCH_REQUEST_BUDGET_EXHAUSTED", budgetDiagnostics(retrievalBudget, {
+            round,
+            stage: admitPrimary.reason,
+            ...ledgerDiagnostics(),
+          }));
+          return completeWithCumulativeResponse(round, "research request budget exhausted", ledgerDiagnostics());
+        }
+        // Everything this round would ask for already ran in an earlier round
+        // or fallback, so there is nothing new to request.
+        markPhase("budget_checked", true, runState.cumulativeEvidenceCount, "DUPLICATE_ATTEMPT_SKIPPED", budgetDiagnostics(retrievalBudget, {
+          round,
+          stage: admitPrimary.reason,
+          ...ledgerDiagnostics(),
+        }));
+        if (runState.cumulativeResponse) {
+          return completeWithCumulativeResponse(round, "all remaining attempts already executed", ledgerDiagnostics());
+        }
+        throw Object.assign(new Error("No executable retrieval attempt remains for this research"), { code: "WORKER_DEADLINE" });
+      }
+      if (admitPrimary.reason === "truncated_by_unit_budget") {
+        // The batch only partly fit. It still runs, and the next admission sees
+        // the reduced remaining budget, so a batch can never exceed the cap.
+        markPhase("budget_checked", true, undefined, "RESEARCH_REQUEST_BUDGET_TRUNCATED", budgetDiagnostics(retrievalBudget, {
+          round,
+          stage: "unit_budget_truncated",
+          ...attemptUnitCounts(admitPrimary.admitted),
+          ...ledgerDiagnostics(),
+        }));
+      }
       phaseContext = { round, attemptId: `round-${round}-primary`, attemptType: "primary" };
-      roundResponse = prepareRoundResponse(await executeResearch(plan));
-      preservation = mergeAttemptResponse(roundResponse, "primary");
+      // Scoped per provider so only the newly admitted combinations reach the
+      // pipeline — a filtered provider list with the full query list would
+      // rebuild the cross-product the ledger just removed. Each slice is charged
+      // only when it actually starts, inside runRetrievalSlices.
+      const primaryRun = await runRetrievalSlices({
+        plan,
+        admitted: admitPrimary.admitted,
+        attemptType: "primary",
+        round,
+        execute: executeResearch,
+        merge: (response) => { preservation = mergeAttemptResponse(response, "primary"); return preservation as EvidencePreservationSnapshot; },
+        setPhaseContext: () => { phaseContext = { round, attemptId: `round-${round}-primary`, attemptType: "primary" }; },
+      });
+      const executedPrimaryProviderIds = primaryRun.executedProviderIds;
+      if (!primaryRun.merged) {
+        // The slice executor started nothing: the shared deadline or the
+        // allowance closed before the first slice. It already reported the real
+        // reason and charged nothing, so there is nothing to execute here.
+        // Calling executeResearch(plan) would bypass the executor and dispatch
+        // an uncharged provider call. Close out on the cumulative result
+        // instead, keeping the reason the executor recorded.
+        return completeWithCumulativeResponse(
+          round,
+          primaryRun.stopReason === "WORKER_DEADLINE"
+            ? "retrieval deadline closed before the first slice started"
+            : "research request budget exhausted before the first slice started",
+          { stage: primaryRun.stopStage, ...ledgerDiagnostics() },
+        );
+      }
+      roundResponse = primaryRun.merged;
       if (!roundResponse.signals.length && plan.fallbackSourceTypes?.length) {
-        const firstAttemptResponse = roundResponse;
-        const fallbackSelection = selectSource({
-          strategy: plan.strategy ?? "INITIAL",
-          availableSourceCapabilities: plan.fallbackSourceTypes.map((type) => ({
-            type,
-            available: true,
-            supportsFreshness: type !== "MEMORY",
-            supportsPrimaryDocuments: type === "OFFICIAL" || type === "PRIMARY",
-            supportsDomainFilter: type !== "MEMORY",
-            supportsTimeFilter: type !== "MEMORY",
-          })),
-          sourceProfile,
-          previousSourceOutcomes: [
-            ...previousSourceOutcomes,
-            {
-              sourceType: plan.selectedSourceType!,
-              providerId: plan.allowedProviderIds?.[0] ?? "unknown",
-              resultCount: 0,
-              newEvidenceCount: 0,
-              newClaimCount: 0,
-              reliabilityGain: 0,
-              conflictReduction: 0,
-            },
-          ],
-          resolvedEntities: plan.resolvedEntities,
-        });
-        if (fallbackSelection.primarySourceType && fallbackSelection.primarySourceType !== plan.selectedSourceType) {
-          phaseContext = { round, attemptId: `round-${round}-fallback`, attemptType: "fallback" };
-          plan = createResearchPlan(researchInput, round, maxQueries, relatedKnowledge, plan.strategy, fallbackSelection, intent, sourceProfile);
-          // Verification (fallback) gates scale with the attempt: fixed 9s/4s
-          // guards structurally blocked every verification round once round-1
-          // planning + discovery consumed their share of the same deadline
-          // (run signals-7dd4694e: 2.0s left → fallback retrieval never ran).
+        // Declared fallbacks must actually run. Previously exactly one fallback
+        // group was executed and the loop ended, so a source listed in
+        // fallbackSourceTypes could be planned but never invoked (observed:
+        // attempts were ["OFFICIAL","PRIMARY"] and GENERAL_WEB never ran). Walk
+        // the remaining, not-yet-attempted source types instead, stopping as
+        // soon as evidence appears, a source yields nothing worth retrying, or
+        // the existing deadline forbids another retrieval. The total budget is
+        // unchanged and a source that already ran is never repeated.
+        //
+        // attemptedSourceTypes only guards the source-type level. The real
+        // de-duplication lives in the run-wide AttemptLedger, which is keyed by
+        // provider + single query + retrieval params and also covers every
+        // provider a discovery-mode attempt already started (not just the
+        // selected one).
+        //
+        // A source type counts as attempted only when one of its providers was
+        // actually dispatched. Deriving it from plan.selectedSourceType alone
+        // would record a source the pipeline never called.
+        const executedProviderIds = new Set(
+          [...executedPrimaryProviderIds].filter((providerId) => providerId !== "*"),
+        );
+        const attemptedSourceTypes = new Set<SourceSelectionType>(
+          (plan.selectedSourceType ? [plan.selectedSourceType] : [])
+            .filter((type) => providerIdsFor(type).some((providerId) => executedProviderIds.has(providerId))),
+        );
+        let pendingFallbacks = plan.fallbackSourceTypes.filter(
+          (type) => type !== plan.selectedSourceType && !attemptedSourceTypes.has(type),
+        );
+        let mergedAttempts = roundResponse;
+        const skippedFallbacks: SourceSelectionType[] = [];
+        while (!mergedAttempts.signals.length && pendingFallbacks.length) {
+          const fallbackSourceType = pendingFallbacks[0];
+          pendingFallbacks = pendingFallbacks.slice(1);
           const fallbackBudget = new BudgetManager({ deadlineAt, attempt: round });
-          const fallbackPlanningBudget = fallbackBudget.snapshot();
-          markPhase("budget_checked", true, undefined, undefined, budgetDiagnostics(fallbackPlanningBudget, { round, stage: "fallback_planning" }));
-          if (fallbackPlanningBudget.canStartModelPlanning) {
-            plan = await applyModelPlanning({
-              plan,
-              adapter: options.modelAdapter,
-              userQuery: (options.userQuery ?? options.input.currentQuestions) || options.input.industry,
-              relatedKnowledge,
-              previousQueries: plan.queries,
+          const fallbackRetrievalBudget = fallbackBudget.snapshot();
+          markPhase("budget_checked", true, undefined, undefined, budgetDiagnostics(fallbackRetrievalBudget, { round, stage: "fallback_retrieval" }));
+          if (!fallbackRetrievalBudget.canStartRetrieval) {
+            // Budget exhausted. If no fallback ever got to run, this is the same
+            // deadline condition the single-fallback path used to raise, so keep
+            // that contract. If some already ran, stop here and report honestly
+            // instead of pretending the remaining sources were covered.
+            //
+            // `fallback_exhausted` is not in the cloud Handler's phase
+            // whitelist, so this is reported through `budget_checked`, which is
+            // an already-recorded phase. Nothing here may be described as a
+            // cloud-side trace field that does not actually get persisted.
+            if (!attemptedSourceTypes.has(fallbackSourceType) && attemptedSourceTypes.size <= 1) {
+              throw Object.assign(new Error("Worker deadline budget exhausted before fallback research"), { code: "WORKER_DEADLINE" });
+            }
+            markPhase("budget_checked", false, pendingFallbacks.length, "FALLBACK_BUDGET_EXHAUSTED", {
               round,
-              timeoutMs: fallbackBudget.modelPlanningTimeoutMs(),
-              onTimeout: () => markPhase("budget_checked", true, undefined, "MODEL_PLANNING_TIMEOUT", { stage: "model_planning_timeout", fallback: "deterministic_plan" }),
+              stage: "fallback_budget_exhausted",
+              notExecutedSourceTypes: [fallbackSourceType, ...pendingFallbacks],
+              ...ledgerDiagnostics(),
             });
+            break;
           }
+          const fallbackSelection = selectSource({
+            strategy: plan.strategy ?? "INITIAL",
+            availableSourceCapabilities: pendingFallbacks.concat(fallbackSourceType).map((type) => ({
+              type,
+              available: true,
+              supportsFreshness: type !== "MEMORY",
+              supportsPrimaryDocuments: type === "OFFICIAL" || type === "PRIMARY",
+              supportsDomainFilter: type !== "MEMORY",
+              supportsTimeFilter: type !== "MEMORY",
+            })),
+            sourceProfile,
+            previousSourceOutcomes: [
+              ...previousSourceOutcomes,
+              ...Array.from(attemptedSourceTypes).map((sourceType) => ({
+                sourceType,
+                providerId: plan.allowedProviderIds?.[0] ?? "unknown",
+                resultCount: 0,
+                newEvidenceCount: 0,
+                newClaimCount: 0,
+                reliabilityGain: 0,
+                conflictReduction: 0,
+              })),
+            ],
+            resolvedEntities: plan.resolvedEntities,
+            officiallyCoveredEntities: officialCoverageEntities(plan.resolvedEntities, plan.objective),
+          });
+          // Pin the attempt to the source we are actually giving a chance to,
+          // so the selector cannot re-pick an already-executed type.
+          const executableFallback: SourceExecutionPlan = fallbackSelection.primarySourceType
+            ? { ...fallbackSelection, primarySourceType: fallbackSourceType, fallbackSourceTypes: [] }
+            : { ...fallbackSelection, primarySourceType: fallbackSourceType, fallbackSourceTypes: [], allowedProviderIds: providerIdsFor(fallbackSourceType) };
+          phaseContext = { round, attemptId: `round-${round}-fallback`, attemptType: "fallback" };
+          plan = createResearchPlan(researchInput, round, maxQueries, relatedKnowledge, plan.strategy, executableFallback, intent, sourceProfile);
           markPhase("plan_finished", true, plan.queries.length, undefined, {
             round,
             fallback: true,
@@ -358,17 +825,70 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
             topicProfileSource: plan.topicProfile ? "agent_research_plan" : "unavailable",
             strategy: plan.strategy,
           });
-          add("SOURCE_SELECTOR", "completed", { round, fallback: true }, fallbackSelection, "首选来源无有效结果，执行 fallback 来源");
-          const fallbackRetrievalBudget = fallbackBudget.snapshot();
-          markPhase("budget_checked", true, undefined, undefined, budgetDiagnostics(fallbackRetrievalBudget, { round, stage: "fallback_retrieval" }));
-          if (!fallbackRetrievalBudget.canStartRetrieval) {
-            throw Object.assign(new Error("Worker deadline budget exhausted before fallback research"), { code: "WORKER_DEADLINE" });
+          add("SOURCE_SELECTOR", "completed", { round, fallback: true }, executableFallback, `首选来源无有效结果，执行 fallback 来源 ${fallbackSourceType}`);
+          // A fallback that would repeat an identical provider + query + params
+          // combination must not spend another unit. A different query on a
+          // provider that already started is a legitimately new attempt and is
+          // admitted normally, subject to the run-wide provider-query cap.
+          const admitFallback = ledger.admit(plan, reserveForLaterRounds(round));
+          if (!admitFallback.allowed) {
+            skippedFallbacks.push(fallbackSourceType);
+            const budgetExhausted = admitFallback.reason === "request_budget_exhausted"
+              || admitFallback.reason === "slice_budget_exhausted";
+            markPhase("budget_checked", false, pendingFallbacks.length + 1,
+              budgetExhausted ? "RESEARCH_REQUEST_BUDGET_EXHAUSTED" : "DUPLICATE_ATTEMPT_SKIPPED", {
+                round,
+                stage: admitFallback.reason,
+                skippedSourceType: fallbackSourceType,
+                skippedProviderIds: plan.allowedProviderIds,
+                ...ledgerDiagnostics(),
+              });
+            if (budgetExhausted) break;
+            continue;
+          }
+          if (admitFallback.reason === "truncated_by_unit_budget") {
+            markPhase("budget_checked", true, undefined, "RESEARCH_REQUEST_BUDGET_TRUNCATED", {
+              round,
+              stage: "unit_budget_truncated",
+              sourceType: fallbackSourceType,
+              ...attemptUnitCounts(admitFallback.admitted),
+              ...ledgerDiagnostics(),
+            });
           }
           phaseContext = { round, attemptId: `round-${round}-fallback`, attemptType: "fallback" };
-          const fallbackResponse = prepareRoundResponse(await executeResearch(plan));
-          preservation = mergeAttemptResponse(fallbackResponse, "fallback");
-          roundResponse = prepareRoundResponse(mergeRoundAttempts(firstAttemptResponse, fallbackResponse));
+          // Same slice executor as the primary path: each slice is charged only
+          // when it actually starts, so a slice that never runs is never marked
+          // started. A started slice stays charged even if it fails or its result
+          // is unknown, and is never retried inside this research.
+          const fallbackRun = await runRetrievalSlices({
+            plan,
+            admitted: admitFallback.admitted,
+            attemptType: "fallback",
+            round,
+            execute: executeResearch,
+            merge: (response) => { preservation = mergeAttemptResponse(response, "fallback"); return preservation as EvidencePreservationSnapshot; },
+            setPhaseContext: () => { phaseContext = { round, attemptId: `round-${round}-fallback`, attemptType: "fallback" }; },
+          });
+          const fallbackExecutedProviderIds = fallbackRun.executedProviderIds;
+          if (fallbackRun.merged) {
+            mergedAttempts = prepareRoundResponse(mergeRoundAttempts(mergedAttempts, fallbackRun.merged));
+          }
+          if (providerIdsFor(fallbackSourceType).some((providerId) => fallbackExecutedProviderIds.has(providerId))) {
+            attemptedSourceTypes.add(fallbackSourceType);
+          }
         }
+        if (pendingFallbacks.length && !mergedAttempts.signals.length) {
+          // Also reported through `budget_checked`: `fallback_exhausted` is not
+          // in the Handler phase whitelist, so it never reaches the cloud trace.
+          markPhase("budget_checked", true, mergedAttempts.signals.length, "FALLBACK_SOURCES_NOT_EXECUTED", {
+            round,
+            stage: "fallback_not_executed",
+            notExecutedSourceTypes: pendingFallbacks,
+            skippedDuplicateSourceTypes: skippedFallbacks,
+            ...ledgerDiagnostics(),
+          });
+        }
+        roundResponse = mergedAttempts;
       }
     } catch (error) {
       const errorCode = error && typeof error === "object" && "code" in error ? String(error.code) : "UNKNOWN_RESEARCH_FAILURE";
@@ -484,6 +1004,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       previousSourceOutcomes,
       sourceProfile,
       resolvedEntities: plan.resolvedEntities,
+      officiallyCoveredEntities: officialCoverageEntities(plan.resolvedEntities, plan.objective),
     });
     markPhase("source_selection_finished", true, sourceSelection.allowedProviderIds.length, undefined, {
       strategy: policy.strategy,

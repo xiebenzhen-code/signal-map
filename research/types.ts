@@ -103,8 +103,8 @@ export type QueryPlan = {
   changeKeywords: string[];
   knowledgeAwareQueries: string[];
   searchCombinations: string[];
-  retrievalWindows: Array<"24h" | "3d" | "7d" | "30d">;
-  requestedFreshnessWindow: "24h" | "3d" | "7d" | "30d";
+  retrievalWindows: Array<"24h" | "3d" | "7d" | "30d" | "90d">;
+  requestedFreshnessWindow: "24h" | "3d" | "7d" | "30d" | "90d";
   selectedSourceType?: string;
   fallbackSourceTypes?: string[];
   allowedProviderIds?: string[];

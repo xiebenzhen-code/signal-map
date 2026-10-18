@@ -111,3 +111,10 @@ test("legacy filter shape cannot be accepted as completed V2 data", () => {
   assert.equal(isNormalizedInformationFilter(legacy), false);
   assert.equal(isNormalizedInformationFilter(normalized), true);
 });
+
+test("90-day saved filters remain V2 data after reload rather than entering legacy migration", () => {
+  const snapshot = migrateAlphaSnapshot(legacySnapshot(), now);
+  snapshot.filters[0].freshnessWindow = "90d";
+  assert.equal(isNormalizedInformationFilter(snapshot.filters[0]), true);
+  assert.equal(migrateAlphaSnapshot(snapshot, later).filters[0].freshnessWindow, "90d");
+});

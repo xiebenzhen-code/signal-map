@@ -7,6 +7,18 @@ export type ProviderRejectionSample = {
   rejectionReason: string;
 };
 
+/**
+ * Why a source stayed `not_searched`. `not_searched` alone is ambiguous: it can
+ * mean "the run chose not to spend a request here", or "this provider was never
+ * allowed to execute at all". Only the first is a real remaining opportunity,
+ * so the reason must travel with the outcome instead of being inferred.
+ */
+export type SourceNotSearchedReason =
+  | "source_selection"
+  | "budget"
+  | "no_candidate_source"
+  | "not_required";
+
 export type SourceExecutionOutcome = {
   source: string;
   providerId?: string;
@@ -17,6 +29,8 @@ export type SourceExecutionOutcome = {
     | "not_configured"
     | "unavailable"
     | "failed";
+  /** Only meaningful while `execution === "not_searched"`. */
+  blockedBy?: SourceNotSearchedReason;
   searched: boolean;
   resultCount: number;
   rawResultCount?: number;
