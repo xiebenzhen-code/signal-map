@@ -1,5 +1,5 @@
-import { handleAuthMe } from "@/backend/handlers";
+import { proxyApiRequest } from "@/backend/api-proxy";
 
 export async function GET(request: Request) {
-  return handleAuthMe(request);
+  return proxyApiRequest(request);
 }

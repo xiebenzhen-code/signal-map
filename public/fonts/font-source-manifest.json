@@ -1,0 +1,36 @@
+{
+  "repository": "https://github.com/vercel/geist-font",
+  "commit": "10dc7658f13c38a474cde201bb09a4617267545b",
+  "license": "SIL Open Font License 1.1",
+  "files": [
+    {
+      "filename": "Geist-Variable.woff2",
+      "upstreamPath": "fonts/Geist/webfonts/Geist[wght].woff2",
+      "url": "https://raw.githubusercontent.com/vercel/geist-font/10dc7658f13c38a474cde201bb09a4617267545b/fonts/Geist/webfonts/Geist%5Bwght%5D.woff2",
+      "bytes": 69760,
+      "sha256": "2ffebe993e969069a9789d15164b7715d42491b5835516c5e3b935d5f81b05f1"
+    },
+    {
+      "filename": "GeistMono-Variable.woff2",
+      "upstreamPath": "fonts/GeistMono/webfonts/GeistMono[wght].woff2",
+      "url": "https://raw.githubusercontent.com/vercel/geist-font/10dc7658f13c38a474cde201bb09a4617267545b/fonts/GeistMono/webfonts/GeistMono%5Bwght%5D.woff2",
+      "bytes": 71596,
+      "sha256": "afaacc4c5fbba89d2ebf7a02dc4070208540874592a5504d57175782fe893101"
+    },
+    {
+      "filename": "OFL.txt",
+      "upstreamPath": "OFL.txt",
+      "url": "https://raw.githubusercontent.com/vercel/geist-font/10dc7658f13c38a474cde201bb09a4617267545b/OFL.txt",
+      "bytes": 4383,
+      "sha256": "c683bfbcc7e087f5d37a54ef628f10387c451a83ddc459b151403a164ac46c90"
+    },
+    {
+      "filename": "LICENSE.txt",
+      "upstreamPath": "LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/vercel/geist-font/10dc7658f13c38a474cde201bb09a4617267545b/LICENSE.txt",
+      "bytes": 4368,
+      "sha256": "930853ee1daa68554d9e35c8a9175affb74f699fad9a5da6ee5ebe76379d9137"
+    }
+  ],
+  "acquisitionRequests": 4
+}

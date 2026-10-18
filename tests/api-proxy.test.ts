@@ -8,6 +8,60 @@ import {
 
 type Captured = { url: string; init?: RequestInit };
 
+test("production proxy fails closed for missing, malformed, prefixed and looping upstream", async () => {
+  const env: Record<string, string | undefined> = process.env;
+  const priorMode = env.NODE_ENV;
+  const priorUrl = process.env.API_UPSTREAM_URL;
+  env.NODE_ENV = "production";
+  try {
+    for (const value of [undefined, "", "bad-url", "file:///secret", "https://user:secret@example.com",
+      "https://backend.example/api", "https://backend.example/?secret=x", "https://frontend.example"]) {
+      if (value === undefined) delete process.env.API_UPSTREAM_URL;
+      else process.env.API_UPSTREAM_URL = value;
+      let calls = 0;
+      const response = await proxyApiRequest(new Request("https://frontend.example/api/signals"), {
+        fetchFn: async () => { calls++; return new Response("unexpected"); },
+      });
+      assert.equal(response.status, 502, String(value));
+      assert.equal(calls, 0);
+      assert.deepEqual(await response.json(), { error: "API backend unavailable", code: "API_UPSTREAM_UNAVAILABLE" });
+    }
+  } finally {
+    if (priorMode === undefined) delete env.NODE_ENV; else env.NODE_ENV = priorMode;
+    if (priorUrl === undefined) delete process.env.API_UPSTREAM_URL; else process.env.API_UPSTREAM_URL = priorUrl;
+  }
+});
+
+test("proxy uses manual redirects and rejects foreign Location without following it", async () => {
+  for (const [location, expected] of [["/login?next=%2F", 302], ["https://backend.example/login", 302],
+    ["https://evil.example/login", 502], ["//evil.example/login", 502], ["javascript:alert(1)", 502],
+    ["//backend.example/login", 302], ["next", 302], ["?next=1", 302], ["#part", 302],
+    ["https://user:secret@backend.example/login", 502], ["/\\evil.example/login", 502]] as const) {
+    const response = await proxyApiRequest(new Request("https://frontend.example/api/auth/me"), {
+      upstream: "https://backend.example",
+      fetchFn: async (_input, init) => {
+        assert.equal(init?.redirect, "manual");
+        return new Response(null, { status: 302, headers: { Location: location } });
+      },
+    });
+    assert.equal(response.status, expected);
+    if (location === "https://backend.example/login") assert.equal(response.headers.get("location"), "https://frontend.example/login");
+    if (location.startsWith("/login")) assert.equal(response.headers.get("location"), location);
+  }
+});
+
+test("double-slash request paths cannot replace the configured upstream", async () => {
+  let target = "";
+  await proxyApiRequest(new Request("https://frontend.example//evil.example/api?x=1"), {
+    upstream: "https://backend.example",
+    fetchFn: async input => {
+      target = String(input);
+      return new Response(null);
+    },
+  });
+  assert.equal(target, "https://backend.example//evil.example/api?x=1");
+});
+
 test("API proxy classifies DB-backed routes and keeps edge-safe routes local", () => {
   const dbBacked = [
     "/api/signals",
