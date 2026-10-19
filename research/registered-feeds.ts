@@ -26,16 +26,31 @@ function decode(value: string) {
   });
 }
 
+/**
+ * Work budgets for feed parsing. The tokenizer is bounded by the work it may
+ * perform, not by document size: tokenizing stops once `FEED_MAX_RECORDS`
+ * item/entry records have closed, because the caller never consumes more
+ * than that (and returns at most `FEED_MAX_ENTRIES`). A document that cannot
+ * yield that many records within `FEED_MAX_TOKENS` fragments is a resource
+ * limit and reports FEED_TOO_COMPLEX, never a syntax error.
+ */
+const FEED_MAX_TOKENS = 30000;
+const FEED_MAX_RECORDS = 100;
+const FEED_MAX_ENTRIES = 60;
+
 /** Bounded, non-validating XML tree. DTD/entity declarations are never processed. */
-function xmlTree(xml: string): XmlNode {
+function xmlTree(xml: string, itemBudget: number = FEED_MAX_RECORDS): XmlNode {
   if (Buffer.byteLength(xml) > 2 * 1024 * 1024 || /<!\s*(?:DOCTYPE|ENTITY)/i.test(xml)) throw new Error("FEED_UNSAFE_XML");
   const root: XmlNode = {name: "document", attributes: {}, children: [], text: ""};
   const stack = [root];
   let cursor = 0;
   let count = 0;
+  let records = 0;
+  let truncated = false;
   const tokens = /<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<[^>]*>|[^<]+/g;
   for (const match of xml.matchAll(tokens)) {
-    if (match.index !== cursor || ++count > 30000) throw new Error("FEED_INVALID_XML");
+    if (match.index !== cursor) throw new Error("FEED_INVALID_XML");
+    if (++count > FEED_MAX_TOKENS) throw new Error("FEED_TOO_COMPLEX");
     const token = match[0];
     cursor += token.length;
     const parent = stack[stack.length - 1];
@@ -46,6 +61,9 @@ function xmlTree(xml: string): XmlNode {
       if (stack.length === 1 || token.slice(2, -1).trim() !== parent.name) throw new Error("FEED_INVALID_XML");
       stack.pop();
       if (stack.length > 1) stack[stack.length - 1].text += ` ${parent.text}`;
+      if (local(parent) === "item" || local(parent) === "entry") {
+        if (++records >= itemBudget) { truncated = true; break; }
+      }
       continue;
     }
     const start = token.match(/^<([\w:.-]+)((?:\s+[\w:.-]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*\/?>$/);
@@ -55,7 +73,13 @@ function xmlTree(xml: string): XmlNode {
     parent.children.push(node);
     if (!token.endsWith("/>")) stack.push(node);
   }
-  if (cursor !== xml.length || stack.length !== 1 || root.children.length !== 1 || root.text.trim()) throw new Error("FEED_INVALID_XML");
+  // When tokenizing stopped at the record budget, the head was fully consumed
+  // and balanced; the unread tail is deliberately not validated. The document
+  // must still END as a complete feed: an O(1) root-close anchor that keeps a
+  // truncated body from being parsed as a successful read.
+  if (truncated) {
+    if (!/<\/\s*(?:rss|feed)\s*>\s*$/i.test(xml)) throw new Error("FEED_INVALID_XML");
+  } else if (cursor !== xml.length || stack.length !== 1 || root.children.length !== 1 || root.text.trim()) throw new Error("FEED_INVALID_XML");
   return root.children[0];
 }
 
@@ -73,7 +97,7 @@ export function parseRegisteredFeed(xml: string, feed: RegisteredFeed): {entries
   if (!container) throw new Error("FEED_UNSUPPORTED_FORMAT");
   const records = container.children.filter(node => local(node) === (atom ? "entry" : "item"));
   const entries = new Map<string, FeedEntry>();
-  for (const record of records.slice(0, 100)) {
+  for (const record of records.slice(0, FEED_MAX_RECORDS)) {
     const title = plain(text(record, "title")).slice(0, 500);
     const link = atom ? record.children.find(node => local(node) === "link" && (!node.attributes.rel || node.attributes.rel === "alternate"))?.attributes.href : text(record, "link");
     let url: string | undefined;
@@ -88,7 +112,7 @@ export function parseRegisteredFeed(xml: string, feed: RegisteredFeed): {entries
     entries.set(parsed.href, {title, url: parsed.href, snippet: plain(text(record, "description") || text(record, "summary") || text(record, "content") || text(record, "encoded")).slice(0, 12000),
       ...(Number.isFinite(date) ? {publishedAt: new Date(date).toISOString()} : {})});
   }
-  return {entries: [...entries.values()].slice(0, 60), rawCount: records.length};
+  return {entries: [...entries.values()].slice(0, FEED_MAX_ENTRIES), rawCount: records.length};
 }
 
 async function readFeed(feed: RegisteredFeed, reader: typeof readCustomSource, deadlineAt?: number): Promise<FeedRead> {

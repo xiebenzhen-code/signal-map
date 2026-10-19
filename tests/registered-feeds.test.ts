@@ -174,3 +174,62 @@ test("one broken feed never aborts the research or contaminates its peers", asyn
   } finally { globalThis.fetch = before; }
 });
 
+// Fixture builders for documents whose legal size exceeds the historical
+// per-document fragment budget. The real Shopify changelog captured on
+// 2026-10-19 (1,874,367 bytes, 773 items, 35,777 tokens) is exactly this
+// profile: valid XML, far below 2 MiB, rejected only by the fragment cap.
+const tokenCount = (xml: string) => xml.match(/<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<[^>]*>|[^<]+/g)?.length ?? 0;
+const largeFeedItem = (index: number, descriptionBytes: number) => {
+  const part = "x".repeat(Math.floor(descriptionBytes / 12));
+  const description = Array.from({length: 10}, (_, i) => `${i ? ` <em>${i}</em> ` : ""}${part}-${i}`).join("");
+  return `<item><title>Shopify change ${index}</title><link>https://shopify.dev/changelog/change-${index}</link><guid isPermaLink="false">https://shopify.dev/changelog/change-${index}</guid><pubDate>${publishedAt}</pubDate><category>checkout</category><description>${description}</description></item>`;
+};
+const largeFeed = (items: number, descriptionBytes: number) =>
+  `<rss version="2.0"><channel><title>Shopify</title><link>https://shopify.dev/changelog</link><description>changelog</description>${Array.from({length: items}, (_, i) => largeFeedItem(i, descriptionBytes)).join("")}</channel></rss>`;
+
+test("a legal large feed parses with bounded work instead of a fragment-cap error", () => {
+  const reviewScale = largeFeed(2500, 150);
+  const realFeedScale = largeFeed(773, 2100);
+  for (const xml of [reviewScale, realFeedScale]) {
+    assert.ok(Buffer.byteLength(xml) <= 2 * 1024 * 1024, "the fixture stays under the 2 MiB read limit");
+    assert.ok(tokenCount(xml) > 30000, "the fixture exceeds the historical 30k fragment budget");
+  }
+  for (const xml of [reviewScale, realFeedScale]) {
+    const result = parseRegisteredFeed(xml, registeredFeeds[0]);
+    assert.equal(result.rawCount, 100, "processing stays bounded to the first 100 records");
+    assert.equal(result.entries.length, 60, "at most 60 entries are returned");
+    assert.equal(result.entries[0].url, "https://shopify.dev/changelog/change-0", "the head of the document is kept");
+  }
+});
+
+test("token exhaustion reports a bounded-work limit, not invalid XML", () => {
+  const junk = "<x/>".repeat(31_000);
+  const xml = `<rss><channel>${junk}<item><title>t</title><link>https://shopify.dev/changelog/a</link></item></channel></rss>`;
+  assert.throws(() => parseRegisteredFeed(xml, registeredFeeds[0]), /FEED_TOO_COMPLEX/,
+    "a resource limit must not be reported as a syntax error");
+});
+
+test("a truncated document still fails as invalid XML", () => {
+  const xml = largeFeed(2500, 150);
+  assert.throws(() => parseRegisteredFeed(xml.slice(0, Math.floor(xml.length * 0.6)), registeredFeeds[0]), /FEED_INVALID_XML/);
+  assert.throws(() => parseRegisteredFeed("<rss><channel><item><title>x", registeredFeeds[0]), /FEED_INVALID_XML/);
+});
+
+test("a failed source ends the run as incomplete, never as a quiet zero-result day", async () => {
+  const before = globalThis.fetch;
+  globalThis.fetch = async () => new Response("<rss><channel></channel></rss>", {status: 200});
+  try {
+    const failed = await runResearchPipeline(input, undefined, {
+      customSourceReader: async url => ({url, status: "failed", reason: "FEED_HTTP_403", requestCount: 1}),
+    }, {queries: ["Shopify checkout payment"], allowedProviderIds: ["registered-feeds"], selectedSourceType: "OFFICIAL"});
+    const failedLabel = failed.progress.find(entry => entry.stage === "complete")?.label ?? "";
+    assert.doesNotMatch(failedLabel, /今天没有重要变化/, "a failed source must not be reported as a quiet zero-result day");
+    assert.match(failedLabel, /未完成|证据不足/);
+    const quiet = await runResearchPipeline(input, undefined, {
+      customSourceReader: async url => ({url, status: "readable", reason: "read", requestCount: 1, content: "<rss><channel></channel></rss>"}),
+    }, {queries: ["Shopify checkout payment"], allowedProviderIds: ["registered-feeds"], selectedSourceType: "OFFICIAL"});
+    assert.match(quiet.progress.find(entry => entry.stage === "complete")?.label ?? "", /研究完成 · 今天没有重要变化/,
+      "sources that searched and legitimately found nothing keep the honest zero label");
+  } finally { globalThis.fetch = before; }
+});
+

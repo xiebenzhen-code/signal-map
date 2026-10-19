@@ -2609,11 +2609,17 @@ export async function runResearchPipeline(
   if (!allSignals.length) {
     failures.push("Result: 四级来源均未返回与扩展关键词相关的资料；建议加入公司名、人物名、产品名或监管机构名后重试。");
   }
+  // A read failure means the run never finished gathering evidence, so the
+  // closing label must not claim a quiet zero-result day. Sources that were
+  // searched and legitimately returned nothing keep the honest zero label.
+  const sourceReadFailed = sourceOutcomes.some((outcome) => outcome.execution === "failed");
   await emit({
     stage: "complete",
     label: selectedCount
       ? `研究完成 · 今天 ${selectedCount} 条值得注意`
-      : "研究完成 · 今天没有重要变化",
+      : sourceReadFailed
+        ? "研究未完成 · 来源读取失败或证据不足，请稍后再试"
+        : "研究完成 · 今天没有重要变化",
     counts,
   });
 
