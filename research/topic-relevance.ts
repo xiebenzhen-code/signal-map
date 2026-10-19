@@ -143,6 +143,124 @@ function matchesTaskVariant(textStem: string, taskStem: string) {
   return !(/\b(?:no|not|without|none)\s*$/i.test(preceding) || /(?:无|没有|不是|不含)\s*$/u.test(preceding));
 }
 
+const CJK_STOP_CHARS = "与和或的以及之在对于有是";
+const CJK_CONNECTIVES = "与和或的以及之跟同并及";
+
+/**
+ * Words that name *interrogation intent* or broad domain vocabulary rather
+ * than a task constraint: "哪些版本" asks which, "模型更新" is the domain
+ * register, "30d" is the freshness window. Admitting them as constraints
+ * rejects real change evidence (e.g. a release note that never says
+ * "版本"). Question-object words ("版本","升级") and register nouns
+ * ("模型","开源","工具") are deliberately excluded; concrete task nouns
+ * ("结账","支付","checkout","payment") are kept.
+ */
+const CONSTRAINT_STOP_TERMS = new Set([
+  // question objects and intent words
+  "版本", "升级", "哪些", "有哪", "有哪些", "什么", "为什么", "如何", "怎么", "值得", "安排", "动态",
+  "变化", "变更", "更新", "发布", "推出", "上线", "最近", "过去", "未来", "当前",
+  "现在", "今天", "昨天", "本周", "本月", "一个", "个月", "新闻", "公告",
+  // broad domain register
+  "模型", "生成", "成式", "基础", "开源", "开发", "工具", "功能", "特性",
+  "改版", "版本号", "个版",
+  // latin equivalents
+  "version", "versions", "upgrade", "upgrades", "update", "updates", "release",
+  "releases", "released", "change", "changes", "recent", "latest", "current",
+  "news", "announcement", "announcements", "model", "models", "tool", "tools",
+]);
+const CONSTRAINT_TIME_PATTERN = /^(?:\d+[a-z]{1,2}|\d{2,4})$/i;
+
+function hasCjk(text: string) {
+  return /[\u3400-\u9fff]/u.test(text);
+}
+
+/**
+ * Extract candidate task-constraint terms from planner-designated values.
+ * - Entity names (and their aliases) are excluded: "show me Shopify" is a
+ *   subject, not a task constraint.
+ * - GENERIC_TERMS are skipped so generic registries ("release") do not become
+ *   constraints, while specific latin terms ("launch", "checkout") survive.
+ * - CJK runs are split into 2-grams so a compound like "结账与支付" matches a
+ *   text naming either half ("结账", "支付").
+ */
+/**
+ * Candidate task-constraint *words* from planner-designated entries.
+ * - Entity names (and their aliases) are excluded: "show me Shopify" is a
+ *   subject, not a task constraint.
+ * - GENERIC_TERMS / stop terms / time windows ("30d") are skipped so generic
+ *   registers ("release", "最近") do not constrain, while specific words
+ *   ("checkout", "结账", "launch") survive.
+ * - CJK compounds split on connectives ("结账与支付" -> 结账 / 支付); each
+ *   fragment must be a short word. Longer narrative phrases ("开源开发与
+ *   工具", "值得我测试的") contribute nothing: their 2-grams would otherwise
+ *   fabricate constraints like "发与" that reject real change evidence.
+ * - Only short, clause-free entries are read: a narrative question
+ *   ("ComfyUI 最近一个月在 GitHub 发布了哪些版本？…") is not a constraint
+ *   list.
+ */
+function constraintTermsFrom(values: string[], entities: Set<string>): string[] {
+  const terms = new Set<string>();
+  for (const value of values) {
+    if (!value) continue;
+    if (/[?？。，,；;、]/.test(value)) continue;
+    const normalized = normalize(value);
+    if (!normalized) continue;
+    for (const run of normalized.match(/[\u3400-\u9fff]+/gu) || []) {
+      const trimmed = run.replace(
+        new RegExp(`^[${CJK_STOP_CHARS}]+|[${CJK_STOP_CHARS}]+$`, "gu"),
+        "",
+      );
+      if (!trimmed) continue;
+      const fragments = trimmed.split(new RegExp(`[${CJK_CONNECTIVES}]`, "u")).filter(Boolean);
+      for (const fragment of fragments) {
+        if (fragment.length < 2 || fragment.length > 3) continue;
+        if (CONSTRAINT_STOP_TERMS.has(fragment)) continue;
+        terms.add(fragment);
+      }
+    }
+    for (const token of normalized.split(" ")) {
+      if (!token || !/^[a-z0-9]+$/i.test(token)) continue;
+      if (GENERIC_TERMS.has(token) || entities.has(token)) continue;
+      if (CONSTRAINT_STOP_TERMS.has(token) || CONSTRAINT_TIME_PATTERN.test(token)) continue;
+      // A multi-word latin phrase ("AI developer tools", "official update")
+      // names the domain register, not a task; only compact entries
+      // ("checkout", "payment", "coding") carry a task constraint.
+      if (normalized.split(" ").length > 2) break;
+      terms.add(token);
+    }
+  }
+  return [...terms].filter((term) => !entities.has(term));
+}
+
+/**
+ * Gate constraints come from the planner's core keywords only — the entries
+ * that name what the answer must be about. synonyms and topicKeywords stay in
+ * the topic-term vocabulary (they broaden discovery), but as constraints they
+ * over-constrain with register nouns ("模型更新"). originalNeed only fills a
+ * language family the core keywords left empty, so a Chinese question with an
+ * English evidence stream ("Generate and create … Premiere …") is not judged
+ * on narrative words.
+ */
+function taskConstraintTerms(plan: QueryPlan): string[] {
+  const entities = new Set(
+    [
+      ...plan.entities,
+      ...(plan.aliasesConsidered || []),
+      ...(plan.resolvedEntities ?? []).flatMap((entity) => [entity.canonicalEntity, ...entity.aliasesConsidered]),
+    ]
+      .map((value) => normalize(value))
+      .filter(Boolean),
+  );
+  const planned = constraintTermsFrom(plan.coreKeywords || [], entities);
+  const plannedHasCjk = planned.some((term) => hasCjk(term));
+  const plannedHasLatin = planned.some((term) => !hasCjk(term));
+  const fallback = plan.originalNeed
+    ? constraintTermsFrom([plan.originalNeed], entities).filter((term) =>
+      hasCjk(term) ? !plannedHasCjk : !plannedHasLatin)
+    : [];
+  return [...new Set([...planned, ...fallback])];
+}
+
 function isUsableProfileAnchor(term: string) {
   const raw = term.trim();
   const normalized = normalize(raw);
@@ -264,21 +382,35 @@ export function assessTopicRelevance(text: string, plan: QueryPlan): TopicReleva
     [entity.canonicalEntity, ...entity.aliasesConsidered])].map(normalize).filter(meaningful);
   const hasEntityMatch = entities.some((term) => matches(normalizedText, term));
   const hasTopicTerms = terms.length > 0;
-  const decision = (!entities.length || hasEntityMatch) && (!hasTopicTerms || legacyMatchedTerms.length > 0)
+  // Task constraints gate on what the user asked the evidence to be about.
+  // Constraints that share no language family with the text (a Chinese plan
+  // against an English changelog) cannot be judged and are skipped rather than
+  // rejected; explicit subject-only material still passes via the entity gate.
+  const taskConstraints = taskConstraintTerms(plan);
+  const textIsCjk = hasCjk(normalizedText);
+  const applicableConstraints = taskConstraints.filter((constraint) => hasCjk(constraint) === textIsCjk);
+  const matchedTaskConstraints = applicableConstraints.filter((constraint) => matches(normalizedText, constraint));
+  const subjectSatisfied = !entities.length || hasEntityMatch;
+  const taskSatisfied = applicableConstraints.length === 0 || matchedTaskConstraints.length > 0;
+  const topicSatisfied = !hasTopicTerms || legacyMatchedTerms.length > 0;
+  const decision = subjectSatisfied && taskSatisfied && topicSatisfied
     ? "MATCH"
     : "TOPIC_MISMATCH";
   return {
     decision,
-    reason: !hasTopicTerms
-      ? "NO_TOPIC_TERMS"
-      : legacyMatchedTerms.length
-        ? "LEGACY_QUERY_TERM_MATCH"
-        : "NO_QUERY_TERM_MATCH",
+    reason: !taskSatisfied
+      ? "NO_TASK_CONSTRAINT_MATCH"
+      : !hasTopicTerms
+        ? "NO_TOPIC_TERMS"
+        : legacyMatchedTerms.length
+          ? "LEGACY_QUERY_TERM_MATCH"
+          : "NO_QUERY_TERM_MATCH",
     matchedTerms: legacyMatchedTerms,
     matchedDomainAnchors,
     matchedTaskAnchors,
     matchedGenericTerms,
     matchedQueryTerms: legacyMatchedTerms,
+    matchedTaskConstraints,
     relevanceGateApplied: false,
     relevanceGatePassed: decision === "MATCH",
     score: !hasTopicTerms ? 50 : legacyMatchedTerms.length ? Math.min(100, 60 + legacyMatchedTerms.length * 15) : 0,

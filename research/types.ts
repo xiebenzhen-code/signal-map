@@ -32,6 +32,7 @@ export type TopicRelevanceReason =
   | "PROFILE_HAS_NO_NON_GENERIC_ANCHORS"
   | "LEGACY_QUERY_TERM_MATCH"
   | "NO_QUERY_TERM_MATCH"
+  | "NO_TASK_CONSTRAINT_MATCH"
   | "NO_TOPIC_TERMS";
 
 export type TopicProfile = {
@@ -48,6 +49,10 @@ export type TopicRelevance = {
   matchedTaskAnchors?: string[];
   matchedGenericTerms?: string[];
   matchedQueryTerms?: string[];
+  /** Task constraint terms matched on the legacy path (e.g. "payment" for a
+   *  "Shopify checkout/payment" question). Empty when no constraint gate
+   *  applied. */
+  matchedTaskConstraints?: string[];
   relevanceGateApplied?: boolean;
   relevanceGatePassed?: boolean;
   score: number;

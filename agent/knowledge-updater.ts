@@ -43,13 +43,22 @@ function signalText(signal: ResearchSignal) {
   return signal.originalTitle || signal.title;
 }
 
+/** Index pages, subscription endpoints and channel boilerplate carry no claim. */
+const NAVIGATION_TEXT = /\b(?:changelog|release notes?|newsletter|subscribe|rss|atom feed|feed\.xml|developer center|documentation index|find the latest|learn about new platform)\b|导航|订阅|最新动态|了解更多平台/iu;
+
 function canWriteKnowledge(signal: ResearchSignal, change: KnowledgeChange) {
-  return signal.reliabilityScore >= 55 &&
-    signal.topicRelevance?.decision !== "TOPIC_MISMATCH" &&
-    signal.informationGainStatus !== "NO_INFORMATION_GAIN" &&
-    signal.verificationStatus !== "unverified" &&
-    signal.informationType !== "SIGNAL" &&
-    change.classification !== "CONTRADICTS";
+  // An official source and a high reliability score describe the publisher, not
+  // whether the item answers this question. Requiring an explicit MATCH keeps
+  // unjudged and off-task material out; navigation and channel boilerplate
+  // never become confirmed facts even when their source is authoritative.
+  if (signal.topicRelevance?.decision !== "MATCH") return false;
+  if (signal.reliabilityScore < 55) return false;
+  if (signal.informationGainStatus === "NO_INFORMATION_GAIN") return false;
+  if (signal.verificationStatus === "unverified") return false;
+  if (signal.informationType === "SIGNAL") return false;
+  if (change.classification === "CONTRADICTS") return false;
+  if (change.classification === "DUPLICATE") return false;
+  return !NAVIGATION_TEXT.test(`${signal.originalTitle || ""} ${signal.title || ""}`);
 }
 
 function shouldAdvanceRevision(change: KnowledgeChange) {

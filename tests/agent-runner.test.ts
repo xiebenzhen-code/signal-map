@@ -57,6 +57,18 @@ function signal(overrides: Partial<ResearchSignal> = {}): ResearchSignal {
     verificationStatus: "verified", relevanceScore: 90, reliabilityScore: 90, freshnessScore: 90,
     noveltyScore: 80, judgementImpactScore: 80, gapMatchScore: 80, overallScore: 88,
     sourceCount: 1, independentEvidenceCount: 1, propagationCount: 0, claims: [], sources: [],
+    // The real pipeline assesses relevance for every aggregated cluster
+    // (research-pipeline.ts) and only MATCH-gated signals may become knowledge.
+    topicRelevance: {
+      decision: "MATCH",
+      reason: "LEGACY_QUERY_TERM_MATCH",
+      matchedTerms: ["codex"],
+      matchedQueryTerms: ["codex"],
+      matchedTaskConstraints: [],
+      relevanceGateApplied: false,
+      relevanceGatePassed: true,
+      score: 75,
+    },
     section: "must_know", gapMatches: ["new workflow"], questionMatches: ["latest release"],
     entityMatches: ["codex"], whyItMatters: "new", eventStatus: "NEW", informationType: "FACT",
     knowledgeStatus: "NOVEL", attentionDecision: "MUST_READ", ...overrides,
