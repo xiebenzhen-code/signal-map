@@ -384,29 +384,61 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
   // repository untouched. With no related knowledge the run proceeds normally.
   const memoryQuestion = options.userQuery ?? options.input.currentQuestions ?? options.input.industry;
   const memoryEntities = String(options.input.trackedEntities || "").split(/[,，、;；\n]/).map((item) => item.trim()).filter(Boolean);
+  // Subject-level selection runs against the declared entities (and their
+  // aliases) only, so a generic word inside an unrelated memory ("in" inside
+  // "billing") can never bind it to this question. The lightweight plan is
+  // computed from the raw input — before any memory joins the context — so the
+  // alias list reflects this question, not a previous answer.
+  const selectionPlan = planQuery({
+    ...options.input,
+    knownInformation: options.input.knownInformation,
+    // Selection must judge against the *current* question: userQuery overrides
+    // a stale input.currentQuestions, so an entity named in the live question
+    // ("Did Model X launch?") is what the subject pass matches, not a leftover
+    // tracked-entity list from an older question.
+    currentQuestions: memoryQuestion,
+  });
   const subjectSelection = selectRelatedKnowledge({
     records: knownFactRecords,
     query: memoryQuestion,
     entities: memoryEntities,
+    plan: selectionPlan,
+    // Subject pass only: task-concept fit and stability are the second
+    // pass's verdict and are not repeated here.
+    taskLevel: false,
   });
-  let relatedKnowledge = subjectSelection.selected.map((record) => record.text);
-  const knowledgeSelectionDiagnostics = () => subjectSelection.entries.map((entry) => ({
+  const subjectDiagnostics = subjectSelection.entries.map((entry) => ({
     recordId: entry.recordId,
     selected: entry.selected,
     reason: entry.reason,
   }));
-  const retrieveStep = add("RETRIEVE", "completed", {
+  // Task-level selection once the plan's task constraints are known: a record
+  // that shares the entity but not the task (or that is time-sensitive /
+  // conflicted) must not enter knownInformation — it would suppress fresh
+  // evidence as already-known. The repository itself is never rewritten.
+  const taskSelection = selectRelatedKnowledge({
+    records: subjectSelection.selected,
+    query: memoryQuestion,
+    entities: memoryEntities,
+    plan: selectionPlan,
+  });
+  const finalRelatedKnowledge = taskSelection.selected.map((record) => record.text);
+  add("RETRIEVE", "completed", {
     query: memoryQuestion,
     storedRecords: knownFactRecords.length,
     subject: {
-      selected: knowledgeSelectionDiagnostics().filter((entry) => entry.selected),
-      excluded: knowledgeSelectionDiagnostics().filter((entry) => !entry.selected),
+      selected: subjectDiagnostics.filter((entry) => entry.selected),
+      excluded: subjectDiagnostics.filter((entry) => !entry.selected),
     },
-  }, relatedKnowledge.join("\n") || "none");
+    task: {
+      selected: taskSelection.entries.filter((entry) => entry.selected).map((entry) => ({ recordId: entry.recordId, reason: entry.reason })),
+      excluded: taskSelection.excluded.map((entry) => ({ recordId: entry.recordId, reason: entry.reason })),
+    },
+  }, finalRelatedKnowledge.join("\n") || "none");
   const intent = classifyIntent({
     userQuery: (options.userQuery ?? options.input.currentQuestions) || options.input.industry,
     filterContext: options.input,
-    relatedKnowledge,
+    relatedKnowledge: finalRelatedKnowledge,
     currentGoal: options.currentGoal,
   });
   const sourceProfile = sourceProfileForIntent(intent.primaryIntent);
@@ -414,7 +446,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
 
   const researchInput = {
     ...options.input,
-    knownInformation: appendLines(options.input.knownInformation, subjectSelection.selected.map((record) => record.text)),
+    knownInformation: appendLines(options.input.knownInformation, finalRelatedKnowledge),
     userJudgements: appendLines(options.input.userJudgements, judgementRecords.map((record) =>
       /^\s*(?:Not useful|Changed after evidence)\s*:/i.test(record.text)
         ? record.text.replace(/\s*\r?\n\s*/g, " ")
@@ -425,29 +457,15 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
   const generatedFromRevision = options.context && options.repository
     ? await Promise.resolve(options.repository.getResearchContextRevision(options.context))
     : options.initialRevision ?? 1;
-  const bootstrapStrategy: ResearchStrategy = knownFactRecords.length > 0 ? "REFRESH" : "INITIAL";
-  let plan = createResearchPlan(researchInput, 1, maxQueries, relatedKnowledge, bootstrapStrategy, undefined, intent, sourceProfile);
-  // Task-level selection once the plan's task constraints are known: a record
-  // that shares the entity but not the task (or that is time-sensitive /
-  // conflicted) must not enter knownInformation — it would suppress fresh
-  // evidence as already-known. The repository itself is never rewritten.
-  const taskSelection = selectRelatedKnowledge({
-    records: subjectSelection.selected,
-    query: memoryQuestion,
-    entities: memoryEntities,
-    plan: planQuery({ ...researchInput, knownInformation: options.input.knownInformation }),
-  });
-  relatedKnowledge = taskSelection.selected.map((record) => record.text);
-  researchInput.knownInformation = appendLines(options.input.knownInformation, relatedKnowledge);
-  // Record the task-level verdict on the same RETRIEVE step so every kept/dropped
-  // record keeps its id and reason at whichever level decided it.
-  retrieveStep.input = {
-    ...(retrieveStep.input as Record<string, unknown>),
-    task: {
-      selected: taskSelection.entries.filter((entry) => entry.selected).map((entry) => ({ recordId: entry.recordId, reason: entry.reason })),
-      excluded: taskSelection.excluded.map((entry) => ({ recordId: entry.recordId, reason: entry.reason })),
-    },
-  };
+  // Strategy depends on whether any memory actually survived selection, not on
+  // how many records the repository holds: an unrelated off-task memory must
+  // not force a REFRESH when nothing relevant is present.
+  const bootstrapStrategy: ResearchStrategy = finalRelatedKnowledge.length > 0 ? "REFRESH" : "INITIAL";
+  // The final plan is built after both selection levels, so excluded memories
+  // never shape the initial queries: knownInformation (and therefore
+  // knowledgeAwareQueries / searchCombinations) reflects only what survived
+  // selection.
+  let plan = createResearchPlan(researchInput, 1, maxQueries, finalRelatedKnowledge, bootstrapStrategy, undefined, intent, sourceProfile);
   markPhase("source_selection_started");
   const bootstrapSelection = selectSource({
     strategy: bootstrapStrategy,
@@ -651,7 +669,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       plan,
       adapter: options.modelAdapter,
       userQuery: (options.userQuery ?? options.input.currentQuestions) || options.input.industry,
-      relatedKnowledge,
+      relatedKnowledge: finalRelatedKnowledge,
       previousQueries: [],
       round: 1,
       timeoutMs: budget.modelPlanningTimeoutMs(),
@@ -862,7 +880,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
             ? { ...fallbackSelection, primarySourceType: fallbackSourceType, fallbackSourceTypes: [] }
             : { ...fallbackSelection, primarySourceType: fallbackSourceType, fallbackSourceTypes: [], allowedProviderIds: providerIdsFor(fallbackSourceType) };
           phaseContext = { round, attemptId: `round-${round}-fallback`, attemptType: "fallback" };
-          plan = createResearchPlan(researchInput, round, maxQueries, relatedKnowledge, plan.strategy, executableFallback, intent, sourceProfile);
+          plan = createResearchPlan(researchInput, round, maxQueries, finalRelatedKnowledge, plan.strategy, executableFallback, intent, sourceProfile);
           markPhase("plan_finished", true, plan.queries.length, undefined, {
             round,
             fallback: true,
@@ -1027,7 +1045,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       ? "stale" : response.signals.length > 0 ? "fresh" : "unknown";
     const policyInput = {
       currentEvidence: response,
-      relatedKnowledge,
+      relatedKnowledge: finalRelatedKnowledge,
       conflictState: evaluation,
       sourceCoverage: response.coverage,
       freshnessState,
@@ -1167,7 +1185,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
         skippedNextRoundDueToBudget: true,
       }));
     }
-    plan = createResearchPlan(researchInput, round + 1, maxQueries, relatedKnowledge, policy.strategy, sourceSelection, intent, sourceProfile);
+    plan = createResearchPlan(researchInput, round + 1, maxQueries, finalRelatedKnowledge, policy.strategy, sourceSelection, intent, sourceProfile);
     const nextPlanningBudget = budget.snapshot();
     markPhase("budget_checked", true, runState.cumulativeEvidenceCount, undefined, budgetDiagnostics(nextPlanningBudget, {
       round: round + 1,
@@ -1179,7 +1197,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
           plan,
           adapter: options.modelAdapter,
           userQuery: (options.userQuery ?? options.input.currentQuestions) || options.input.industry,
-          relatedKnowledge,
+          relatedKnowledge: finalRelatedKnowledge,
           previousQueries: plan.queries,
           round: round + 1,
           timeoutMs: budget.modelPlanningTimeoutMs(),

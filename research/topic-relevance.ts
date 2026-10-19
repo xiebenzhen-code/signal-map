@@ -1,6 +1,6 @@
 import type { QueryPlan, TopicProfile, TopicRelevance, TopicRelevanceDecision, TopicRelevanceReason } from "./types.ts";
 
-const GENERIC_TERMS = new Set([
+export const GENERIC_TERMS = new Set([
   "a",
   "an",
   "and",
@@ -76,12 +76,18 @@ const QUESTION_GENERIC_TERMS = new Set([
 ]);
 const PROFILE_ANCHOR_INSTRUCTION = /排除|告诉我|为什么|值得|优先|不要|避免|只看|有哪些|什么|过去|最近|当前|现在|exclude|tell|why|worth|prefer|avoid|only|what|recent|latest/iu;
 
-function normalize(value: string) {
+export function normalize(value: string) {
   return value
     .toLocaleLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+export function matches(text: string, term: string) {
+  if (!/[a-z0-9]/i.test(term)) return text.includes(term);
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|\\s)${escaped}(?=\\s|$)`, "i").test(text);
 }
 
 function meaningful(term: string) {
@@ -109,12 +115,6 @@ function topicTerms(plan: QueryPlan) {
     }
   }
   return [...terms].sort((left, right) => right.length - left.length);
-}
-
-function matches(text: string, term: string) {
-  if (!/[a-z0-9]/i.test(term)) return text.includes(term);
-  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(?:^|\\s)${escaped}(?=\\s|$)`, "i").test(text);
 }
 
 function isTaskAnchor(term: string) {
@@ -279,6 +279,78 @@ function constraintTermsFrom(values: string[], entities: Set<string>): string[] 
   return [...terms].filter((term) => !entities.has(term));
 }
 
+// Browsing-intent vocabulary: interrogative/time/register words that ask about
+// an entity's state without naming a concrete task. A plan whose non-entity
+// entries carry no task content is an explicit open-browsing question — its
+// material path is the legacy subject+topic match. A plan that names a concrete
+// task (or nothing at all beyond the entity) must not default to MATCH when no
+// constraint survives extraction.
+const BROWSING_WORDS = new Set([
+  ...CONSTRAINT_STOP_TERMS,
+  ...GENERIC_TERMS,
+  "哪", "些", "呢", "吗", "吧", "请", "帮", "下", "一下", "现在", "最近", "最新",
+  "今天", "当前", "过去", "未来", "本周", "本月", "动态", "变化", "新动态", "新变化",
+  "什么", "有什么", "有哪些", "为什么", "如何", "怎么", "哪些",
+  "recent", "latest", "current", "new", "news", "today", "now", "this week",
+  "this month", "what", "which", "why", "how", "changes", "change", "update",
+  "updates", "released", "release", "releases",
+]);
+const BROWSING_PHRASES = ["最近", "最新", "新动态", "新变化", "有什么", "有哪些", "什么", "动态", "变化", "更新", "值得", "关注", "推荐", "安排", "最近有", "what's new", "whats new", "what changed", "new changes", "latest update", "release notes"];
+const BROWSING_NEED_PATTERN = /最近|最新|新动态|新变化|新消息|有什么|有哪些|什么|动态|变化|更新|现在|今天|当前|过去|未来|值得|关注|推荐|recent|latest|what's new|whats new|what changed|new changes|updates?|changes?|news|released?|推出|发布/iu;
+
+function isBrowsingToken(token: string) {
+  if (!token) return false;
+  if (GENERIC_TERMS.has(token) || CONSTRAINT_STOP_TERMS.has(token)) return true;
+  if (CONSTRAINT_TIME_PATTERN.test(token)) return true;
+  if (BROWSING_WORDS.has(token)) return true;
+  return BROWSING_PHRASES.some((phrase) => token.includes(phrase));
+}
+
+function isBrowsingNeed(need: string) {
+  return Boolean(need) && BROWSING_NEED_PATTERN.test(normalize(need));
+}
+
+/**
+ * Sentence-function words and change/temporal morphology: prepositions,
+ * articles, pronouns, copulas and interrogative/auxiliary words never name a
+ * task, and neither do change verbs or their inflections ("changed",
+ * "updating"). "What changed in Codex?" must not read as a concrete task
+ * through "changed" + "in".
+ */
+const NON_TASK_FUNCTION_WORDS = new Set([
+  "a", "an", "the", "of", "in", "on", "at", "for", "to", "from", "with",
+  "without", "by", "as", "than", "into", "onto",
+  "is", "are", "was", "were", "be", "been", "am",
+  "it", "its", "this", "that", "these", "those", "their", "they", "we",
+  "you", "your", "our", "i", "he", "she", "them", "us", "his", "her",
+  "what", "which", "why", "how", "when", "where", "who", "whom", "whose",
+  "did", "do", "does", "will", "would", "can", "could", "should", "may", "might",
+  "changed", "changes", "change", "changing", "latest", "recent", "new",
+  "news", "update", "updates", "updated", "updating", "released", "release",
+  "releases", "today", "now", "past", "future", "current",
+]);
+
+/**
+ * A non-entity entry names a task when it carries concrete task content:
+ * at least two specific latin tokens ("AI Toolkit security scan" ->
+ * toolkit/security/scan) or a task-concept member ("checkout", "security").
+ * Browsing wording ("最近有什么新动态"), question modifiers ("优先官方依据"),
+ * domain register ("视频工具"), sentence-function words ("What changed in
+ * Codex?") and entity-joined phrases ("Premiere和After") are not task content
+ * and must not block the open-browsing material path.
+ */
+function entryNamesTask(entry: string, entities: Set<string>): boolean {
+  const latinTokens = entry.split(" ").filter((token) => /^[a-z0-9]+$/i.test(token));
+  const concreteLatin = latinTokens.filter((token) =>
+    !GENERIC_TERMS.has(token) && !entities.has(token) &&
+    !CONSTRAINT_STOP_TERMS.has(token) && !CONSTRAINT_TIME_PATTERN.test(token) &&
+    !BROWSING_WORDS.has(token) && !isBrowsingToken(token) &&
+    !NON_TASK_FUNCTION_WORDS.has(token));
+  if (concreteLatin.length >= 2) return true;
+  return TASK_CONCEPT_GROUPS.some((group) =>
+    group.some((member) => entry.includes(normalize(member))));
+}
+
 /**
  * Task constraints come from the planner's core keywords and synonyms —
  * entries that name what the answer must be about. topicKeywords stay in the
@@ -286,11 +358,15 @@ function constraintTermsFrom(values: string[], entities: Set<string>): string[] 
  * language family the others left empty, so a Chinese question with an
  * English evidence stream is not judged on narrative words.
  *
- * `hasNonEntityEntry` records whether the plan declared anything beyond the
- * tracked entities. A plan that only lists entity names gives no task context
- * at all, and an entity hit alone must not read as task-relevant.
+ * `hasNonEntityEntry` records whether the plan declared any *task-bearing*
+ * entry beyond the tracked entities: an entry that is entirely browsing
+ * wording ("ComfyUI 最近有什么新动态？") names no task, while an entry that
+ * names a concrete task ("AI Toolkit security scan") does even when no
+ * constraint term survives extraction. A plan that only lists entity names
+ * gives no task context at all, and an entity hit alone must not read as
+ * task-relevant unless the question itself is an explicit open-browsing ask.
  */
-function taskConstraintTerms(plan: QueryPlan): { terms: string[]; hasNonEntityEntry: boolean } {
+function taskConstraintTerms(plan: QueryPlan): { terms: string[]; hasNonEntityEntry: boolean; openBrowsing: boolean } {
   const entities = new Set(
     [
       ...plan.entities,
@@ -308,9 +384,25 @@ function taskConstraintTerms(plan: QueryPlan): { terms: string[]; hasNonEntityEn
     ? constraintTermsFrom([plan.originalNeed], entities).filter((term) =>
       hasCjk(term) ? !plannedHasCjk : !plannedHasLatin)
     : [];
-  const hasNonEntityEntry = sources.map((value) => normalize(value)).some((entry) =>
-    entry && !entities.has(entry) && !planned.includes(entry));
-  return { terms: [...new Set([...planned, ...fallback])], hasNonEntityEntry };
+  const nonEntityEntries = sources.map((value) => normalize(value)).filter((entry) => entry && !entities.has(entry));
+  // hasNonEntityEntry = a non-entity entry that was NOT extracted as a
+  // constraint (extraction failure on concrete task wording) — same meaning as
+  // before: "退货" IS extracted (planned.includes("退货")), so the plan is
+  // judgeable; "AI Toolkit security scan" is NOT extractable, so the plan
+  // declares task content that tasks cannot be read from.
+  const hasNonEntityEntry = nonEntityEntries.some((entry) =>
+    !planned.includes(entry) && entry.split(" ").some((token) => !entities.has(token)));
+  // openBrowsing = the question explicitly asks about an entity's state
+  // without naming a task. A plan whose non-entity entries carry no task
+  // content is open browsing, as is a plan with no non-entity entry at all
+  // whose original need is a browsing ask. A plan that names concrete task
+  // content ("退货", "AI Toolkit security scan") is never open browsing.
+  const nonEntityTaskless = nonEntityEntries.length > 0 &&
+    nonEntityEntries.every((entry) => !entryNamesTask(entry, entities));
+  const openBrowsing = nonEntityEntries.length === 0
+    ? isBrowsingNeed(plan.originalNeed ?? "")
+    : nonEntityTaskless;
+  return { terms: [...new Set([...planned, ...fallback])], hasNonEntityEntry, openBrowsing };
 }
 
 function isUsableProfileAnchor(term: string) {
@@ -448,7 +540,7 @@ export function assessTopicRelevance(text: string, plan: QueryPlan): TopicReleva
   //                                and open browsing questions stay admissible;
   //                                they simply cannot reach confirmed knowledge
   //                                without a task-relevant verdict upstream).
-  const { terms: taskConstraints, hasNonEntityEntry } = taskConstraintTerms(plan);
+  const { terms: taskConstraints, hasNonEntityEntry, openBrowsing } = taskConstraintTerms(plan);
   const matchedTaskConstraints = taskConstraints.filter((constraint) => constraintConceptMatches(normalizedText, constraint));
   const conceptBridgeable = taskConstraints.some((constraint) => conceptGroupOf(constraint).length > 0);
   const subjectSatisfied = !entities.length || hasEntityMatch;
@@ -457,7 +549,12 @@ export function assessTopicRelevance(text: string, plan: QueryPlan): TopicReleva
   if (!subjectSatisfied || !topicSatisfied) {
     decision = "TOPIC_MISMATCH";
   } else if (taskConstraints.length === 0) {
-    decision = "MATCH";
+    // No constraint survived extraction. This is either an explicit open
+    // browsing question (legacy subject+topic match stays admissible as
+    // material) or constraint-extraction failure on a plan that named task
+    // content — the latter must keep the material UNCERTAIN: an entity hit
+    // alone is not a task verdict and must not read as confirmed knowledge.
+    decision = openBrowsing ? "MATCH" : "UNCERTAIN";
   } else if (matchedTaskConstraints.length > 0) {
     decision = "MATCH";
   } else if (conceptBridgeable || hasNonEntityEntry) {

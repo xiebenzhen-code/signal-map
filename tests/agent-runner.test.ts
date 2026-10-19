@@ -1102,10 +1102,13 @@ test("a later material state change is stored as UPDATES and does not supersede 
 
 test("CONFIRMS updates provenance without duplicate knowledge or revision", async () => {
   const repository = new InMemorySignalRepository();
+  // A current fact: an old "available" record is time-sensitive and must be
+  // re-verified, so a stale record would (correctly) not count as known.
+  const recent = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
   repository.addPersonalKnowledge(context, {
     type: "KNOWN_INFORMATION",
     text: "Codex is available",
-  }, "2026-09-05T00:00:00.000Z");
+  }, recent);
   const beforeRevision = repository.getResearchContextRevision(context);
 
   const result = await runAgent({
