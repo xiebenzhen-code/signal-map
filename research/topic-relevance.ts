@@ -1,4 +1,4 @@
-import type { QueryPlan, TopicProfile, TopicRelevance, TopicRelevanceReason } from "./types.ts";
+import type { QueryPlan, TopicProfile, TopicRelevance, TopicRelevanceDecision, TopicRelevanceReason } from "./types.ts";
 
 const GENERIC_TERMS = new Set([
   "a",
@@ -170,6 +170,49 @@ const CONSTRAINT_STOP_TERMS = new Set([
 ]);
 const CONSTRAINT_TIME_PATTERN = /^(?:\d+[a-z]{1,2}|\d{2,4})$/i;
 
+/**
+ * Cross-language task-concept groups (generic software/commerce vocabulary,
+ * not question-specific): a constraint declared in one language still admits
+ * evidence written in another, and an unrelated task in the other language is
+ * still rejected. Members are normalized (see normalize()).
+ */
+const TASK_CONCEPT_GROUPS: string[][] = [
+  ["结账", "结帐", "支付", "付款", "付费", "checkout", "checkouts", "payment", "payments", "billing", "bill", "tender", "tenders"],
+  ["安全", "security", "secure", "vulnerability", "vulnerabilities", "scan", "scanning"],
+  ["订阅", "subscribe", "subscription", "subscriptions"],
+  ["性能", "performance", "latency", "throughput"],
+  ["许可", "license", "licensing", "licence", "commercial", "商用"],
+  ["导出", "export", "exporting"],
+  ["迁移", "migration", "migrate"],
+  ["权限", "permission", "permissions", "authorization"],
+  ["搜索", "检索", "search", "query", "queries"],
+];
+
+function conceptGroupOf(term: string): string[][] {
+  const normalized = normalize(term);
+  return TASK_CONCEPT_GROUPS.filter((group) => group.some((member) => normalize(member) === normalized));
+}
+
+/** A constraint matches when any member of its concept group appears in the text. */
+function constraintConceptMatches(text: string, constraint: string) {
+  const groups = conceptGroupOf(constraint);
+  if (!groups.length) return matches(text, constraint);
+  return groups.some((group) => group.some((member) => Boolean(normalize(member)) && matches(text, normalize(member))));
+}
+
+/** Concept groups activated by any term appearing in the text. Exported for
+ *  knowledge read-back selection, which compares the task concepts a stored
+ *  fact names against the task concepts the current question asks about. */
+export function conceptGroupsInText(text: string): string[][] {
+  const groups: string[][] = [];
+  for (const group of TASK_CONCEPT_GROUPS) {
+    if (group.some((member) => Boolean(normalize(member)) && matches(normalize(text), normalize(member)))) {
+      groups.push(group);
+    }
+  }
+  return groups;
+}
+
 function hasCjk(text: string) {
   return /[\u3400-\u9fff]/u.test(text);
 }
@@ -215,33 +258,39 @@ function constraintTermsFrom(values: string[], entities: Set<string>): string[] 
       for (const fragment of fragments) {
         if (fragment.length < 2 || fragment.length > 3) continue;
         if (CONSTRAINT_STOP_TERMS.has(fragment)) continue;
+        // Drop fragments carrying a register stop word ("生成式" contains
+        // "生成", "视频工具" contains "工具"): the fragment is domain register,
+        // not a task.
+        if ([...CONSTRAINT_STOP_TERMS].some((stop) => stop.length >= 2 && fragment.includes(stop))) continue;
         terms.add(fragment);
       }
     }
-    for (const token of normalized.split(" ")) {
-      if (!token || !/^[a-z0-9]+$/i.test(token)) continue;
-      if (GENERIC_TERMS.has(token) || entities.has(token)) continue;
-      if (CONSTRAINT_STOP_TERMS.has(token) || CONSTRAINT_TIME_PATTERN.test(token)) continue;
-      // A multi-word latin phrase ("AI developer tools", "official update")
-      // names the domain register, not a task; only compact entries
-      // ("checkout", "payment", "coding") carry a task constraint.
-      if (normalized.split(" ").length > 2) break;
-      terms.add(token);
+    // Whole latin entries up to three concrete tokens ("video editing",
+    // "automatic rough cut"). An entry that contains a generic/register token
+    // ("AI developer tools", "official update") names the domain, not a task.
+    const latinTokens = normalized.split(" ").filter((token) => /^[a-z0-9]+$/i.test(token));
+    if (latinTokens.length > 0 && latinTokens.length <= 3 &&
+      latinTokens.every((token) =>
+        !GENERIC_TERMS.has(token) && !entities.has(token) &&
+        !CONSTRAINT_STOP_TERMS.has(token) && !CONSTRAINT_TIME_PATTERN.test(token))) {
+      terms.add(latinTokens.join(" "));
     }
   }
   return [...terms].filter((term) => !entities.has(term));
 }
 
 /**
- * Gate constraints come from the planner's core keywords only — the entries
- * that name what the answer must be about. synonyms and topicKeywords stay in
- * the topic-term vocabulary (they broaden discovery), but as constraints they
- * over-constrain with register nouns ("模型更新"). originalNeed only fills a
- * language family the core keywords left empty, so a Chinese question with an
- * English evidence stream ("Generate and create … Premiere …") is not judged
- * on narrative words.
+ * Task constraints come from the planner's core keywords and synonyms —
+ * entries that name what the answer must be about. topicKeywords stay in the
+ * topic-term vocabulary (they broaden discovery); originalNeed only fills a
+ * language family the others left empty, so a Chinese question with an
+ * English evidence stream is not judged on narrative words.
+ *
+ * `hasNonEntityEntry` records whether the plan declared anything beyond the
+ * tracked entities. A plan that only lists entity names gives no task context
+ * at all, and an entity hit alone must not read as task-relevant.
  */
-function taskConstraintTerms(plan: QueryPlan): string[] {
+function taskConstraintTerms(plan: QueryPlan): { terms: string[]; hasNonEntityEntry: boolean } {
   const entities = new Set(
     [
       ...plan.entities,
@@ -251,14 +300,17 @@ function taskConstraintTerms(plan: QueryPlan): string[] {
       .map((value) => normalize(value))
       .filter(Boolean),
   );
-  const planned = constraintTermsFrom(plan.coreKeywords || [], entities);
+  const sources = [...(plan.coreKeywords || []), ...plan.synonyms];
+  const planned = constraintTermsFrom(sources, entities);
   const plannedHasCjk = planned.some((term) => hasCjk(term));
   const plannedHasLatin = planned.some((term) => !hasCjk(term));
   const fallback = plan.originalNeed
     ? constraintTermsFrom([plan.originalNeed], entities).filter((term) =>
       hasCjk(term) ? !plannedHasCjk : !plannedHasLatin)
     : [];
-  return [...new Set([...planned, ...fallback])];
+  const hasNonEntityEntry = sources.map((value) => normalize(value)).some((entry) =>
+    entry && !entities.has(entry) && !planned.includes(entry));
+  return { terms: [...new Set([...planned, ...fallback])], hasNonEntityEntry };
 }
 
 function isUsableProfileAnchor(term: string) {
@@ -382,29 +434,48 @@ export function assessTopicRelevance(text: string, plan: QueryPlan): TopicReleva
     [entity.canonicalEntity, ...entity.aliasesConsidered])].map(normalize).filter(meaningful);
   const hasEntityMatch = entities.some((term) => matches(normalizedText, term));
   const hasTopicTerms = terms.length > 0;
-  // Task constraints gate on what the user asked the evidence to be about.
-  // Constraints that share no language family with the text (a Chinese plan
-  // against an English changelog) cannot be judged and are skipped rather than
-  // rejected; explicit subject-only material still passes via the entity gate.
-  const taskConstraints = taskConstraintTerms(plan);
-  const textIsCjk = hasCjk(normalizedText);
-  const applicableConstraints = taskConstraints.filter((constraint) => hasCjk(constraint) === textIsCjk);
-  const matchedTaskConstraints = applicableConstraints.filter((constraint) => matches(normalizedText, constraint));
+  // Task gate: evidence must be on the task the question asked about, not just
+  // the tracked entity. Constraints bridge languages through concept groups, so
+  // a Chinese constraint still admits an English body naming the same concept
+  // (and vice versa). Outcomes:
+  //   constraint hit                 -> MATCH
+  //   miss, task judgeable (a concept group or plan task context exists)
+  //                                -> TOPIC_MISMATCH
+  //   miss, nothing judgeable    -> UNCERTAIN: a declared constraint that has no
+  //                                concept bridge and no task context must not
+  //                                read as relevant through an entity hit.
+  //   no constraint at all       -> legacy subject+topic match (tracked-entity
+  //                                and open browsing questions stay admissible;
+  //                                they simply cannot reach confirmed knowledge
+  //                                without a task-relevant verdict upstream).
+  const { terms: taskConstraints, hasNonEntityEntry } = taskConstraintTerms(plan);
+  const matchedTaskConstraints = taskConstraints.filter((constraint) => constraintConceptMatches(normalizedText, constraint));
+  const conceptBridgeable = taskConstraints.some((constraint) => conceptGroupOf(constraint).length > 0);
   const subjectSatisfied = !entities.length || hasEntityMatch;
-  const taskSatisfied = applicableConstraints.length === 0 || matchedTaskConstraints.length > 0;
   const topicSatisfied = !hasTopicTerms || legacyMatchedTerms.length > 0;
-  const decision = subjectSatisfied && taskSatisfied && topicSatisfied
-    ? "MATCH"
-    : "TOPIC_MISMATCH";
+  let decision: TopicRelevanceDecision;
+  if (!subjectSatisfied || !topicSatisfied) {
+    decision = "TOPIC_MISMATCH";
+  } else if (taskConstraints.length === 0) {
+    decision = "MATCH";
+  } else if (matchedTaskConstraints.length > 0) {
+    decision = "MATCH";
+  } else if (conceptBridgeable || hasNonEntityEntry) {
+    decision = "TOPIC_MISMATCH";
+  } else {
+    decision = "UNCERTAIN";
+  }
   return {
     decision,
-    reason: !taskSatisfied
+    reason: decision === "TOPIC_MISMATCH" && taskConstraints.length > 0
       ? "NO_TASK_CONSTRAINT_MATCH"
-      : !hasTopicTerms
-        ? "NO_TOPIC_TERMS"
-        : legacyMatchedTerms.length
-          ? "LEGACY_QUERY_TERM_MATCH"
-          : "NO_QUERY_TERM_MATCH",
+      : decision === "UNCERTAIN"
+        ? "UNCERTAIN_TASK_CONSTRAINT"
+        : !hasTopicTerms
+          ? "NO_TOPIC_TERMS"
+          : legacyMatchedTerms.length
+            ? "LEGACY_QUERY_TERM_MATCH"
+            : "NO_QUERY_TERM_MATCH",
     matchedTerms: legacyMatchedTerms,
     matchedDomainAnchors,
     matchedTaskAnchors,

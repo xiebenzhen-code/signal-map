@@ -20,7 +20,7 @@ export type VerificationStatus =
   | "unverified"
   | "conflicting";
 
-export type TopicRelevanceDecision = "MATCH" | "TOPIC_MISMATCH";
+export type TopicRelevanceDecision = "MATCH" | "TOPIC_MISMATCH" | "UNCERTAIN";
 
 export type TopicRelevanceReason =
   | "DOMAIN_AND_TASK_ANCHOR_MATCH"
@@ -33,6 +33,7 @@ export type TopicRelevanceReason =
   | "LEGACY_QUERY_TERM_MATCH"
   | "NO_QUERY_TERM_MATCH"
   | "NO_TASK_CONSTRAINT_MATCH"
+  | "UNCERTAIN_TASK_CONSTRAINT"
   | "NO_TOPIC_TERMS";
 
 export type TopicProfile = {

@@ -46,11 +46,21 @@ function signalText(signal: ResearchSignal) {
 /** Index pages, subscription endpoints and channel boilerplate carry no claim. */
 const NAVIGATION_TEXT = /\b(?:changelog|release notes?|newsletter|subscribe|rss|atom feed|feed\.xml|developer center|documentation index|find the latest|learn about new platform)\b|导航|订阅|最新动态|了解更多平台/iu;
 
+// A real event title often cites the feed it came from ("... - Shopify
+// developer changelog"). Judge the subject of the publisher's headline, not
+// the suffix, so an actual change is never rejected as the navigation page it
+// was published on.
+function navigationSubject(signal: ResearchSignal) {
+  const headline = (signal.originalTitle || signal.title || "").trim();
+  if (!headline) return "";
+  return headline.split(/\s+[-–—]\s+/)[0] || headline;
+}
+
 function canWriteKnowledge(signal: ResearchSignal, change: KnowledgeChange) {
   // An official source and a high reliability score describe the publisher, not
   // whether the item answers this question. Requiring an explicit MATCH keeps
-  // unjudged and off-task material out; navigation and channel boilerplate
-  // never become confirmed facts even when their source is authoritative.
+  // unjudged (UNCERTAIN), off-task and unjudgeable material out; navigation and
+  // channel boilerplate never become confirmed facts even when authoritative.
   if (signal.topicRelevance?.decision !== "MATCH") return false;
   if (signal.reliabilityScore < 55) return false;
   if (signal.informationGainStatus === "NO_INFORMATION_GAIN") return false;
@@ -58,7 +68,7 @@ function canWriteKnowledge(signal: ResearchSignal, change: KnowledgeChange) {
   if (signal.informationType === "SIGNAL") return false;
   if (change.classification === "CONTRADICTS") return false;
   if (change.classification === "DUPLICATE") return false;
-  return !NAVIGATION_TEXT.test(`${signal.originalTitle || ""} ${signal.title || ""}`);
+  return !NAVIGATION_TEXT.test(navigationSubject(signal));
 }
 
 function shouldAdvanceRevision(change: KnowledgeChange) {

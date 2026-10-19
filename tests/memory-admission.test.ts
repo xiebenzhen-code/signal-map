@@ -43,9 +43,14 @@ function response(signals: ResearchSignal[]) {
 
 const newChange = (signalId = "signal-1") => ({ signalId, classification: "NEW" }) as never;
 
+// Changes must reference the ids of the signals actually being tested. A
+// default "signal-1" here used to silently skip unknown ids inside
+// updateKnowledgeFromChanges (map miss -> continue), so navigation probes
+// "passed" without ever reaching canWriteKnowledge. Defaulting to the first
+// item's id forces every case through the real admission path.
 async function persistedTexts(
   items: ResearchSignal[],
-  changes: unknown[] = [newChange()],
+  changes: unknown[] = [newChange(items[0]?.id)],
 ) {
   const repository = new InMemorySignalRepository();
   await updateKnowledgeFromChanges({
@@ -58,6 +63,14 @@ async function persistedTexts(
   });
   return (await repository.listPersonalKnowledge(context)).map((record) => record.text);
 }
+
+// Positive control proving the write path is reachable with the same harness:
+// an identical call whose signal is writable must persist exactly one record.
+// If this fails, a zero-record assertion above cannot be trusted as admission.
+test("harness control: a writable signal persists through the same call shape", async () => {
+  const texts = await persistedTexts([signal()]);
+  assert.equal(texts.length, 1, "the harness must be able to write; otherwise zero-record probes prove nothing");
+});
 
 test("navigation text never becomes confirmed knowledge even from an official source", async () => {
   const texts = await persistedTexts([

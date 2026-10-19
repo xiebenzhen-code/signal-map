@@ -784,7 +784,11 @@ function primaryDomains(plan: QueryPlan) {
 }
 
 function relevant(item: LiveItem, plan: QueryPlan) {
-  return assessTopicRelevance(`${item.title} ${item.snippet}`, plan).decision === "MATCH";
+  // MATCH and UNCERTAIN both stay in the material stream: uncertain evidence is
+  // kept as a candidate but cannot become confirmed knowledge (the write path
+  // requires an explicit MATCH).
+  const decision = assessTopicRelevance(`${item.title} ${item.snippet}`, plan).decision;
+  return decision !== "TOPIC_MISMATCH";
 }
 
 const providerQueryNoise = new Set([

@@ -734,7 +734,7 @@ test("an accepted synonym of an existing fact is retrieved and classified as no 
   });
 
   const first = await runAgent({
-    input, context: runContext, repository, maxRounds: 1,
+    userQuery: "Palmier Pro macOS AI video editor updates", input, context: runContext, repository,
     research: async () => response([makeEvidence("Palmier Pro launched an open-source AI video editor for macOS.")]),
   });
   assert.equal(first.response?.signals[0]?.informationGainStatus, "NEW_INFORMATION");
@@ -742,7 +742,7 @@ test("an accepted synonym of an existing fact is retrieved and classified as no 
   assert.equal(repository.listPersonalKnowledge(runContext).length, 1);
 
   const second = await runAgent({
-    input, context: runContext, repository, maxRounds: 1,
+    userQuery: "Palmier Pro macOS AI video editor updates", input, context: runContext, repository,
     research: async () => response([makeEvidence("Palmier Pro launches an open-source AI video editor for macOS.")]),
   });
   const retrieved = second.steps.find((step) => step.state === "RETRIEVE")?.output;
@@ -777,13 +777,13 @@ test("an accepted same-source claim that adds a new capability updates knowledge
   });
 
   const first = await runAgent({
-    input, context: runContext, repository, maxRounds: 1,
+    userQuery: "Palmier Pro macOS AI video editor updates", input, context: runContext, repository,
     research: async () => response([makeEvidence(oldClaim)]),
   });
   assert.equal(first.knowledgeChanges[0]?.classification, "NEW");
 
   const second = await runAgent({
-    input, context: runContext, repository, maxRounds: 1,
+    userQuery: "Palmier Pro macOS AI video editor updates", input, context: runContext, repository,
     research: async () => response([makeEvidence(newClaim)]),
   });
   const retrieved = second.steps.find((step) => step.state === "RETRIEVE")?.output;
@@ -1030,7 +1030,7 @@ test("a conflicting claim about stored knowledge is classified as CONTRADICTS an
   const known = "Palmier Pro launched an open-source AI video editor for macOS.";
   const contradiction = "Palmier Pro did not launch an open-source AI video editor for macOS.";
   const first = await runAgent({
-    input, context: runContext, repository, maxRounds: 1,
+    userQuery: "Palmier Pro macOS AI video editor updates", input, context: runContext, repository,
     research: async () => response([evidenceSignal({
       id: "palmier-known",
       title: known,
@@ -1041,7 +1041,7 @@ test("a conflicting claim about stored knowledge is classified as CONTRADICTS an
   assert.equal(first.knowledgeChanges[0]?.classification, "NEW");
 
   const second = await runAgent({
-    input, context: runContext, repository,
+    userQuery: "Palmier Pro macOS AI video editor updates", input, context: runContext, repository,
     research: async () => response([evidenceSignal({
       id: "palmier-conflict",
       title: contradiction,
@@ -1085,11 +1085,11 @@ test("a later material state change is stored as UPDATES and does not supersede 
   });
 
   await runAgent({
-    input, context: runContext, repository, maxRounds: 1,
+    userQuery: "Palmier Pro macOS AI video editor updates", input, context: runContext, repository,
     research: async () => response([makeEvidence(oldClaim)]),
   });
   const second = await runAgent({
-    input, context: runContext, repository,
+    userQuery: "Palmier Pro macOS AI video editor updates", input, context: runContext, repository,
     research: async () => response([makeEvidence(nextClaim)]),
   });
   const stored = repository.listPersonalKnowledge(runContext).map((record) => record.text);

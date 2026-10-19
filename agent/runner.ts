@@ -7,6 +7,8 @@ import { BudgetManager, type BudgetSnapshot } from "./budget-manager.ts";
 import { applyAttentionPreferences, compareKnowledge, evaluateEvidence, reconcileAttentionDecision, reconcileInformationGain } from "./evaluation.ts";
 import { persistResearchRecords, updateKnowledgeFromChanges } from "./knowledge-updater.ts";
 import { createResearchPlan } from "./query-planner.ts";
+import { planQuery } from "../research/query-planner.ts";
+import { selectRelatedKnowledge } from "./memory-selection.ts";
 import { ResearchRunState, mergeRoundAttempts, type EvidencePreservationSnapshot } from "./research-run-state.ts";
 import { toRetrievalPlan } from "./retrieval-plan.ts";
 import { chooseResearchStrategy } from "./research-policy.ts";
@@ -344,8 +346,10 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
   const deadlineAt = options.deadlineAt ?? startedAt + (options.maxExecutionTimeMs ?? 30000);
   const budget = new BudgetManager({ deadlineAt });
   const add = (state: AgentState, status: AgentStep["status"], input: unknown, output: unknown, reason?: string) => {
-    steps.push({ state, status, input, output });
+    const step = { state, status, input, output };
+    steps.push(step);
     trace.push({ state, status, action: state.toLowerCase(), inputSummary: JSON.stringify(input).slice(0, 500), outputSummary: JSON.stringify(output).slice(0, 500), decisionReason: reason, timestamp: now() });
+    return step;
   };
 
   add("UNDERSTAND", "completed", { query: options.input.currentQuestions || options.input.industry }, { filterContext: "accepted" });
@@ -373,8 +377,32 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
   const judgementRecords = persistedKnowledge.filter((record) => record.type === "JUDGEMENT");
   const trackedEntityRecords = persistedKnowledge.filter((record) => record.type === "TRACKED_ENTITY");
   const trackedEventRecords = persistedKnowledge.filter((record) => record.type === "TRACKED_EVENT");
-  const relatedKnowledge = knownFactRecords.map((record) => record.text);
-  add("RETRIEVE", "completed", { query: options.userQuery ?? options.input.currentQuestions }, relatedKnowledge.join("\n") || "none");
+  // Read-back selection: only knowledge that shares the current question's
+  // subject (and, once the plan exists, its task) may enter the research
+  // context. Every record keeps its id plus a selection/exclusion reason in the
+  // RETRIEVE trace; unrelated, time-sensitive or conflicted records stay in the
+  // repository untouched. With no related knowledge the run proceeds normally.
+  const memoryQuestion = options.userQuery ?? options.input.currentQuestions ?? options.input.industry;
+  const memoryEntities = String(options.input.trackedEntities || "").split(/[,，、;；\n]/).map((item) => item.trim()).filter(Boolean);
+  const subjectSelection = selectRelatedKnowledge({
+    records: knownFactRecords,
+    query: memoryQuestion,
+    entities: memoryEntities,
+  });
+  let relatedKnowledge = subjectSelection.selected.map((record) => record.text);
+  const knowledgeSelectionDiagnostics = () => subjectSelection.entries.map((entry) => ({
+    recordId: entry.recordId,
+    selected: entry.selected,
+    reason: entry.reason,
+  }));
+  const retrieveStep = add("RETRIEVE", "completed", {
+    query: memoryQuestion,
+    storedRecords: knownFactRecords.length,
+    subject: {
+      selected: knowledgeSelectionDiagnostics().filter((entry) => entry.selected),
+      excluded: knowledgeSelectionDiagnostics().filter((entry) => !entry.selected),
+    },
+  }, relatedKnowledge.join("\n") || "none");
   const intent = classifyIntent({
     userQuery: (options.userQuery ?? options.input.currentQuestions) || options.input.industry,
     filterContext: options.input,
@@ -386,7 +414,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
 
   const researchInput = {
     ...options.input,
-    knownInformation: appendLines(options.input.knownInformation, relatedKnowledge),
+    knownInformation: appendLines(options.input.knownInformation, subjectSelection.selected.map((record) => record.text)),
     userJudgements: appendLines(options.input.userJudgements, judgementRecords.map((record) =>
       /^\s*(?:Not useful|Changed after evidence)\s*:/i.test(record.text)
         ? record.text.replace(/\s*\r?\n\s*/g, " ")
@@ -397,8 +425,29 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
   const generatedFromRevision = options.context && options.repository
     ? await Promise.resolve(options.repository.getResearchContextRevision(options.context))
     : options.initialRevision ?? 1;
-  const bootstrapStrategy: ResearchStrategy = relatedKnowledge.length > 0 ? "REFRESH" : "INITIAL";
+  const bootstrapStrategy: ResearchStrategy = knownFactRecords.length > 0 ? "REFRESH" : "INITIAL";
   let plan = createResearchPlan(researchInput, 1, maxQueries, relatedKnowledge, bootstrapStrategy, undefined, intent, sourceProfile);
+  // Task-level selection once the plan's task constraints are known: a record
+  // that shares the entity but not the task (or that is time-sensitive /
+  // conflicted) must not enter knownInformation — it would suppress fresh
+  // evidence as already-known. The repository itself is never rewritten.
+  const taskSelection = selectRelatedKnowledge({
+    records: subjectSelection.selected,
+    query: memoryQuestion,
+    entities: memoryEntities,
+    plan: planQuery({ ...researchInput, knownInformation: options.input.knownInformation }),
+  });
+  relatedKnowledge = taskSelection.selected.map((record) => record.text);
+  researchInput.knownInformation = appendLines(options.input.knownInformation, relatedKnowledge);
+  // Record the task-level verdict on the same RETRIEVE step so every kept/dropped
+  // record keeps its id and reason at whichever level decided it.
+  retrieveStep.input = {
+    ...(retrieveStep.input as Record<string, unknown>),
+    task: {
+      selected: taskSelection.entries.filter((entry) => entry.selected).map((entry) => ({ recordId: entry.recordId, reason: entry.reason })),
+      excluded: taskSelection.excluded.map((entry) => ({ recordId: entry.recordId, reason: entry.reason })),
+    },
+  };
   markPhase("source_selection_started");
   const bootstrapSelection = selectSource({
     strategy: bootstrapStrategy,
