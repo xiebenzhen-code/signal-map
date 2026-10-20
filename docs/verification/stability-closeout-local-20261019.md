@@ -70,7 +70,7 @@
 ## 6. 固定验收与门禁（全部通过）
 
 - **8 文件核心矩阵**（stability-regressions / stability-excluded-memory / memory-selection-acceptance / agent-runner / general-relevance / task-relevance / topic-relevance / memory-admission）：**116 tests / 115 pass / 0 fail / 1 skipped**（数据库相关跳过，见第 8 节）。
-- **全量测试**（package.json test 列表，105 文件，node24 等效命令）：**795 tests / 789 pass / 0 fail / 6 skipped**。
+- **全量测试更正（2026-10-20独立复核）**：完整执行package.json的105文件清单，实际为 **873 tests / 862 pass / 5 fail / 6 skipped**，首次命令退出1。5项失败为沙箱禁止连接本地端口（connect EACCES 127.0.0.1），均位于proxy-auth-http.test.mjs；解除该限制后，该文件独立复跑 **6/6通过，退出0**。逐项复核未剩未解释失败，但不能称首次全量命令退出0。原795/789/0/6缺少完整执行清单依据，不再作为全量验收结论。
 - **typecheck**：`tsc --noEmit` 0 错误。
 - **lint**：0 error / 28 既有 warning（存量，未新增）。
 - **knip**：clean。
@@ -97,9 +97,9 @@ tests/stability-regressions.test.ts     | 224 ++++++++++++++++++++++++++
 
 ## 8. 跳过项与边界
 
-- **数据库测试**：未配置 `DATABASE_URL` 的环境依赖用例显式跳过（6 skipped 中 1 个为 DB 相关）。配置后必须真断言，不得空通过。
+- **数据库测试**：全量6项跳过保留为环境条件跳过；其中新增验收文件有1项数据库前置跳过，不能据此推断全量只有1项数据库相关。配置后必须真断言，不得空通过。真实数据库链路尚未因本地内存测试而获得验收。
 - **前台失败根因**：维持 **UNKNOWN**（405 归因已撤回——405 对应另一次 `GET /api/research/plan` 探测，不能证明原 `POST /api/signals` 失败；504 不直接归因容器出网）。本次未改前端 HTTP method，未新增线上研究。
-- **部署在架**：生产 DeployId 015（CloudBase，FlowRatio 100，回退目标 014）不受本轮影响；容器到外网 feed 间歇性超时为既有问题，Shopify feed 端到端复验仍 UNKNOWN。
+- **部署边界**：本轮未部署；DeployId 015为此前发布记录，本轮未实时复查平台。015容器已存在一次Shopify读取与解析成功的历史证据（1,874,367字节、100条处理/60条归一），不能标成完全未验证；持续稳定性及本轮新代码的云端效果仍未验证。研究请求504不能直接归因容器出网。
 
 ## 9. 受控发布条件评估
 
@@ -108,4 +108,11 @@ tests/stability-regressions.test.ts     | 224 ++++++++++++++++++++++++++
 1. 单独授权（含回归修复 3 项对应的测试在目标基线复跑通过）。
 2. 从 `44157e4`（或后续收口提交）构建并按既有流程部署（参考 DeployId 014/015 的导出—构建—回退链）。
 3. 部署后以原题进行一次真实研究复验（feed 端到端 searched_with_results），此前容器出网问题未闭环。
-4. 认证保存/读回仍 BLOCKED，不影响研究主链路但属已知缺口。
+4. 已登录账户的保存与整页刷新读回、下一次研究读取旧记忆已有历史证据；尚未验证本轮代码的云端记忆质量、登出重登读回和完整前台交付。前台交付失败仍是产品验收阻断，不能称“不影响主链路”。
+
+## 10. 2026-10-20复核更正与溯源
+
+- 独立复核实际运行新增两个稳定性测试文件：16/16通过。旧版红对照7红7绿属于执行方历史记录，本次未重复运行。
+- 原始全量日志位于主仓库 `outputs/stability-audit-20261020-full.log`；复核报告为 `docs/verification/stability-44157e4-audit-20261020.md`。
+- 历史云端证据参见 `docs/verification/authenticated-browser-memory-20261019.md`、`memory-cross-run-relevance-audit-20261019.md`、`shopify-phase-015-result-20261019.md`（主仓库）。
+- typecheck、lint、knip、deps:check及构建保持执行方原报告证据，本次文档更正未重跑这些检查。未修改产品代码，未声称线上稳定。
