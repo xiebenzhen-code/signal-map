@@ -99,6 +99,7 @@ test('film: a relevant re-seen fact is read back, selected, then classified as d
   const repository = new InMemorySignalRepository();
   const claim = 'Palmier Pro launched an open-source AI video editor for macOS.';
   const run = () => runAgent({
+    memoryParticipation: true,
     input: baseInput({ trackedEntities: 'Palmier Pro', currentQuestions: 'Palmier Pro macOS AI video editor updates' }),
     userQuery: 'Palmier Pro macOS AI video editor updates',
     context, repository, maxRounds: 1,
@@ -119,6 +120,7 @@ test("film: an off-task same-entity memory is excluded with a recorded reason", 
   seed(repository, 'Palmier Pro 安全扫描功能上线');
   const fresh = claimSignal("video-new", "Palmier Pro adds a new timeline editing feature");
   const result = await runAgent({
+    memoryParticipation: true,
     input: baseInput({ trackedEntities: 'Palmier Pro', currentQuestions: 'Palmier Pro 结账与支付变化' }),
     userQuery: 'Palmier Pro 结账与支付变化',
     context, repository, maxRounds: 1,
@@ -141,6 +143,7 @@ test("e-commerce: a related memory is selected for the same task, a same-entity 
   seed(repository, "Shopify 新增结账与支付方式");
   seed(repository, "Shopify 推出应用安全扫描功能");
   const result = await runAgent({
+    memoryParticipation: true,
     input: baseInput({ trackedEntities: "Shopify", currentQuestions: "Shopify 支付变化" }),
     context, repository, maxRounds: 1,
     research: async () => response([claimSignal("shopify-payment", "Shopify checkout payments adds a new payment method")]),
@@ -156,6 +159,7 @@ test("programming: an outdated (unverified) memory is not treated as settled kno
   const repository = new InMemorySignalRepository();
   seed(repository, "ComfyUI video preview node supports frame-accurate scrubbing", { status: "partially_verified" });
   const result = await runAgent({
+    memoryParticipation: true,
     input: baseInput({ trackedEntities: "ComfyUI", currentQuestions: "ComfyUI video preview changes" }),
     context, repository, maxRounds: 1,
     research: async () => response([claimSignal("comfy-recheck", "ComfyUI video preview node supports frame-accurate scrubbing")]),
@@ -170,6 +174,9 @@ test("programming: a conflicted memory stays unread but is never deleted", async
   const repository = new InMemorySignalRepository();
   seed(repository, "ComfyUI is available", { status: "conflicting" });
   await runAgent({
+    // This file pins the auto-memory participation contract; the production
+    // default is isolated (bounded closeout cycle 2026-10-20).
+    memoryParticipation: true,
     input: baseInput({ trackedEntities: "ComfyUI", currentQuestions: "ComfyUI availability" }),
     context, repository, maxRounds: 1,
     research: async () => response([]),
@@ -185,12 +192,14 @@ test("follow-up: the previous question's fact is selected and updates provenance
   const repository = new InMemorySignalRepository();
   const claim = "Shopify checkout now supports Shop Pay installments.";
   const first = await runAgent({
+    memoryParticipation: true,
     input: baseInput({ trackedEntities: "Shopify", currentQuestions: "Shopify checkout changes" }),
     context, repository, maxRounds: 1,
     research: async () => response([claimSignal("s1", claim)]),
   });
   assert.equal(first.knowledgeChanges[0]?.classification, "NEW");
   const second = await runAgent({
+    memoryParticipation: true,
     input: baseInput({ trackedEntities: "Shopify", currentQuestions: "Shopify checkout payment changes" }),
     context, repository, maxRounds: 1,
     research: async () => response([claimSignal("s2", claim)]),
@@ -206,6 +215,7 @@ test("unrelated question: another scope's research does not leak into this one's
   const other = { authenticatedUserId: "user-y", filterId: "filter-y" };
   repository.addPersonalKnowledge(other, { type: "KNOWN_INFORMATION", text: "ComfyUI video preview node released" } as never, "2026-10-02T00:00:00.000Z");
   const result = await runAgent({
+    memoryParticipation: true,
     input: baseInput({ trackedEntities: "ComfyUI", currentQuestions: "ComfyUI video preview changes" }),
     context, repository, maxRounds: 1,
     research: async () => response([claimSignal("comfy-follow", "ComfyUI video preview node released")]),
@@ -219,6 +229,7 @@ test("unrelated question: another scope's research does not leak into this one's
 test("no memory at all still researches normally without fabricating history", async () => {
   const repository = new InMemorySignalRepository();
   const result = await runAgent({
+    memoryParticipation: true,
     input: baseInput({ trackedEntities: "ComfyUI", currentQuestions: "ComfyUI video preview changes" }),
     context, repository, maxRounds: 1,
     research: async () => response([claimSignal("comfy-fresh", "ComfyUI video preview node released")]),

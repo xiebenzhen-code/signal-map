@@ -137,7 +137,7 @@ async function readFeed(feed: RegisteredFeed, reader: typeof readCustomSource, d
   }
 }
 
-export async function retrieveRegisteredFeeds(input: {entities: string[]; query: string; selectedSourceType?: string; allowed: boolean; deadlineAt?: number; reader?: typeof readCustomSource; cache?: FeedReadCache}) {
+export async function retrieveRegisteredFeeds(input: {entities: string[]; query: string; selectedSourceType?: string; allowed: boolean; deadlineAt?: number; reader?: typeof readCustomSource; cache?: FeedReadCache; excludedEntities?: string[]}) {
   const feeds = selectRegisteredFeeds(input);
   const items: ResearchCandidate[] = [];
   const outcomes: SourceExecutionOutcome[] = [];

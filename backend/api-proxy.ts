@@ -39,6 +39,38 @@ export function resolveApiUpstream(fallback?: string): string {
   return url.origin;
 }
 
+/**
+ * Browser-facing origin gate for the web service.
+ *
+ * The product deploys the web app and the Node API as separate services. The
+ * Node backend's own gate (auth/session.ts withSession) trusts only its
+ * configured origin, so forwarding the browser's web-domain Origin made every
+ * browser POST (research submit, saves, control writes) fail with 403 while
+ * GETs kept working — research could complete on the server while the page
+ * only reported failure.
+ *
+ * Origin enforcement now lives at the layer that actually talks to the
+ * browser: a POST is first-party when it is same-origin with the web service
+ * or carries the web service's configured origin. The upstream hop itself is
+ * server-to-server and carries no Origin at all.
+ */
+function webOriginCheck(request: Request): Response | null {
+  if (request.method !== "POST") return null;
+  const origin = request.headers.get("origin");
+  if (!origin) return null;
+  const requestOrigin = new URL(request.url).origin;
+  const configured = (globalThis.process as { env?: Record<string, string | undefined> } | undefined)
+    ?.env?.SIGNAL_MAP_ALLOWED_ORIGIN;
+  const trusted = new Set([requestOrigin, ...(configured ? [configured] : [])]);
+  if (!trusted.has(origin)) {
+    return Response.json(
+      { error: "Forbidden origin" },
+      { status: 403, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  return null;
+}
+
 export async function proxyApiRequest(
   request: Request,
   options: { upstream?: string; fetchFn?: ApiUpstreamFetch } = {},
@@ -51,11 +83,19 @@ export async function proxyApiRequest(
     upstreamUrl.pathname = url.pathname;
     upstreamUrl.search = url.search;
 
+    const forbidden = webOriginCheck(request);
+    if (forbidden) return forbidden;
+
     const headers = new Headers(request.headers);
     // fetch() sets host and content-length itself; forwarding the originals can
     // cause undici to reject the request or produce a mismatched body length.
     headers.delete("host");
     headers.delete("content-length");
+    // The upstream hop is server-to-server: never present the browser's Origin
+    // to the Node runtime, whose origin gate would reject a first-party web
+    // origin it does not know. Browser-origin enforcement happens in
+    // webOriginCheck above this hop.
+    headers.delete("origin");
 
     const hasBody = request.method !== "GET" && request.method !== "HEAD" && request.body !== null;
     const init: RequestInit = { method: request.method, headers, redirect: "manual" };

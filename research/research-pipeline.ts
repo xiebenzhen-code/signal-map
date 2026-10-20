@@ -153,19 +153,32 @@ export function normalizeRetrievalFreshness(value?: string): QueryPlan["requeste
 
 export function resolvePipelinePlan(input: ResearchInput, upstream?: RetrievalPlan | LegacySourceSelection): PipelinePlanResolution {
   const upstreamQueries = validRetrievalQueries(upstream);
+  // The derived plan is the exclusion source of truth: a per-question
+  // exclusion wins over any positive entity the agent plan may still carry.
+  const derivedPlan = planQuery(input);
+  const derivedExcludedEntities = derivedPlan.excludedEntities ?? [];
+  const derivedExcludedContentTypes = derivedPlan.excludedContentTypes ?? [];
   if (upstreamQueries.length && upstream && "queries" in upstream) {
-    const derivedPlan = planQuery(input);
     const resolvedEntities = upstream.resolvedEntities ?? [];
-    const entities = resolvedEntities.map((entity) => entity.canonicalEntity).filter(Boolean);
+    const isExcludedTerm = (value: string) => derivedExcludedEntities.some((entity) =>
+      value.toLocaleLowerCase().replace(/[\p{P}\p{S}\s]+/gu, "") === entity.toLocaleLowerCase().replace(/[\p{P}\p{S}\s]+/gu, ""));
+    const mentionsExcluded = (value: string) => derivedExcludedEntities.some((entity) => {
+      const escaped = entity.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(`(?:^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`, "iu").test(` ${value.toLocaleLowerCase()} `);
+    });
+    const cleanQueries = upstreamQueries.filter((query) => !mentionsExcluded(query));
+    const entities = resolvedEntities.map((entity) => entity.canonicalEntity).filter(Boolean)
+      .filter((entity) => !isExcludedTerm(entity));
     const aliasesConsidered = [...new Set(resolvedEntities.flatMap((entity) => entity.aliasesConsidered ?? []))];
     const requestedFreshnessWindow = normalizeRetrievalFreshness(upstream.freshnessWindow ?? input.freshnessWindow);
     return {
       fallbackUsed: false,
       retrievalPlanSource: "upstream_agent_plan",
-      agentGeneratedQueries: upstreamQueries,
+      agentGeneratedQueries: cleanQueries,
       plan: {
         originalNeed: input.currentQuestions?.trim() || input.industry,
-        coreKeywords: deterministicTerms([input.focusAreas, input.trackedEntities, input.currentQuestions, ...upstreamQueries]),
+        coreKeywords: deterministicTerms([input.focusAreas, input.trackedEntities, input.currentQuestions, ...cleanQueries])
+          .filter((term) => !isExcludedTerm(term)),
         topicAnchors: upstream.topicAnchors ?? derivedPlan.topicAnchors,
         topicKeywords: upstream.topicKeywords ?? derivedPlan.topicKeywords,
         topicProfile: upstream.topicProfile,
@@ -175,7 +188,7 @@ export function resolvePipelinePlan(input: ResearchInput, upstream?: RetrievalPl
         industryKeywords: derivedPlan.industryKeywords,
         changeKeywords: [],
         knowledgeAwareQueries: [],
-        searchCombinations: upstreamQueries,
+        searchCombinations: cleanQueries,
         retrievalWindows: upstream.retrievalWindows ?? [requestedFreshnessWindow],
         requestedFreshnessWindow,
         selectedSourceType: upstream.selectedSourceType,
@@ -184,20 +197,21 @@ export function resolvePipelinePlan(input: ResearchInput, upstream?: RetrievalPl
         sourceSelectionReason: upstream.reason,
         resolvedEntities,
         aliasesConsidered,
-        queryBudget: upstreamQueries.length,
-        deduplicatedQueryCount: upstreamQueries.length,
+        queryBudget: cleanQueries.length,
+        deduplicatedQueryCount: cleanQueries.length,
+        excludedEntities: derivedExcludedEntities,
+        excludedContentTypes: derivedExcludedContentTypes,
       },
     };
   }
 
   const legacy = upstream as LegacySourceSelection | undefined;
-  const fallbackPlan = planQuery(input);
   return {
     fallbackUsed: true,
     fallbackReason: upstream ? "upstream_plan_missing_valid_queries" : "upstream_plan_missing",
     retrievalPlanSource: "pipeline_fallback_plan",
     plan: {
-      ...fallbackPlan,
+      ...derivedPlan,
       selectedSourceType: legacy?.primarySourceType ?? legacy?.selectedSourceType,
       fallbackSourceTypes: legacy?.fallbackSourceTypes,
       allowedProviderIds: legacy?.allowedProviderIds,
@@ -1509,6 +1523,7 @@ export async function runResearchPipeline(
       ? discoverOfficialUpdatePages(plan.entities)
       : Promise.resolve({ items: [], outcome: { source: "Official Update Pages", execution: "not_searched" as const, blockedBy: "source_selection" as const, searched: false, resultCount: 0 }, failure: undefined }),
     retrieveRegisteredFeeds({entities: plan.entities, query: plan.originalNeed, selectedSourceType: plan.selectedSourceType,
+      excludedEntities: plan.excludedEntities,
       allowed: canExecute("registered-feeds"), reader: debug?.customSourceReader, deadlineAt: debug?.deadlineAt, cache: debug?.feedCache}),
   ]);
   const customCandidates: ResearchCandidate[] = [];

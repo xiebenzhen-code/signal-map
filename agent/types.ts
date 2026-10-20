@@ -215,6 +215,13 @@ export type AgentRunOptions = {
   /** @deprecated Alias of maxResearchRetrievalSlices. */
   maxResearchPlanAttempts?: number;
   availableSourceCapabilities?: SourceCapability[];
+  /**
+   * Auto-memory participation in this run (bounded closeout cycle 2026-10-20).
+   * Defaults to isolated: stored knowledge shapes planning, fact judgement and
+   * ranking only when this is true or SIGNAL_MAP_MEMORY_ISOLATION=participate.
+   * Writes and read-back are never affected.
+   */
+  memoryParticipation?: boolean;
   currentGoal?: { type?: string; objective?: string };
   modelAdapter?: {
     status: "configured" | "not_configured" | "error";

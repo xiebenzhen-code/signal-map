@@ -1,6 +1,66 @@
 import type { QueryPlan, ResearchInput, TopicProfile } from "./types";
 import { deduplicateQueries, resolveResearchEntities } from "./entity-resolution.ts";
 
+export type ExclusionTargets = {
+  /** Brand/company/product targets: fully excluded from positive planning. */
+  entities: string[];
+  /** Content-type targets ("营销文章", "marketing articles"): recorded, never
+   *  treated as an entity, and never allowed to remove a positive subject. */
+  contentTypes: string[];
+};
+
+// A per-question exclusion wins over the standing tracked-entity profile.
+const EXCLUSION_CLAUSE = /(?:排除|不包含|不包括|不要|避免|剔除|exclude|excluding|avoid)\s*([^，,。；;.!！？?\n]*)/giu;
+const EXCLUSION_TAIL = /(其他|其它|等等|无关|之类|相关)/u;
+const EXCLUSION_TAIL_HEAD = /^(其他|其它|等|等等|相关|无关|类型|任何)/u;
+const BARE_CONTENT_NOUN = /^(产品|内容|文章|信息|新闻|来源|话题|主题)$/u;
+
+const exclusionKey = (value: string) => value.toLocaleLowerCase().replace(/[\p{P}\p{S}\s]+/gu, "");
+
+function exclusionTargets(value: string): string[] {
+  return value
+    .split(/[、，,；;/]|和|与|及|或者?|\s+and\s+/iu)
+    .map((target) => target.trim().replace(/^[的和与及或]+|[的和与及或]+$/gu, "").trim())
+    .filter(Boolean);
+}
+
+/**
+ * Parses per-question exclusion clauses ("排除 Shopify 及其他无关产品",
+ * "exclude marketing articles"). Brand-like targets (contain latin letters or
+ * digits) become excluded entities; CJK-only phrases become content-type
+ * exclusions so "排除营销文章" never removes the positive subject and never
+ * fabricates a negative entity. Quantifier tails ("及其他无关产品") are
+ * dropped entirely. Known limitation: a CJK company name that is not present
+ * in the latin-only company registry is classified as a content type.
+ */
+export function parseExclusions(text: string): ExclusionTargets {
+  const entities: string[] = [];
+  const contentTypes: string[] = [];
+  for (const match of String(text ?? "").matchAll(EXCLUSION_CLAUSE)) {
+    for (const target of exclusionTargets(match[1] ?? "")) {
+      if (!target || target.length > 24) continue;
+      if (EXCLUSION_TAIL_HEAD.test(target) || EXCLUSION_TAIL.test(target)) continue;
+      if (BARE_CONTENT_NOUN.test(target)) continue;
+      if (/[A-Za-z0-9]/.test(target)) entities.push(target);
+      else contentTypes.push(target);
+    }
+  }
+  return { entities: [...new Set(entities)], contentTypes: [...new Set(contentTypes)] };
+}
+
+function sameExcludedEntity(value: string, excluded: string[]) {
+  const key = exclusionKey(value);
+  return excluded.some((entity) => exclusionKey(entity) === key);
+}
+
+function mentionsExcludedEntity(value: string, excluded: string[]) {
+  const normalized = ` ${String(value ?? "").toLocaleLowerCase()} `;
+  return excluded.some((entity) => {
+    const escaped = entity.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(?:^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`, "iu").test(normalized);
+  });
+}
+
 const expansions: Array<{
   test: RegExp;
   english: string[];
@@ -402,6 +462,12 @@ export function planQuery(input: ResearchInput): QueryPlan {
   const entityScope = entityText(input);
   const matched = expansions.filter((item) => item.test.test(originalNeed));
   const industryTerm = searchTermSource(input.industry);
+  const exclusions = parseExclusions(originalNeed);
+  const excludedEntities = exclusions.entities;
+  // The entity-scope text keeps its exclusion clauses for display fields, but
+  // entity/keyword extraction must never read an excluded brand as a subject.
+  const entityScopeClean = stripInstructionClauses(entityScope);
+  const originalNeedClean = stripInstructionClauses(originalNeed);
     // Instruction clauses ("围绕…寻找有证据支持的新变化") describe how to search,
   // not what to search for. They must not become retrieval keywords. Baseline
   // only avoided them by accident: the generic labels happened to fill the
@@ -417,20 +483,25 @@ export function planQuery(input: ResearchInput): QueryPlan {
   ], 10);
   const englishKeywords = unique(
     matched.flatMap((item) => item.english).concat(
-      originalNeed.match(/\b[A-Za-z][A-Za-z0-9.-]{1,}\b/g) || [],
+      (originalNeedClean.match(/\b[A-Za-z][A-Za-z0-9.-]{1,}\b/g) || [])
+        .filter((keyword) => !sameExcludedEntity(keyword, excludedEntities)),
     ),
   );
   const topicAnchors = topicAnchorsFor(input);
-  const topicKeywords = topicKeywordsFor(input, englishKeywords, topicAnchors);
+  const topicKeywords = topicKeywordsFor(input, englishKeywords, topicAnchors)
+    .filter((keyword) => !sameExcludedEntity(keyword, excludedEntities));
   const topicProfile = topicProfileFor(input, topicAnchors, topicKeywords);
   const synonyms = unique(matched.flatMap((item) => item.synonyms));
   const entities = unique([
     ...tokens(input.trackedEntities),
-    ...(entityScope.match(/\b[A-Z][A-Za-z0-9.-]{1,}\b/g) || []),
-    ...(entityScope.match(/[“「『\"]([^”」』\"]{2,})[”」』\"]/g) || []).map(
+    ...(entityScopeClean.match(/\b[A-Z][A-Za-z0-9.-]{1,}\b/g) || []),
+    ...(entityScopeClean.match(/[“「『\"]([^”」』\"]{2,})[”」』\"]/g) || []).map(
       (item) => item.replace(/[“”「」『』\"]/g, ""),
     ),
-  ]).filter(validEntityCandidate);
+  ])
+    .filter(validEntityCandidate)
+    // A per-question exclusion removes the entity even from trackedEntities.
+    .filter((entity) => !sameExcludedEntity(entity, excludedEntities));
   const resolvedEntities = resolveResearchEntities({ entities, query: originalNeed });
   const aliasesConsidered = unique(resolvedEntities.flatMap((entity) => entity.aliasesConsidered));
   const knownSubjects = knownEntitySubjects(input.knownInformation, entities);
@@ -481,11 +552,11 @@ export function planQuery(input: ResearchInput): QueryPlan {
     ...coreKeywords.slice(0, 4).flatMap((keyword) =>
       englishKeywords.slice(0, 3).map((english) => `${keyword} ${english}`),
     ),
-  ], resolvedEntities, 24);
+  ].filter((query) => !mentionsExcludedEntity(query, excludedEntities)), resolvedEntities, 24);
 
   return {
     originalNeed,
-    coreKeywords,
+    coreKeywords: coreKeywords.filter((keyword) => !sameExcludedEntity(keyword, excludedEntities)),
     topicAnchors,
     topicKeywords,
     topicProfile,
@@ -500,6 +571,8 @@ export function planQuery(input: ResearchInput): QueryPlan {
     requestedFreshnessWindow: normalizeFreshnessWindow(input.freshnessWindow),
     resolvedEntities,
     aliasesConsidered,
+    excludedEntities,
+    excludedContentTypes: exclusions.contentTypes,
     queryBudget: 24,
     deduplicatedQueryCount: searchCombinations.length,
   };

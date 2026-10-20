@@ -34,7 +34,8 @@ export type TopicRelevanceReason =
   | "NO_QUERY_TERM_MATCH"
   | "NO_TASK_CONSTRAINT_MATCH"
   | "UNCERTAIN_TASK_CONSTRAINT"
-  | "NO_TOPIC_TERMS";
+  | "NO_TOPIC_TERMS"
+  | "EXCLUDED_ENTITY";
 
 export type TopicProfile = {
   domainAnchors: string[];
@@ -119,6 +120,13 @@ export type QueryPlan = {
   aliasesConsidered?: string[];
   queryBudget?: number;
   deduplicatedQueryCount?: number;
+  /** Brand/company targets the question explicitly excludes ("排除 Shopify").
+   *  Never positive subjects, never retrieval terms, never admissible answers;
+   *  excludes a positive tracked entity when both are declared. */
+  excludedEntities?: string[];
+  /** Content-type exclusions ("排除营销文章"): recorded for audit, never
+   *  treated as entities, never remove a positive subject. */
+  excludedContentTypes?: string[];
 };
 
 export type RetrievalPlan = {

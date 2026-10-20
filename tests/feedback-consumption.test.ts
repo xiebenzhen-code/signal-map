@@ -46,6 +46,7 @@ async function run(options: {
   let audits: CandidateSelectionAudit[] = [];
   try {
     const result = await runAgent({
+      memoryParticipation: true,
       input: { ...input, ...options.draft }, repository, context, maxRounds: 1,
       modelAdapter: { status: "not_configured", planResearch: async () => ({ status: "not_configured" }) },
       research: async (assembled) => {

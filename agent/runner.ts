@@ -9,6 +9,7 @@ import { persistResearchRecords, updateKnowledgeFromChanges } from "./knowledge-
 import { createResearchPlan } from "./query-planner.ts";
 import { planQuery } from "../research/query-planner.ts";
 import { selectRelatedKnowledge } from "./memory-selection.ts";
+import { memoryParticipates } from "./memory-isolation.ts";
 import { ResearchRunState, mergeRoundAttempts, type EvidencePreservationSnapshot } from "./research-run-state.ts";
 import { toRetrievalPlan } from "./retrieval-plan.ts";
 import { chooseResearchStrategy } from "./research-policy.ts";
@@ -423,8 +424,15 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     plan: selectionPlan,
   });
   const finalRelatedKnowledge = taskSelection.selected.map((record) => record.text);
+  // Bounded-cycle isolation: auto-memory shapes planning, fact judgement and
+  // ranking only when participation is explicitly restored. Selection is still
+  // computed (and traced) so the record-level audit trail stays intact, and
+  // knowledge writes below are never gated by this switch.
+  const memoryOn = memoryParticipates(options);
+  const effectiveKnowledge = memoryOn ? finalRelatedKnowledge : [];
   add("RETRIEVE", "completed", {
     query: memoryQuestion,
+    memoryIsolated: !memoryOn,
     storedRecords: knownFactRecords.length,
     subject: {
       selected: subjectDiagnostics.filter((entry) => entry.selected),
@@ -438,7 +446,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
   const intent = classifyIntent({
     userQuery: (options.userQuery ?? options.input.currentQuestions) || options.input.industry,
     filterContext: options.input,
-    relatedKnowledge: finalRelatedKnowledge,
+    relatedKnowledge: effectiveKnowledge,
     currentGoal: options.currentGoal,
   });
   const sourceProfile = sourceProfileForIntent(intent.primaryIntent);
@@ -446,26 +454,29 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
 
   const researchInput = {
     ...options.input,
-    knownInformation: appendLines(options.input.knownInformation, finalRelatedKnowledge),
-    userJudgements: appendLines(options.input.userJudgements, judgementRecords.map((record) =>
-      /^\s*(?:Not useful|Changed after evidence)\s*:/i.test(record.text)
-        ? record.text.replace(/\s*\r?\n\s*/g, " ")
-        : record.text)),
-    trackedEntities: appendLines(options.input.trackedEntities, trackedEntityRecords.map((record) => record.text)),
-    trackedEvents: appendLines(options.input.trackedEvents, trackedEventRecords.map((record) => record.text)),
+    knownInformation: appendLines(options.input.knownInformation, effectiveKnowledge),
+    userJudgements: memoryOn
+      ? appendLines(options.input.userJudgements, judgementRecords.map((record) =>
+        /^\s*(?:Not useful|Changed after evidence)\s*:/i.test(record.text)
+          ? record.text.replace(/\s*\r?\n\s*/g, " ")
+          : record.text))
+      : options.input.userJudgements,
+    trackedEntities: memoryOn ? appendLines(options.input.trackedEntities, trackedEntityRecords.map((record) => record.text)) : options.input.trackedEntities,
+    trackedEvents: memoryOn ? appendLines(options.input.trackedEvents, trackedEventRecords.map((record) => record.text)) : options.input.trackedEvents,
   };
   const generatedFromRevision = options.context && options.repository
     ? await Promise.resolve(options.repository.getResearchContextRevision(options.context))
     : options.initialRevision ?? 1;
   // Strategy depends on whether any memory actually survived selection, not on
   // how many records the repository holds: an unrelated off-task memory must
-  // not force a REFRESH when nothing relevant is present.
-  const bootstrapStrategy: ResearchStrategy = finalRelatedKnowledge.length > 0 ? "REFRESH" : "INITIAL";
+  // not force a REFRESH when nothing relevant is present. Under isolation no
+  // memory participates, so the bootstrap is always INITIAL.
+  const bootstrapStrategy: ResearchStrategy = effectiveKnowledge.length > 0 ? "REFRESH" : "INITIAL";
   // The final plan is built after both selection levels, so excluded memories
   // never shape the initial queries: knownInformation (and therefore
   // knowledgeAwareQueries / searchCombinations) reflects only what survived
   // selection.
-  let plan = createResearchPlan(researchInput, 1, maxQueries, finalRelatedKnowledge, bootstrapStrategy, undefined, intent, sourceProfile);
+  let plan = createResearchPlan(researchInput, 1, maxQueries, effectiveKnowledge, bootstrapStrategy, undefined, intent, sourceProfile);
   markPhase("source_selection_started");
   const bootstrapSelection = selectSource({
     strategy: bootstrapStrategy,
@@ -502,7 +513,9 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
   let allKnowledgeChanges: AgentRunResult["knowledgeChanges"] = [];
   let allEvidenceIds: string[] = [];
   let previousSourceOutcomes: SourceOutcome[] = [];
-  let previousStrategies: ResearchStrategy[] = (previousRun?.strategies ?? []).filter((strategy): strategy is ResearchStrategy => [
+  // Cross-run strategy memory is part of auto-memory participation: isolated
+  // runs start every round without inheriting the previous run's strategies.
+  let previousStrategies: ResearchStrategy[] = (memoryOn ? previousRun?.strategies ?? [] : []).filter((strategy): strategy is ResearchStrategy => [
     "STOP", "REFRESH", "DEEPEN", "BROADEN", "ESCALATE_SOURCE", "VERIFY_CONFLICT", "INITIAL",
   ].includes(strategy));
   let rounds = 0;
@@ -669,7 +682,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       plan,
       adapter: options.modelAdapter,
       userQuery: (options.userQuery ?? options.input.currentQuestions) || options.input.industry,
-      relatedKnowledge: finalRelatedKnowledge,
+      relatedKnowledge: effectiveKnowledge,
       previousQueries: [],
       round: 1,
       timeoutMs: budget.modelPlanningTimeoutMs(),
@@ -1023,9 +1036,11 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     cumulativeResponse.outputMode = sourceProfile.outputMode;
     cumulativeResponse.intentOutput = mapIntentOutput(cumulativeResponse, sourceProfile);
     response = cumulativeResponse;
-    reconcileInformationGain(response, persistedKnowledge, persistedEvidence);
+    reconcileInformationGain(response, memoryOn ? persistedKnowledge : [], memoryOn ? persistedEvidence : []);
     for (const signal of response.signals) reconcileAttentionDecision(signal);
-    applyAttentionPreferences(response, userPreferences);
+    // Attention preferences are stored state ranking this run's output: they
+    // participate only when memory participation is explicitly restored.
+    applyAttentionPreferences(response, memoryOn ? userPreferences : []);
     add("RESEARCH", "completed", { round }, {
       signals: response.signals.length,
       dataMode: response.dataMode,
@@ -1045,7 +1060,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       ? "stale" : response.signals.length > 0 ? "fresh" : "unknown";
     const policyInput = {
       currentEvidence: response,
-      relatedKnowledge: finalRelatedKnowledge,
+      relatedKnowledge: effectiveKnowledge,
       conflictState: evaluation,
       sourceCoverage: response.coverage,
       freshnessState,
@@ -1104,8 +1119,11 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
         response,
         researchInput.knownInformation,
         generatedFromRevision,
-        persistedKnowledge,
-        persistedEvidence,
+        // Persisted knowledge/evidence identity decides DUPLICATE vs NEW here.
+        // Under isolation the run judges novelty against what the user
+        // supplied for THIS question only; write paths below are unchanged.
+        memoryOn ? persistedKnowledge : [],
+        memoryOn ? persistedEvidence : [],
       );
       const finalAttention = !evaluation.sufficientEvidence || evaluation.conflictDetected
         ? []
@@ -1185,7 +1203,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
         skippedNextRoundDueToBudget: true,
       }));
     }
-    plan = createResearchPlan(researchInput, round + 1, maxQueries, finalRelatedKnowledge, policy.strategy, sourceSelection, intent, sourceProfile);
+    plan = createResearchPlan(researchInput, round + 1, maxQueries, effectiveKnowledge, policy.strategy, sourceSelection, intent, sourceProfile);
     const nextPlanningBudget = budget.snapshot();
     markPhase("budget_checked", true, runState.cumulativeEvidenceCount, undefined, budgetDiagnostics(nextPlanningBudget, {
       round: round + 1,
@@ -1197,7 +1215,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
           plan,
           adapter: options.modelAdapter,
           userQuery: (options.userQuery ?? options.input.currentQuestions) || options.input.industry,
-          relatedKnowledge: finalRelatedKnowledge,
+          relatedKnowledge: effectiveKnowledge,
           previousQueries: plan.queries,
           round: round + 1,
           timeoutMs: budget.modelPlanningTimeoutMs(),

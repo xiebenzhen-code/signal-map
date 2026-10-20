@@ -28,9 +28,16 @@ function contains(text: string, term: string) {
   return /[\u3400-\u9fff]/u.test(term) ? text.includes(term) : new RegExp(`(?:^|[^a-z0-9])${escaped}(?=$|[^a-z0-9])`, "i").test(text);
 }
 
-export function selectRegisteredFeeds(input: {entities: string[]; query: string; selectedSourceType?: string}): RegisteredFeed[] {
+const feedKey = (value: string) => value.toLocaleLowerCase().replace(/[\p{P}\p{S}\s]+/gu, "").trim();
+
+export function selectRegisteredFeeds(input: {entities: string[]; query: string; selectedSourceType?: string; excludedEntities?: string[]}): RegisteredFeed[] {
+  const excluded = (input.excludedEntities ?? []).map(feedKey).filter(Boolean);
   const text = `${input.entities.join(" ")} ${input.query}`.toLowerCase();
-  const available = registeredFeeds.filter(feed => !["OFFICIAL", "PRIMARY"].includes(input.selectedSourceType ?? "") || feed.official);
+  // A publisher the question explicitly excluded ("排除 Shopify") is removed
+  // from source selection: exclusion must apply before discovery, not only at
+  // admission, so its feed is never even fetched.
+  const available = registeredFeeds.filter(feed => !["OFFICIAL", "PRIMARY"].includes(input.selectedSourceType ?? "") || feed.official)
+    .filter(feed => !excluded.some(entity => feed.aliases.some(alias => feedKey(alias) === entity)));
   const exact = available.filter(feed => feed.aliases.some(alias => contains(text, alias)));
   // Named publishers outrank broad subject matches. An unknown question never selects the entire catalogue.
   return (exact.length ? exact : available.filter(feed => feed.topics.some(topic => contains(text, topic)))).slice(0, 3);

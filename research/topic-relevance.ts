@@ -96,7 +96,23 @@ function meaningful(term: string) {
   return term.length >= 2;
 }
 
+function excludedEntitiesOf(plan: QueryPlan): string[] {
+  return [...new Set((plan.excludedEntities ?? []).map((value) => normalize(value)).filter(Boolean))];
+}
+
+function isExcludedEntityTerm(term: string, excluded: string[]) {
+  if (!excluded.length) return false;
+  const normalized = normalize(term);
+  return excluded.some((entity) => entity === normalized);
+}
+
+function excludedEntityMatches(text: string, excluded: string[]) {
+  if (!excluded.length) return false;
+  return excluded.some((entity) => matches(text, entity));
+}
+
 function topicTerms(plan: QueryPlan) {
+  const excluded = excludedEntitiesOf(plan);
   const values = [
     plan.originalNeed,
     ...plan.coreKeywords,
@@ -109,9 +125,12 @@ function topicTerms(plan: QueryPlan) {
   const terms = new Set<string>();
   for (const value of values) {
     const normalized = normalize(value);
-    if (meaningful(normalized)) terms.add(normalized);
+    // An excluded brand ("排除 Shopify") must never become a topic term: the
+    // exclusion clause lives in the question text and would otherwise match
+    // the very material the user asked to exclude.
+    if (meaningful(normalized) && !isExcludedEntityTerm(normalized, excluded)) terms.add(normalized);
     for (const token of normalized.split(" ")) {
-      if (meaningful(token)) terms.add(token);
+      if (meaningful(token) && !isExcludedEntityTerm(token, excluded)) terms.add(token);
     }
   }
   return [...terms].sort((left, right) => right.length - left.length);
@@ -478,45 +497,55 @@ export function assessTopicRelevance(text: string, plan: QueryPlan): TopicReleva
     .filter((term) => term && matches(normalizedText, term));
   const matchedTerms = [...new Set([...matchedDomainAnchors, ...matchedTaskAnchors])];
   const matchedQueryTerms = topicTerms(plan).filter((term) => matches(normalizedText, term));
+  // Explicit profile path: excluded brands never contribute anchors.
+  const excluded = excludedEntitiesOf(plan);
+  const cleanDomainAnchors = matchedDomainAnchors.filter((term) => !isExcludedEntityTerm(term, excluded));
+  const cleanTaskAnchors = matchedTaskAnchors.filter((term) => !isExcludedEntityTerm(term, excluded));
   if (explicit) {
     const hasDomainAnchors = profile.domainAnchors.length > 0;
     const hasTaskAnchors = profile.taskAnchors.length > 0;
-    const domainMatch = matchedDomainAnchors.length > 0;
+    const domainMatch = cleanDomainAnchors.length > 0;
     const taskTextStem = taskConceptStem(normalizedText);
     const variantTaskMatch = profile.taskAnchors.some((anchor) => {
       const stem = taskConceptStem(normalize(anchor));
       return Boolean(stem) && matchesTaskVariant(taskTextStem, stem);
     });
-    const taskMatch = matchedTaskAnchors.length > 0 || variantTaskMatch;
-    const distinctAnchorMatch = matchedDomainAnchors.some((domain) =>
-      matchedTaskAnchors.some((task) => domain !== task),
+    const taskMatch = cleanTaskAnchors.length > 0 || variantTaskMatch;
+    const distinctAnchorMatch = cleanDomainAnchors.some((domain) =>
+      cleanTaskAnchors.some((task) => domain !== task),
     ) || (domainMatch && variantTaskMatch);
-    const decision = hasDomainAnchors && hasTaskAnchors && domainMatch && taskMatch && distinctAnchorMatch
-      ? "MATCH"
-      : "TOPIC_MISMATCH";
-    const reason: TopicRelevanceReason = !hasDomainAnchors
-      ? "MISSING_DOMAIN_ANCHOR"
-      : !hasTaskAnchors
-        ? "MISSING_TASK_ANCHOR"
-        : !domainMatch
-          ? "MISSING_DOMAIN_ANCHOR"
-          : !taskMatch
-            ? "MISSING_TASK_ANCHOR"
-            : !distinctAnchorMatch
-              ? "NO_DOMAIN_OR_TASK_ANCHOR_MATCH"
-              : "DOMAIN_AND_TASK_ANCHOR_MATCH";
+    // Material whose only anchors are excluded brands is excluded material.
+    const onlyExcludedAnchors = (matchedDomainAnchors.length + matchedTaskAnchors.length) > 0 &&
+      cleanDomainAnchors.length === 0 && cleanTaskAnchors.length === 0;
+    const decision = onlyExcludedAnchors ? "TOPIC_MISMATCH"
+      : hasDomainAnchors && hasTaskAnchors && domainMatch && taskMatch && distinctAnchorMatch
+        ? "MATCH"
+        : "TOPIC_MISMATCH";
+    const reason: TopicRelevanceReason = onlyExcludedAnchors
+      ? "EXCLUDED_ENTITY"
+      : !hasDomainAnchors
+        ? "MISSING_DOMAIN_ANCHOR"
+        : !hasTaskAnchors
+          ? "MISSING_TASK_ANCHOR"
+          : !domainMatch
+            ? "MISSING_DOMAIN_ANCHOR"
+            : !taskMatch
+              ? "MISSING_TASK_ANCHOR"
+              : !distinctAnchorMatch
+                ? "NO_DOMAIN_OR_TASK_ANCHOR_MATCH"
+                : "DOMAIN_AND_TASK_ANCHOR_MATCH";
     return {
       decision,
       reason,
-      matchedTerms,
-      matchedDomainAnchors,
-      matchedTaskAnchors,
+      matchedTerms: matchedTerms.filter((term) => !isExcludedEntityTerm(term, excluded)),
+      matchedDomainAnchors: cleanDomainAnchors,
+      matchedTaskAnchors: cleanTaskAnchors,
       matchedGenericTerms,
-      matchedQueryTerms,
+      matchedQueryTerms: matchedQueryTerms.filter((term) => !isExcludedEntityTerm(term, excluded)),
       relevanceGateApplied: true,
       relevanceGatePassed: decision === "MATCH",
       score: decision === "MATCH"
-        ? Math.min(100, 70 + matchedTerms.length * 10)
+        ? Math.min(100, 70 + cleanDomainAnchors.length * 10)
         : 0,
     };
   }
@@ -526,6 +555,10 @@ export function assessTopicRelevance(text: string, plan: QueryPlan): TopicReleva
     [entity.canonicalEntity, ...entity.aliasesConsidered])].map(normalize).filter(meaningful);
   const hasEntityMatch = entities.some((term) => matches(normalizedText, term));
   const hasTopicTerms = terms.length > 0;
+  const hasExcludedEntityMatch = excludedEntityMatches(normalizedText, excluded);
+  // Material about an explicitly excluded brand (and only that brand) is
+  // excluded material, regardless of generic task terms it may share.
+  const excludedOnlyMatch = hasExcludedEntityMatch && !hasEntityMatch;
   // Task gate: evidence must be on the task the question asked about, not just
   // the tracked entity. Constraints bridge languages through concept groups, so
   // a Chinese constraint still admits an English body naming the same concept
@@ -546,7 +579,9 @@ export function assessTopicRelevance(text: string, plan: QueryPlan): TopicReleva
   const subjectSatisfied = !entities.length || hasEntityMatch;
   const topicSatisfied = !hasTopicTerms || legacyMatchedTerms.length > 0;
   let decision: TopicRelevanceDecision;
-  if (!subjectSatisfied || !topicSatisfied) {
+  if (excludedOnlyMatch) {
+    decision = "TOPIC_MISMATCH";
+  } else if (!subjectSatisfied || !topicSatisfied) {
     decision = "TOPIC_MISMATCH";
   } else if (taskConstraints.length === 0) {
     // No constraint survived extraction. This is either an explicit open
@@ -564,15 +599,17 @@ export function assessTopicRelevance(text: string, plan: QueryPlan): TopicReleva
   }
   return {
     decision,
-    reason: decision === "TOPIC_MISMATCH" && taskConstraints.length > 0
-      ? "NO_TASK_CONSTRAINT_MATCH"
-      : decision === "UNCERTAIN"
-        ? "UNCERTAIN_TASK_CONSTRAINT"
-        : !hasTopicTerms
-          ? "NO_TOPIC_TERMS"
-          : legacyMatchedTerms.length
-            ? "LEGACY_QUERY_TERM_MATCH"
-            : "NO_QUERY_TERM_MATCH",
+    reason: excludedOnlyMatch
+      ? "EXCLUDED_ENTITY"
+      : decision === "TOPIC_MISMATCH" && taskConstraints.length > 0
+        ? "NO_TASK_CONSTRAINT_MATCH"
+        : decision === "UNCERTAIN"
+          ? "UNCERTAIN_TASK_CONSTRAINT"
+          : !hasTopicTerms
+            ? "NO_TOPIC_TERMS"
+            : legacyMatchedTerms.length
+              ? "LEGACY_QUERY_TERM_MATCH"
+              : "NO_QUERY_TERM_MATCH",
     matchedTerms: legacyMatchedTerms,
     matchedDomainAnchors,
     matchedTaskAnchors,

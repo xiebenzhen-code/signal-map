@@ -59,7 +59,14 @@ test("production mode does not unconditionally trust localhost origins", async (
   }
 });
 
-test("proxyApiRequest forwards browser origin to the backend", async () => {
+test("the web proxy does not forward the browser Origin to the Node upstream", async () => {
+  // Contract change (2026-10-20): the web app and the Node API deploy as
+  // separate services. The Node backend's withSession gate trusts only its own
+  // configured origin, so a forwarded web-domain Origin made every browser
+  // POST fail 403 while GETs kept working (research completed server-side, the
+  // page only reported failure). The upstream hop is server-to-server and
+  // carries no Origin; browser-origin enforcement lives at the web edge
+  // (tests/web-edge-origin.test.ts).
   const { proxyApiRequest } = await import("../backend/api-proxy.ts");
   const seenHeaders: Record<string, string> = {};
   const fakeUpstream = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -71,6 +78,7 @@ test("proxyApiRequest forwards browser origin to the backend", async () => {
     headers: { "Content-Type": "application/json", "Origin": "http://localhost:3000" },
     body: JSON.stringify({}),
   });
-  await proxyApiRequest(request, { upstream: "http://127.0.0.1:8080", fetchFn: fakeUpstream });
-  assert.equal(seenHeaders["origin"] ?? seenHeaders["Origin"], "http://localhost:3000", "proxy must forward browser origin");
+  const response = await proxyApiRequest(request, { upstream: "http://127.0.0.1:8080", fetchFn: fakeUpstream });
+  assert.equal(response.status, 400, "same-origin browser POST must reach the upstream");
+  assert.equal(seenHeaders["origin"] ?? seenHeaders["Origin"], undefined, "proxy must not forward the browser origin");
 });

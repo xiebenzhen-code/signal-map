@@ -51,6 +51,7 @@ test("RED: real runner assembly keeps KNOWN_INFORMATION in knownInformation and 
 
   let capturedKnownInformation: string | undefined;
   const result = await runAgent({
+    memoryParticipation: true,
     input: { ...baseInput, trackedEntities: "Codex" },
     context: ctx,
     repository,
@@ -78,6 +79,9 @@ test("RED: runner assembly is scoped by account (A's records never enter B's res
   );
   let capturedKnownInformation: string | undefined;
   await runAgent({
+    // This file pins the auto-memory participation contract; the production
+    // default is isolated (bounded closeout cycle 2026-10-20).
+    memoryParticipation: true,
     input: { ...baseInput, trackedEntities: "Codex" },
     context: { authenticatedUserId: "sem-user-a", filterId: "account-sem-user-a" },
     repository,

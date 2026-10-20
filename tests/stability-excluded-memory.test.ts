@@ -77,6 +77,7 @@ test("A: an off-task same-entity memory stays out of context, queries, and model
   const captured: { contexts: string[]; queries: string[]; modelInputs: string[][] } =
     { contexts: [], queries: [], modelInputs: [] };
   const result = await runAgent({
+    memoryParticipation: true,
     input: baseInput(),
     userQuery: "Shopify checkout payment changes",
     context, repository, maxRounds: 1,
@@ -116,6 +117,7 @@ test("B: a genuinely related memory is selected and consumed everywhere", async 
   const captured: { contexts: string[]; modelInputs: string[][]; strategies: string[] } =
     { contexts: [], modelInputs: [], strategies: [] };
   const result = await runAgent({
+    memoryParticipation: true,
     input: baseInput(),
     userQuery: "Shopify checkout payment changes",
     context, repository, maxRounds: 1,
@@ -148,6 +150,7 @@ test("C: a fallback attempt still receives only the final selection", async () =
   let calls = 0;
   const contexts: string[] = [];
   const result = await runAgent({
+    memoryParticipation: true,
     input: baseInput(),
     userQuery: "Shopify checkout payment changes",
     context, repository, maxRounds: 1,
@@ -171,6 +174,7 @@ test("C2: a later round's plan is rebuilt from the final selection only", async 
   const queries: string[] = [];
   const strategies: string[] = [];
   const result = await runAgent({
+    memoryParticipation: true,
     input: baseInput(),
     userQuery: "Shopify checkout payment changes",
     context, repository, maxRounds: 2,
@@ -204,6 +208,7 @@ test("D: the persisted RETRIEVE trace matches the final selection, not a snapsho
   const excluded = seed(repository, `Shopify 安全扫描功能上线 ${MARKER}`);
   const related = seed(repository, "Shopify checkout adds support for Shop Pay installments");
   const result = await runAgent({
+    memoryParticipation: true,
     input: baseInput(),
     userQuery: "Shopify checkout payment changes",
     context, repository, maxRounds: 1,

@@ -26,7 +26,9 @@ test("compression: real Node fetch removes decoded encoding/length and preserves
   let calls = 0;
   const upstream = createServer((req, res) => {
     calls++;
-    assert.equal(req.headers.origin, publicOrigin);
+    // Server-to-server hop: the browser Origin is enforced at the web edge
+    // (webOriginCheck) and must never reach the Node runtime.
+    assert.equal(req.headers.origin, undefined);
     const url = new URL(req.url, "http://fixture.invalid");
     const coding = url.searchParams.get("coding");
     const body = codecs[coding](fixture);
@@ -303,7 +305,9 @@ test("real HTTP preserves separated chunk/expiry/deletion cookies, statuses and 
     assert.equal(req.url, "/echo?query=%2F");
     assert.equal(req.headers.cookie, "session.0=first; session.1=second");
     assert.equal(req.headers.authorization, "Bearer fixture-only");
-    assert.equal(req.headers.origin, "https://signal.benzhenlab.com");
+    // Server-to-server hop: the browser Origin stays at the web edge and is
+    // never presented to the Node runtime.
+    assert.equal(req.headers.origin, undefined);
     let body = ""; for await (const chunk of req) body += chunk;
     assert.equal(body, '{"fixture":true}');
     res.writeHead(429, { "Set-Cookie": cookies, "Content-Type": "application/json" });

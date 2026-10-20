@@ -1117,12 +1117,28 @@ export default function HomePage() {
         allowDemoFallback: false,
         runLive: async () => {
           const { url, ...requestInit } = createResearchRequest(state);
-          researchObservation.current?.request(new Headers(requestInit.headers).get("X-Signal-Map-Request-Id") ?? "");
-          const request = await fetch(url, requestInit);
+          const clientRequestId = new Headers(requestInit.headers).get("X-Signal-Map-Request-Id") ?? "";
+          researchObservation.current?.request(clientRequestId);
+          let request: Response;
+          try {
+            request = await fetch(url, requestInit);
+          } catch {
+            // Network-level failure (connection reset, gateway cut the
+            // response): never a research verdict. Say so, with the request id
+            // so the run can be traced on the server side.
+            throw Object.assign(
+              new Error(`无法连接研究服务（网络错误）${clientRequestId ? `，请求编号：${clientRequestId}` : ""}`),
+              { status: 0 },
+            );
+          }
           if (!request.ok) {
             const body = await request.json().catch(() => null) as { error?: string; reason?: string } | null;
-            const message = body?.reason || body?.error || "Live Web 暂时不可用";
-            throw Object.assign(new Error(message), { status: request.status });
+            const message = body?.reason || body?.error || `研究服务返回异常（HTTP ${request.status}）`;
+            // The server (or an opaque gateway page) is the only place a
+            // requestId exists when the body is not JSON: surface it so the
+            // failure is traceable instead of a bare generic message.
+            const traceId = request.headers.get("X-Signal-Map-Request-Id") || clientRequestId;
+            throw Object.assign(new Error(traceId ? `${message}，请求编号：${traceId}` : message), { status: request.status });
           }
           return (await request.json()) as InformationRunPayload;
         },

@@ -624,6 +624,7 @@ test("the first evidence is NEW_INFORMATION and an identical second run is dedup
   });
 
   const first = await runAgent({
+    memoryParticipation: true,
     input, context: { ...context, filterId: "filter-dedup-first" }, repository, maxRounds: 1,
     research: async () => response([evidence("https://example.com/video-tool", "Video tool supports batch processing")]),
   });
@@ -631,6 +632,7 @@ test("the first evidence is NEW_INFORMATION and an identical second run is dedup
   assert.equal(first.knowledgeChanges[0]?.classification, "NEW");
 
   const second = await runAgent({
+    memoryParticipation: true,
     input, context: { ...context, filterId: "filter-dedup-first" }, repository, maxRounds: 1,
     research: async () => response([evidence("https://example.com/video-tool", "Video tool supports batch processing")]),
   });
@@ -663,11 +665,13 @@ test("the same source with a changed claim is UPDATED_INFORMATION and advances K
   });
 
   await runAgent({
+    memoryParticipation: true,
     input, context: runContext, repository, maxRounds: 1,
     research: async () => response([makeEvidence("Video tool supports batch processing")]),
   });
   const beforeRevision = repository.getResearchContextRevision(runContext);
   const updated = await runAgent({
+    memoryParticipation: true,
     input, context: runContext, repository, maxRounds: 1,
     research: async () => response([makeEvidence("Video tool supports batch processing with multi-clip understanding")]),
   });
@@ -699,10 +703,12 @@ test("an equivalent claim from a different URL does not create a duplicate Knowl
   });
 
   await runAgent({
+    memoryParticipation: true,
     input, context: runContext, repository, maxRounds: 1,
     research: async () => response([makeEvidence("https://example.com/video-tool")]),
   });
   const second = await runAgent({
+    memoryParticipation: true,
     input, context: runContext, repository, maxRounds: 1,
     research: async () => response([makeEvidence("https://docs.example.com/video-tool")]),
   });
@@ -734,6 +740,7 @@ test("an accepted synonym of an existing fact is retrieved and classified as no 
   });
 
   const first = await runAgent({
+    memoryParticipation: true,
     userQuery: "Palmier Pro macOS AI video editor updates", input, context: runContext, repository,
     research: async () => response([makeEvidence("Palmier Pro launched an open-source AI video editor for macOS.")]),
   });
@@ -742,6 +749,7 @@ test("an accepted synonym of an existing fact is retrieved and classified as no 
   assert.equal(repository.listPersonalKnowledge(runContext).length, 1);
 
   const second = await runAgent({
+    memoryParticipation: true,
     userQuery: "Palmier Pro macOS AI video editor updates", input, context: runContext, repository,
     research: async () => response([makeEvidence("Palmier Pro launches an open-source AI video editor for macOS.")]),
   });
@@ -777,12 +785,14 @@ test("an accepted same-source claim that adds a new capability updates knowledge
   });
 
   const first = await runAgent({
+    memoryParticipation: true,
     userQuery: "Palmier Pro macOS AI video editor updates", input, context: runContext, repository,
     research: async () => response([makeEvidence(oldClaim)]),
   });
   assert.equal(first.knowledgeChanges[0]?.classification, "NEW");
 
   const second = await runAgent({
+    memoryParticipation: true,
     userQuery: "Palmier Pro macOS AI video editor updates", input, context: runContext, repository,
     research: async () => response([makeEvidence(newClaim)]),
   });
@@ -823,10 +833,12 @@ test("an accepted knowledge update reaches attention without recomputing the dec
   });
 
   await runAgent({
+    memoryParticipation: true,
     input, context: runContext, repository, maxRounds: 1,
     research: async () => response([makeEvidence(oldClaim)]),
   });
   const second = await runAgent({
+    memoryParticipation: true,
     input, context: runContext, repository,
     research: async () => response([makeEvidence(newClaim)]),
   });
@@ -917,10 +929,12 @@ test("attention reconcile: a semantic duplicate drops from provisional MUST_READ
   });
 
   await runAgent({
+    memoryParticipation: true,
     input, context: runContext, repository, maxRounds: 1,
     research: async () => response([makeEvidence("palmier-first", claim, "MUST_READ")]),
   });
   const second = await runAgent({
+    memoryParticipation: true,
     input, context: runContext, repository, maxRounds: 1,
     research: async () => response([makeEvidence("palmier-synonym", synonym, "MUST_READ")]),
   });
@@ -955,6 +969,7 @@ test("feedback loop: a persisted LOWER_ATTENTION preference changes the next run
 
   // Run 1: no preference, fresh verified signal -> MUST_READ.
   const before = await runAgent({
+    memoryParticipation: true,
     input, context: runContext, repository, maxRounds: 1,
     research: async () => response([makeEvidence("palmier-t1", firstClaim)]),
   });
@@ -973,6 +988,7 @@ test("feedback loop: a persisted LOWER_ATTENTION preference changes the next run
   // research-stage MUST_READ is not downgraded by reconcile — the only reason it
   // drops to LIBRARY_ONLY is the persisted preference read from the repository.
   const result = await runAgent({
+    memoryParticipation: true,
     input, context: runContext, repository, maxRounds: 1,
     research: async () => response([makeEvidence("palmier-t2", secondClaim)]),
   });
@@ -1085,10 +1101,12 @@ test("a later material state change is stored as UPDATES and does not supersede 
   });
 
   await runAgent({
+    memoryParticipation: true,
     userQuery: "Palmier Pro macOS AI video editor updates", input, context: runContext, repository,
     research: async () => response([makeEvidence(oldClaim)]),
   });
   const second = await runAgent({
+    memoryParticipation: true,
     userQuery: "Palmier Pro macOS AI video editor updates", input, context: runContext, repository,
     research: async () => response([makeEvidence(nextClaim)]),
   });
@@ -1112,6 +1130,7 @@ test("CONFIRMS updates provenance without duplicate knowledge or revision", asyn
   const beforeRevision = repository.getResearchContextRevision(context);
 
   const result = await runAgent({
+    memoryParticipation: true,
     input,
     context,
     repository,
