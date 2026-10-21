@@ -1782,6 +1782,7 @@ export async function runResearchPipeline(
     providerOutcomes: sourceOutcomes.map((outcome) => ({
       providerName: outcome.source,
       providerId: outcome.providerId,
+      sourceId: outcome.sourceId,
       execution: outcome.execution,
       searched: outcome.searched,
       resultCount: outcome.resultCount,
@@ -1794,12 +1795,13 @@ export async function runResearchPipeline(
       candidateAdmissionRejectedSamples: outcome.candidateAdmissionRejectedSamples,
       requestCount: outcome.requestCount,
       failureCode: outcome.failureCode,
+      detailFailureCode: outcome.detailFailureCode,
     })),
     providerResponseCount: scanned,
     failureCount: failures.length,
     providerErrorCodes: sourceOutcomes
       .filter((outcome) => outcome.failureCode)
-      .map((outcome) => ({ providerName: outcome.source, failureCode: outcome.failureCode })),
+      .map((outcome) => ({ providerName: outcome.source, failureCode: outcome.failureCode, detailFailureCode: outcome.detailFailureCode })),
     emptyResultReason: searchEmptyReason(sourceOutcomes, scanned),
   });
   const allPrimary = unique([...primary, ...reversePrimary]);

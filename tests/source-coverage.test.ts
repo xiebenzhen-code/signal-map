@@ -49,3 +49,14 @@ test("searched zero results stays distinct from not searched and unavailable", (
   assert.deepEqual(coverage.unavailableProviders, ["Xiaohongshu"]);
   assert.deepEqual(coverage.notSearchedProviders, ["X"]);
 });
+
+
+test("cached repeated reads do not inflate breadth or hide an unsearched concrete feed", () => {
+  const successful = {source: "Official Feed · Krita", sourceId: "krita", providerId: "registered-feeds", execution: "searched_with_results" as const, searched: true, resultCount: 20, requestCount: 1};
+  const skipped = {...successful, source: "Official Feed · OBS", sourceId: "obs", execution: "not_searched" as const, searched: false, resultCount: 0, requestCount: 0};
+  const coverage = buildSourceCoverage([successful, {...successful, requestCount: 0}, skipped]);
+  assert.equal(coverage.level, "Partial");
+  assert.deepEqual(coverage.usedProviders, [successful.source]);
+  assert.deepEqual(coverage.notSearchedProviders, [skipped.source]);
+  assert.equal(coverage.outcomes.reduce((sum, outcome) => sum + (outcome.requestCount ?? 0), 0), 1);
+});

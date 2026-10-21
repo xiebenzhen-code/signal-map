@@ -98,7 +98,10 @@ export function parseRegisteredFeed(xml: string, feed: RegisteredFeed): {entries
   const records = container.children.filter(node => local(node) === (atom ? "entry" : "item"));
   const entries = new Map<string, FeedEntry>();
   for (const record of records.slice(0, FEED_MAX_RECORDS)) {
-    const title = plain(text(record, "title")).slice(0, 500);
+    const snippet = plain(text(record, "description") || text(record, "summary") || text(record, "content") || text(record, "encoded")).slice(0, 12000);
+    // Some official release feeds leave <title/> empty. Retain literal source
+    // text as a discovery lead; downstream relevance/verification still applies.
+    const title = (plain(text(record, "title")) || snippet).slice(0, 500);
     const link = atom ? record.children.find(node => local(node) === "link" && (!node.attributes.rel || node.attributes.rel === "alternate"))?.attributes.href : text(record, "link");
     let url: string | undefined;
     try { url = link ? publicSourceUrl(new URL(link, feed.url).href) : undefined; } catch { continue; }
@@ -109,31 +112,38 @@ export function parseRegisteredFeed(xml: string, feed: RegisteredFeed): {entries
     if (/^\/$|\/(?:feed|rss|atom)(?:\.xml)?\/?$|\/(?:category|tag|tags)(?:\/|$)/i.test(parsed.pathname) || parsed.href === feed.url) continue;
     const rawDate = text(record, atom ? "published" : "pubDate");
     const date = rawDate ? Date.parse(rawDate) : NaN;
-    entries.set(parsed.href, {title, url: parsed.href, snippet: plain(text(record, "description") || text(record, "summary") || text(record, "content") || text(record, "encoded")).slice(0, 12000),
+    entries.set(parsed.href, {title, url: parsed.href, snippet,
       ...(Number.isFinite(date) ? {publishedAt: new Date(date).toISOString()} : {})});
   }
   return {entries: [...entries.values()].slice(0, FEED_MAX_ENTRIES), rawCount: records.length};
 }
 
+// Only fixed reader/parser codes may enter diagnostics, never arbitrary error text.
+function safeFeedFailureCode(value: unknown): string {
+  const code = typeof value === "string" ? value : "";
+  return /^(?:FEED_HTTP_[1-5][0-9]{2}|FEED_(?:BUDGET_EXHAUSTED|PRIVATE_ADDRESS|CONTENT_TYPE_UNSUPPORTED|TOO_LARGE|TIMEOUT|ENOTFOUND|EAI_AGAIN|ECONNRESET|ECONNREFUSED|ETIMEDOUT|PAGE_TOO_LARGE|READ_FAILED|UNSAFE_XML|TOO_COMPLEX|INVALID_XML|UNSUPPORTED_FORMAT))$/.test(code)
+    ? code : "FEED_READ_FAILED";
+}
+
 async function readFeed(feed: RegisteredFeed, reader: typeof readCustomSource, deadlineAt?: number): Promise<FeedRead> {
   const source = `${feed.official ? "Official" : "General Web"} Feed · ${feed.name}`;
-  const base = {source, providerId: "registered-feeds", searched: false, resultCount: 0, requestCount: 0};
+  const base = {source, providerId: "registered-feeds", sourceId: feed.id, searched: false, resultCount: 0, requestCount: 0};
   let requestCount = 0;
   try {
     const result = await reader(feed.url, {format: "feed", deadlineAt});
     requestCount = result.requestCount;
     if (result.status !== "readable" || !result.content) {
       const notStarted = result.status === "not_searched";
-      return {entries: [], outcome: {...base, execution: notStarted ? "not_searched" : "failed", ...(notStarted ? {blockedBy: "budget" as const} : {failureCode: "upstream_error" as const}), searched: result.requestCount > 0, requestCount: result.requestCount},
-        failure: notStarted ? undefined : `${source}: ${result.reason}`};
+      return {entries: [], outcome: {...base, execution: notStarted ? "not_searched" : "failed", ...(notStarted ? {blockedBy: "budget" as const} : {failureCode: "upstream_error" as const, detailFailureCode: safeFeedFailureCode(result.reason)}), searched: result.requestCount > 0, requestCount: result.requestCount},
+        failure: notStarted ? undefined : `${source}: ${safeFeedFailureCode(result.reason)}`};
     }
     const parsed = parseRegisteredFeed(result.content, feed);
     return {entries: parsed.entries, retrievedAt: new Date().toISOString(), outcome: {...base, searched: true, execution: parsed.entries.length ? "searched_with_results" : "searched_no_results", requestCount: result.requestCount,
       resultCount: parsed.entries.length, rawResultCount: parsed.rawCount, normalizedCandidateCount: parsed.entries.length, rejectedRawCount: parsed.rawCount - parsed.entries.length}};
   } catch (error) {
     // Parser errors are fixed codes; never expose an arbitrary transport exception or credential-bearing URL.
-    const code = error instanceof Error && /^FEED_[A-Z_]+$/.test(error.message) ? error.message : "FEED_READ_FAILED";
-    return {entries: [], outcome: {...base, searched: requestCount > 0, requestCount, execution: "failed", failureCode: "upstream_error"}, failure: `${source}: ${code}`};
+    const code = safeFeedFailureCode(error instanceof Error ? error.message : undefined);
+    return {entries: [], outcome: {...base, searched: requestCount > 0, requestCount, execution: "failed", failureCode: "upstream_error", detailFailureCode: code}, failure: `${source}: ${code}`};
   }
 }
 

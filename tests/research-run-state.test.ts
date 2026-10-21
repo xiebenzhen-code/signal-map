@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ResearchRunState, mergeRoundAttempts } from "../agent/research-run-state.ts";
+import { buildSourceCoverage } from "../research/source-coverage.ts";
 import { recordsFromSignal } from "../information/rag-records.ts";
 import type { ResearchResponse, ResearchSignal } from "../research/types.ts";
 
@@ -286,4 +287,19 @@ test("round attempt merge preserves source outcome counts before cumulative merg
   assert.equal(merged.sourceOutcomes?.[0]?.resultCount, 1);
   assert.equal(merged.sourceOutcomes?.[0]?.requestCount, 2);
   assert.equal(merged.sourceOutcomes?.[0]?.newEvidenceCount, 1);
+});
+
+
+test("coverage preserves concrete source history across skipped and failed slices", () => {
+  const success = {source: "Official Feed · Krita News", sourceId: "krita", providerId: "registered-feeds", execution: "searched_with_results" as const, searched: true, resultCount: 20, requestCount: 1};
+  const failure = {...success, source: "Official Feed · Chrome Releases", sourceId: "chrome", execution: "failed" as const, resultCount: 0, failureCode: "upstream_error" as const};
+  const skipped = {...success, source: "Registered Feeds", sourceId: undefined, execution: "not_searched" as const, searched: false, resultCount: 0, requestCount: 0};
+  const merged = mergeRoundAttempts(response([], {coverage: buildSourceCoverage([success, failure])}), response([], {coverage: buildSourceCoverage([skipped])}));
+  assert.deepEqual(merged.coverage.usedProviders, [success.source]);
+  assert.deepEqual(merged.coverage.failedProviders, [failure.source]);
+  assert.deepEqual(merged.coverage.notSearchedProviders, []);
+  assert.equal(merged.coverage.outcomes.length, 3);
+  const retried = mergeRoundAttempts(merged, response([], {coverage: buildSourceCoverage([{...failure, source: success.source}])}));
+  assert.deepEqual(retried.coverage.usedProviders, [success.source]);
+  assert.ok(retried.coverage.failedProviders.includes(success.source));
 });

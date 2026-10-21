@@ -1,3 +1,4 @@
+import { buildSourceCoverage } from "../research/source-coverage.ts";
 import { recordsFromSignal, type EvidenceRecord } from "../information/rag-records.ts";
 import type { FilteringSummary, ResearchOverview, ResearchResponse, ResearchSignal, VerificationStatus } from "../research/types.ts";
 
@@ -224,6 +225,7 @@ function mergeResearchResponses(previous: ResearchResponse | undefined, next: Re
   return mergeResponseSourceOutcomes(previous, {
     ...next,
     signals: mergedSignals,
+    coverage: buildSourceCoverage([...(previous.coverage?.outcomes ?? []), ...(next.coverage?.outcomes ?? [])]),
     evidenceRecords: mergedEvidenceRecords,
     status: [...previous.status, ...next.status],
     progress: [...previous.progress, ...next.progress],

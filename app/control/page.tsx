@@ -140,8 +140,12 @@ export default function ControlDashboard() {
         setStatus("注册成功，请先完成邮箱验证再登录");
         return;
       }
-      await load();
-      window.location.assign("/");
+      if (!result.user || result.user.mode !== "authenticated") {
+        setStatus("登录状态未建立，请重新登录");
+        return;
+      }
+      const observe = new URLSearchParams(window.location.search).get("observe") === "1";
+      window.location.replace(observe ? "/?observe=1" : "/");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : action === "signup" ? "注册失败" : "登录失败");
     }

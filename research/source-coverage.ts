@@ -22,6 +22,8 @@ export type SourceNotSearchedReason =
 export type SourceExecutionOutcome = {
   source: string;
   providerId?: string;
+  /** Concrete source identity within a provider (for example a registered feed). */
+  sourceId?: string;
   execution:
     | "searched_with_results"
     | "searched_no_results"
@@ -42,6 +44,7 @@ export type SourceExecutionOutcome = {
   candidateAdmissionRejectedSamples?: ProviderRejectionSample[];
   requestCount?: number;
   failureCode?: ProviderSearchFailureCode;
+  detailFailureCode?: string;
   engine?: string;
   fallbackAttempted?: boolean;
 };
@@ -58,12 +61,19 @@ export type SourceCoverage = {
 };
 
 export function buildSourceCoverage(outcomes: SourceExecutionOutcome[]): SourceCoverage {
-  const names = (execution: SourceExecutionOutcome["execution"]) => outcomes
-    .filter((outcome) => outcome.execution === execution)
-    .map((outcome) => outcome.source);
-  const usedProviders = outcomes
-    .filter((outcome) => outcome.execution === "searched_with_results" || outcome.execution === "searched_no_results")
-    .map((outcome) => outcome.source);
+  // Keep every slice outcome as history. Summary labels describe cumulative
+  // execution; a later skip cannot undo an actual attempt at the same source.
+  const attempted = outcomes.filter(outcome => outcome.execution !== "not_searched");
+  const summaryOutcomes = outcomes.filter(outcome => outcome.execution !== "not_searched" || !attempted.some(prior =>
+    prior.providerId === outcome.providerId && (prior.source === outcome.source ||
+      Boolean(outcome.providerId && !outcome.sourceId && prior.sourceId)),
+  ));
+  const names = (execution: SourceExecutionOutcome["execution"]) => [...new Set(summaryOutcomes
+    .filter(outcome => outcome.execution === execution)
+    .map(outcome => outcome.source))];
+  const usedProviders = [...new Set(summaryOutcomes
+    .filter(outcome => outcome.execution === "searched_with_results" || outcome.execution === "searched_no_results")
+    .map(outcome => outcome.source))];
   return {
     level: usedProviders.length >= 2 ? "Broad" : usedProviders.length === 1 ? "Partial" : "Limited",
     usedProviders,

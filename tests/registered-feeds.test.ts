@@ -35,12 +35,53 @@ test("allowed registered feed supplies real Shopify material when other discover
 });
 
 test("catalogue broadens subjects without sending unknown entities to every feed", () => {
-  assert.equal(registeredFeeds.length, 10);
+  assert.ok(registeredFeeds.length >= 17);
   assert.deepEqual(selectRegisteredFeeds({entities: ["Shopify"], query: "美国商户结账变化"}).map(feed => feed.id), ["shopify"]);
   assert.deepEqual(selectRegisteredFeeds({entities: [], query: "国内数码和数字生活近期变化"}).map(feed => feed.id), ["ithome", "sspai"]);
   assert.deepEqual(selectRegisteredFeeds({entities: ["DaVinci"], query: "剪辑插件价格"}), []);
   assert.deepEqual(selectRegisteredFeeds({entities: [], query: "documentation updates"}), []);
   assert.deepEqual(selectRegisteredFeeds({entities: [], query: "数码", selectedSourceType: "OFFICIAL"}), []);
+});
+
+test("industry questions select bounded relevant feeds even without a named publisher", () => {
+  const film = selectRegisteredFeeds({entities: [], query: "过去30天面向独立电影人的后期制作软件有哪些正式更新"});
+  assert.ok(film.some(feed => feed.id === "kdenlive"));
+  const commerce = selectRegisteredFeeds({entities: [], query: "小型独立站建站与支付工具正式更新"});
+  assert.ok(commerce.some(feed => feed.id === "woocommerce"));
+  const programming = selectRegisteredFeeds({entities: [], query: "程序开发工具近期发布"});
+  assert.ok(programming.length > 0);
+  for (const feeds of [film, commerce, programming]) assert.ok(feeds.length <= 3);
+  assert.equal(selectRegisteredFeeds({entities: [], query: "未归类的面包配方 documentation"}).length, 0);
+});
+
+test("new publishers respect entity exclusion and official-only selection", () => {
+  assert.deepEqual(selectRegisteredFeeds({entities: ["WooCommerce"], query: "WooCommerce checkout"}).map(feed => feed.id), ["woocommerce"]);
+  assert.equal(selectRegisteredFeeds({entities: ["WooCommerce"], query: "WooCommerce checkout", excludedEntities: ["WooCommerce"]}).length, 0);
+  const media = selectRegisteredFeeds({entities: [], query: "国内技术资讯和开源社区动态"});
+  assert.ok(media.some(feed => feed.id === "infoq" || feed.id === "oschina"));
+  assert.ok(selectRegisteredFeeds({entities: [], query: "国内技术资讯和开源社区动态", selectedSourceType: "OFFICIAL"}).every(feed => feed.official));
+});
+
+test("new commerce feed entries enter the same candidate and coverage contract", async () => {
+  const feed = registeredFeeds.find(feed => feed.id === "woocommerce");
+  assert.ok(feed, "new source must exist in the runtime catalogue");
+  const xml = `<rss><channel><item><title>WooCommerce checkout update</title><link>https://developer.woocommerce.com/2026/10/19/checkout-update/</link><pubDate>${publishedAt}</pubDate><description>Released checkout improvements.</description></item></channel></rss>`;
+  const result = await retrieveRegisteredFeeds({entities: ["WooCommerce"], query: "checkout", allowed: true, reader: async url => ({url, status: "readable", content: xml, reason: "fixture", requestCount: 1})});
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].sourceType, "primary");
+  assert.equal(result.items[0].publishedAt, publishedAt);
+  assert.equal(result.outcomes[0].execution, "searched_with_results");
+  assert.equal(result.outcomes[0].requestCount, 1);
+});
+
+test("a real release with an empty feed title retains its literal description as a discovery lead", () => {
+  const feed = {id: "kdenlive", name: "Kdenlive", url: "https://kdenlive.org/news/index.xml", publisherHosts: ["kdenlive.org"], aliases: [], topics: [], official: true, cloudVerified: false};
+  const description = "The second maintenance release of the 26.08 series is out with stability fixes.";
+  const parsed = parseRegisteredFeed(`<rss><channel><item><title/><link>https://kdenlive.org/news/releases/26.08.2/</link><pubDate>${publishedAt}</pubDate><description>${description}</description></item><item><title/><link>https://kdenlive.org/empty/</link></item></channel></rss>`, feed);
+  assert.equal(parsed.entries.length, 1);
+  assert.equal(parsed.entries[0].title, description);
+  assert.equal(parsed.entries[0].publishedAt, publishedAt);
+  assert.equal(parsed.entries[0].snippet, description);
 });
 
 test("Atom uses alternate article links and explicit publication, never updated or retrieval time", () => {
@@ -233,3 +274,23 @@ test("a failed source ends the run as incomplete, never as a quiet zero-result d
   } finally { globalThis.fetch = before; }
 });
 
+
+
+test("feed failures preserve safe detailed codes through search phase diagnostics", async () => {
+  for (const [reason, expected] of [["FEED_PRIVATE_ADDRESS", "FEED_PRIVATE_ADDRESS"], ["FEED_TIMEOUT", "FEED_TIMEOUT"], ["FEED_HTTP_503", "FEED_HTTP_503"], ["https://user:password@example.com/?token=secret", "FEED_READ_FAILED"]]) {
+    const phases: Array<{phase: string; diagnostic?: Record<string, unknown>}> = [];
+    const result = await runResearchPipeline(input, undefined, {
+      deadlineAt: Date.now() + 20000,
+      onPhase: phase => { phases.push(phase); },
+      customSourceReader: async url => ({url, status: "failed", reason, requestCount: reason === "FEED_PRIVATE_ADDRESS" ? 0 : 1}),
+    }, {queries: ["Shopify checkout payment"], allowedProviderIds: ["registered-feeds"], selectedSourceType: "OFFICIAL"});
+    const outcome = result.coverage.outcomes.find(o => o.providerId === "registered-feeds")!;
+    assert.equal((outcome as unknown as {detailFailureCode: string}).detailFailureCode, expected);
+    const diagnostic = phases.find(p => p.phase === "search_finished")?.diagnostic;
+    const providers = diagnostic?.providerOutcomes as Array<{providerId?: string; sourceId?: string; detailFailureCode?: string}>;
+    const feedOutcome = providers.find(provider => provider.providerId === "registered-feeds");
+    assert.equal(feedOutcome?.detailFailureCode, expected);
+    assert.equal(feedOutcome?.sourceId, "shopify");
+    assert.ok(!JSON.stringify(diagnostic).includes("token=secret"));
+  }
+});
