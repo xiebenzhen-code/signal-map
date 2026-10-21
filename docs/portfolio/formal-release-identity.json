@@ -1,0 +1,39 @@
+{
+  "domain": "https://signal.benzhenlab.com",
+  "siteProjectId": "appgprj_6a90935d9d048191bc44242ef23b0fb4",
+  "siteVersion": 53,
+  "siteSourceCommit": "f7b5c78eb50de136201408ffd0efe582037a8ea1",
+  "productionCodeFromGitHubCommit": "dac60565ed063532c508eeeae3f625b608146cb6",
+  "deploymentId": "appgdep_6ad85daa24e88191bafde03b68d9079c",
+  "status": "succeeded",
+  "customDomainStatus": "active",
+  "sslStatus": "active",
+  "environmentRevision": 9,
+  "addedEnvironmentKeys": [
+    "API_UPSTREAM_URL"
+  ],
+  "preservedExistingEnvironmentKeys": true,
+  "rollbackSitesVersion": 52,
+  "apiDeploymentUnchanged": "019",
+  "quality": {
+    "tests": 902,
+    "pass": 896,
+    "fail": 0,
+    "skipped": 6,
+    "exitCode": 0
+  },
+  "buildExitCode": 0,
+  "browserAcceptance": {
+    "login": true,
+    "redirectToHome": true,
+    "refreshRetainsLogin": true,
+    "researchSubmissions": 1,
+    "scanned": 20,
+    "aggregated": 18,
+    "displayed": 0,
+    "answerQualityPassed": false,
+    "requestId": "UNKNOWN"
+  },
+  "modelUsage": "UNKNOWN",
+  "cloudCost": "UNKNOWN"
+}

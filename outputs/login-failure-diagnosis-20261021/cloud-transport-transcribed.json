@@ -1,0 +1,20 @@
+{
+  "evidenceMethod": "direct API019 Webshell visible terminal output transcribed",
+  "hostname": "signal-map-api-preview-019-d5fc566b6-5s8mr",
+  "automaticMemoryParticipates": false,
+  "databaseConfigured": true,
+  "databaseConnectionTested": false,
+  "probe": {
+    "env": {
+      "url": "PRESENT",
+      "key": "PRESENT"
+    },
+    "dns": "PASS",
+    "https": "PASS",
+    "tls": "PASS",
+    "hostnameVerification": "PASS",
+    "authRootHttpStatus": 404,
+    "errorCategory": "AUTH_HTTP_ERROR"
+  },
+  "note": "Auth root 404 proves HTTP transport only, not credential validity. Credential validity independently confirmed by separate sanitized login pair."
+}

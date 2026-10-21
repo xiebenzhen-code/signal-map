@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">
+<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#365cff"/></marker></defs>
+<rect width="1600" height="1000" fill="#f7f5ef"/>
+<style>text{font-family:"Microsoft YaHei","Noto Sans CJK SC",sans-serif;fill:#172033}.label{font-size:18px;fill:#5b6573}.title{font-size:25px;font-weight:700}.small{font-size:16px;fill:#5b6573}</style>
+<text x="60" y="65" font-size="20">SIGNAL MAP</text>
+<text x="60" y="118" font-size="40">从公开材料到有证据的信息判断</text>
+<text x="60" y="153" class="label">系统框架 · 当前实现与验收边界 · 2026.10.21</text>
+<rect x="60" y="230" width="270" height="205" rx="20" fill="#fff" stroke="#d9dde3" stroke-width="2"/>
+<text x="83" y="270" class="title">用户与研究范围</text>
+<text x="83" y="308" class="label">自然语言问题 / 实体</text>
+<text x="83" y="339" class="label">时间窗口 / 排除条件</text>
+<text x="83" y="370" class="label">自选公开来源</text>
+<rect x="360" y="230" width="270" height="205" rx="20" fill="#fff" stroke="#d9dde3" stroke-width="2"/>
+<text x="383" y="270" class="title">规划与预算</text>
+<text x="383" y="308" class="label">意图与任务约束</text>
+<text x="383" y="339" class="label">主体 / 任务相关性</text>
+<text x="383" y="370" class="label">切片去重与截止预算</text>
+<rect x="660" y="230" width="270" height="205" rx="20" fill="#fff" stroke="#d9dde3" stroke-width="2"/>
+<text x="683" y="270" class="title">公开来源读取</text>
+<text x="683" y="308" class="label">官方页面 / RSS / Atom</text>
+<text x="683" y="339" class="label">已配置搜索与社区线索</text>
+<text x="683" y="370" class="label">安全地址检查与解析</text>
+<rect x="960" y="230" width="270" height="205" rx="20" fill="#eef2ff" stroke="#365cff" stroke-width="2"/>
+<text x="983" y="270" class="title">筛选与证据</text>
+<text x="983" y="308" class="label">日期 / 相关性 / 去重</text>
+<text x="983" y="339" class="label">事件与主张聚合</text>
+<text x="983" y="370" class="label">证据强度 / 新颖度</text>
+<path d="M334,331 H355" stroke="#365cff" stroke-width="3" marker-end="url(#arrow)"/>
+<path d="M634,331 H655" stroke="#365cff" stroke-width="3" marker-end="url(#arrow)"/>
+<path d="M934,331 H955" stroke="#365cff" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="1260" y="230" width="280" height="205" rx="20" fill="#eef2ff" stroke="#365cff" stroke-width="2"/>
+<text x="1283" y="270" class="title">用户可见结果</text>
+<text x="1283" y="308" class="label">今日 / 信息 / 资料库</text>
+<text x="1283" y="339" class="label">事实 / 待验证线索</text>
+<text x="1283" y="370" class="label">不足与失败明确说明</text>
+<path d="M1234,331 H1255" stroke="#365cff" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="60" y="500" width="420" height="190" rx="20" fill="#fff" stroke="#d9dde3" stroke-width="2"/>
+<text x="83" y="540" class="title">账户与数据边界</text>
+<text x="83" y="578" class="label">Supabase Auth → 认证身份</text>
+<text x="83" y="609" class="label">PostgreSQL：用户 + 过滤范围</text>
+<text x="83" y="640" class="label">知识、反馈、运行记录持久化</text>
+<rect x="520" y="500" width="510" height="190" rx="20" fill="#fff" stroke="#d9dde3" stroke-width="2"/>
+<text x="543" y="540" class="title">贯穿执行链的可靠性约束</text>
+<text x="543" y="578" class="label">真实来源覆盖 / 逐来源错误码</text>
+<text x="543" y="609" class="label">安全读取 / 有界执行 / 失败保留</text>
+<text x="543" y="640" class="label">本地测试 ≠ 生产场景全部验收</text>
+<rect x="1070" y="500" width="470" height="190" rx="20" fill="#fff" stroke="#d9dde3" stroke-width="2" stroke-dasharray="8 6"/>
+<text x="1093" y="540" class="title">记忆与主动能力 · 待闭环</text>
+<text x="1093" y="578" class="label">知识可保存与查看的接线已存在</text>
+<text x="1093" y="609" class="label">自动记忆参与：当前关闭</text>
+<text x="1093" y="640" class="label">跨次作用 / 定时提醒：未完整验收</text>
+<text x="60" y="770" class="title">已取得的实时读取证据</text>
+<text x="60" y="808" class="label">API019：OBS 10条、Kdenlive 20条；成功读取仍需通过问题相关性与日期筛选。</text>
+<text x="60" y="865" class="title">交付边界</text>
+<text x="60" y="903" class="label">17路登记订阅源 ≠ 全行业覆盖；Chrome超时、WooCommerce安全预检拒绝。</text>
+<text x="60" y="941" class="small">正式域名：signal.benzhenlab.com（Sites版本53 + API019，正式域名已更新）</text>
+</svg>
