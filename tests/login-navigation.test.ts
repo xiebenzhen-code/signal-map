@@ -44,3 +44,19 @@ test("failed or sessionless authentication never navigates", async () => {
   assert.deepEqual((await authenticate(null, "", "login", new Error("登录失败"))).destinations, []);
   assert.deepEqual((await authenticate({ user: null })).destinations, []);
 });
+
+test("already signed-in control entry returns home without loading the account dashboard", async () => {
+  const load = source.match(/  async function load\(\)[\s\S]*?(?=\n  async function authenticate)/)?.[0];
+  assert.ok(load);
+  const js = ts.transpileModule(load, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  const destinations: string[] = [];
+  let dashboards = 0;
+  const run = new Function("readJson", "setStatus", "setState", "setUser", "emptyState", "loadDashboardState", "window", `${js};return load;`)(
+    async () => ({ user: { id: "test-a", mode: "authenticated" } }), () => {}, () => {}, () => {}, {},
+    async () => { dashboards++; return {}; },
+    { location: { search: "?observe=1", replace: (url: string) => destinations.push(url) } },
+  );
+  await run();
+  assert.deepEqual(destinations, ["/?observe=1"]);
+  assert.equal(dashboards, 0);
+});

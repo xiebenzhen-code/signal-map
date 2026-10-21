@@ -55,12 +55,8 @@ import type {
   ProviderCoverage,
   SourceScope,
 } from "@/information/types";
-import {
-  clearAlphaData,
-  loadAlphaSnapshot,
-  setAlphaValue,
-  saveFilterSources,
-} from "@/lib/alpha-storage";
+import { createAlphaStorage } from "@/lib/alpha-storage";
+import { LocalAccountBoundary } from "./components/local-account-boundary";
 import { CustomSourcesEditor } from "./components/custom-sources-editor";
 import { parseCustomSources } from "@/lib/custom-sources";
 import { signalTypeLabel, userFacingReason } from "@/lib/user-facing-labels";
@@ -919,8 +915,12 @@ function CoverageBadge({ coverage }: { coverage: ProviderCoverage }) {
 }
 
 export default function HomePage() {
+  return <LocalAccountBoundary>{(user) => <AccountHomePage key={user?.id ?? "anonymous"} currentUser={user} />}</LocalAccountBoundary>;
+}
+
+function AccountHomePage({ currentUser }: { currentUser: CurrentUser }) {
+  const { clearAlphaData, loadAlphaSnapshot, setAlphaValue, saveFilterSources } = useMemo(() => createAlphaStorage(currentUser?.id ?? null), [currentUser?.id]);
   const [page, setPage] = useState<Page>("today");
-  const [currentUser, setCurrentUser] = useState<CurrentUser>(null);
   const [profile, setProfile] = useState<PersonalProfile>(defaultProfile);
   const [knowledgeByFilterId, setKnowledgeByFilterId] = useState<KnowledgeByFilterId>({});
   const [lastRunByFilterId, setLastRunByFilterId] = useState<Record<string, InformationRun>>({});
@@ -1096,7 +1096,7 @@ export default function HomePage() {
         ...latest, researchContextRevision: latest.researchContextRevision + 1, updatedAt: update.knowledge.updatedAt,
       } };
     });
-  }, [activeFilter, activeFilterId, activeKnowledge, filters, knowledgeByFilterId, loading]);
+  }, [activeFilter, activeFilterId, activeKnowledge, filters, knowledgeByFilterId, loading, saveFilterSources]);
 
   const navigate = (nextPage: Page) => {
     window.scrollTo({ top: 0, behavior: "auto" });
@@ -1208,16 +1208,6 @@ export default function HomePage() {
       const initialLibraryView = libraryViewFromParam(params.get("libraryView"));
       if (initialPage) setPage(initialPage);
       if (initialLibraryView) setLibraryView(initialLibraryView);
-      fetch("/api/auth/me", { cache: "no-store", credentials: "same-origin" })
-        .then(async (request) => {
-          if (!request.ok) throw new Error("auth unavailable");
-          return (await request.json()) as { user: CurrentUser };
-        })
-        .then((value) => {
-          setCurrentUser(value.user);
-          setError("");
-        })
-        .catch(() => setCurrentUser(null));
       fetch("/api/connections", { cache: "no-store", credentials: "same-origin" })
         .then(async (request) => (await request.json()) as { connections?: Connection[] })
         .then((value) => setConnections(value.connections || []))
@@ -1227,7 +1217,7 @@ export default function HomePage() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [refreshToday]);
+  }, [refreshToday, loadAlphaSnapshot, setAlphaValue]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -1289,38 +1279,38 @@ export default function HomePage() {
     if (!hydrated) return;
     void setAlphaValue("profile", profile);
     void setAlphaValue("knowledgeByFilterId", knowledgeByFilterId);
-  }, [hydrated, knowledgeByFilterId, profile]);
+  }, [hydrated, knowledgeByFilterId, profile, setAlphaValue]);
 
   useEffect(() => {
     if (!hydrated) return;
     void setAlphaValue("lastRunByFilterId", lastRunByFilterId);
-  }, [hydrated, lastRunByFilterId]);
+  }, [hydrated, lastRunByFilterId, setAlphaValue]);
 
   useEffect(() => {
     if (!hydrated) return;
     void setAlphaValue("library", library);
-  }, [hydrated, library]);
+  }, [hydrated, library, setAlphaValue]);
 
   useEffect(() => {
     if (!hydrated) return;
     void setAlphaValue("filters", filters);
     void setAlphaValue("activeFilterId", activeFilterId);
-  }, [activeFilterId, filters, hydrated]);
+  }, [activeFilterId, filters, hydrated, setAlphaValue]);
 
   useEffect(() => {
     if (!hydrated) return;
     void setAlphaValue("notes", notes);
-  }, [hydrated, notes]);
+  }, [hydrated, notes, setAlphaValue]);
 
   useEffect(() => {
     if (!hydrated) return;
     void setAlphaValue("feedback", feedbackRecords);
-  }, [feedbackRecords, hydrated]);
+  }, [feedbackRecords, hydrated, setAlphaValue]);
 
   useEffect(() => {
     if (!hydrated) return;
     void setAlphaValue("experienceFeedback", experienceFeedback);
-  }, [experienceFeedback, hydrated]);
+  }, [experienceFeedback, hydrated, setAlphaValue]);
 
   const signals = useMemo(() => response?.signals || [], [response]);
   const todayPresentation = useMemo(() => selectTodayPresentation(signals, response?.queryPlan?.requestedFreshnessWindow), [signals, response]);
@@ -1979,7 +1969,7 @@ export default function HomePage() {
 
           <details className={accordionClass}>
             <summary className={summaryClass}><span>我的数据</span><ChevronRight size={18}/></summary>
-            <p className="mt-4 text-sm leading-6 text-[#68727f]">{loggedIn ? "登录后长期 Knowledge 与 RAG Memory 由服务器账户隔离保存；本机仍保留界面草稿和反馈。" : "过滤器、认知状态、资料库、笔记与反馈只保存在当前浏览器。"}</p>{experienceFeedback.length ? <a href={feedbackExportHref} download={`signal-map-feedback-${sessionId.slice(0, 8) || "alpha"}.json`} className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black">导出反馈 JSON</a> : <span className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black opacity-40">导出反馈 JSON</span>}<button onClick={() => { if (!window.confirm("清除当前设备上的全部 Signal Map Alpha 数据？")) return; void clearAlphaData().then(() => { setFilters([]); setActiveFilterId(null); setProfile(defaultProfile); setKnowledgeByFilterId({}); setLastRunByFilterId({}); setLibrary([]); setNotes({}); setFeedbackRecords([]); setExperienceFeedback([]); setPage("today"); }); }} className="mt-2 min-h-12 w-full rounded-xl text-sm font-black text-rose-700">清除本地测试数据</button>
+            <p className="mt-4 text-sm leading-6 text-[#68727f]">{loggedIn ? "登录后长期 Knowledge 与 RAG Memory 由服务器账户隔离保存；本机仍保留界面草稿和反馈。" : "过滤器、认知状态、资料库、笔记与反馈只保存在当前浏览器。"}</p>{experienceFeedback.length ? <a href={feedbackExportHref} download={`signal-map-feedback-${sessionId.slice(0, 8) || "alpha"}.json`} className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black">导出反馈 JSON</a> : <span className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl border border-[#dfe3e7] text-sm font-black opacity-40">导出反馈 JSON</span>}<button onClick={() => { if (!window.confirm("清除当前账号（未登录时为匿名）的本机数据？其他账号的数据会保留。")) return; void clearAlphaData().then(() => { setFilters([]); setActiveFilterId(null); setProfile(defaultProfile); setKnowledgeByFilterId({}); setLastRunByFilterId({}); setLibrary([]); setNotes({}); setFeedbackRecords([]); setExperienceFeedback([]); setPage("today"); }); }} className="mt-2 min-h-12 w-full rounded-xl text-sm font-black text-rose-700">清除当前账号本机数据</button>
           </details>
         </div>
 

@@ -88,21 +88,6 @@ async function readJson<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-async function loadDashboardState(): Promise<DashboardState> {
-  const [goals, notifications, knowledge, agentRuns] = await Promise.all([
-    readJson<{ goals: ControlGoal[] }>("/api/control/goals"),
-    readJson<{ notifications: NotificationItem[] }>("/api/control/notifications"),
-    readJson<{ knowledge: KnowledgeItem[] }>("/api/control/knowledge"),
-    readJson<{ agentRuns: AgentRunItem[] }>("/api/control/agent-runs"),
-  ]);
-  return {
-    goals: goals.goals,
-    notifications: notifications.notifications,
-    knowledge: knowledge.knowledge,
-    agentRuns: agentRuns.agentRuns,
-  };
-}
-
 export default function ControlDashboard() {
   const [state, setState] = useState<DashboardState>(emptyState);
   const [status, setStatus] = useState("loading");
@@ -116,10 +101,14 @@ export default function ControlDashboard() {
     setStatus("loading");
     try {
       const session = await readJson<{ user: CurrentUser }>("/api/auth/me");
-      setUser(session.user);
-      if (!session.user) { setState(emptyState); setStatus("signed_out"); return; }
-      setState(await loadDashboardState());
-      setStatus("ready");
+      if (session.user) {
+        const observe = new URLSearchParams(window.location.search).get("observe") === "1";
+        window.location.replace(observe ? "/?observe=1" : "/");
+        return;
+      }
+      setUser(null);
+      setState(emptyState);
+      setStatus("signed_out");
     } catch {
       setState(emptyState);
       setStatus("error");
@@ -199,13 +188,13 @@ export default function ControlDashboard() {
     readJson<{ user: CurrentUser }>("/api/auth/me")
       .then(async (session) => {
         if (!active) return;
-        setUser(session.user);
-        if (!session.user) {
-          setStatus("signed_out");
+        if (session.user) {
+          const observe = new URLSearchParams(window.location.search).get("observe") === "1";
+          window.location.replace(observe ? "/?observe=1" : "/");
           return;
         }
-        const dashboard = await loadDashboardState();
-        if (active) { setState(dashboard); setStatus("ready"); }
+        setUser(null);
+        setStatus("signed_out");
       })
       .catch(() => {
         if (active) setStatus("error");
