@@ -1,0 +1,38 @@
+{
+  "evidenceMethod": "direct Webshell execution and visible terminal screenshots; values transcribed, not raw console export",
+  "hostname": "signal-map-api-preview-019-d5fc566b6-smqls",
+  "readMode": "feed",
+  "readBudgetMs": 12000,
+  "results": [
+    {
+      "id": "obs",
+      "target": "https://obsproject.com/blog/rss",
+      "status": "readable",
+      "requestCount": 1,
+      "elapsedMs": 1128,
+      "bytes": 95927,
+      "parse": {
+        "ok": true,
+        "rawCount": 10,
+        "entryCount": 10
+      },
+      "sampleDateObserved": "2026-07-21T00:00:00.000Z"
+    },
+    {
+      "id": "kdenlive",
+      "target": "https://kdenlive.org/news/index.xml",
+      "status": "readable",
+      "requestCount": 1,
+      "elapsedMs": 648,
+      "bytes": 11855,
+      "parse": {
+        "ok": true,
+        "rawCount": 20,
+        "entryCount": 20
+      },
+      "sampleDateObserved": "2026-10-16T08:30:00.000Z"
+    }
+  ],
+  "completionMarkerObserved": "OTHER_FEED_PROBE_DONE",
+  "researchSubmissions": 0
+}
