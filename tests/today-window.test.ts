@@ -92,7 +92,11 @@ function releaseSignal(overrides: Partial<ResearchSignal> = {}): ResearchSignal 
 
 // "now" of the acceptance scenario: 2026-09-29. The release is 8 days old —
 // inside a requested 30d window but far beyond the old fixed 72h gate.
-test("a verified in-window official release (8 days old) reaches 今日可用更新 under a 30d window", () => {
+// The clock is PINNED to the scenario moment: the fixture dates are relative
+// to it and must not drift as wall-clock time moves. Production selection
+// rules are untouched — only the test's view of "now" is fixed.
+test("a verified in-window official release (8 days old) reaches 今日可用更新 under a 30d window", (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-09-29T14:31:42.000Z") });
   const presentation = selectTodayPresentation([releaseSignal()], "30d");
   assert.equal(presentation.kind, "usable_updates", `expected usable_updates, got ${presentation.kind}`);
   assert.equal(presentation.usableUpdates.length, 1);
