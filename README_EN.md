@@ -10,9 +10,9 @@ An information-filtering tool for independent developers and creators: research 
 ![Stage](https://img.shields.io/badge/status-limited_trial-2457ff)
 ![Language](https://img.shields.io/badge/language-TypeScript-3178c6)
 ![Runtime](https://img.shields.io/badge/local_checks-Node.js_24%2B-43853d)
-![Repository](https://img.shields.io/badge/repository-private-596473)
+![Repository](https://img.shields.io/badge/repository-public-2ea44f)
 
-**Limited trial.** The repository is currently private and requires access to clone. It does not display unverifiable Star counts, CI-success badges or license badges.
+**Source now public (2026-10-22).** The repository is public and can be cloned for reading; the product remains a limited trial with no availability guarantees. There is still no `LICENSE` file and no open-source license is declared.
 
 [Watch the roughly 50-second live demo](docs/portfolio/signal-map-demo.mp4) · [Recording method and outcome](docs/portfolio/DEMO.md)
 

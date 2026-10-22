@@ -10,9 +10,9 @@
 ![Stage](https://img.shields.io/badge/status-limited_trial-2457ff)
 ![Language](https://img.shields.io/badge/language-TypeScript-3178c6)
 ![Runtime](https://img.shields.io/badge/local_checks-Node.js_24%2B-43853d)
-![Repository](https://img.shields.io/badge/repository-private-596473)
+![Repository](https://img.shields.io/badge/repository-public-2ea44f)
 
-**当前为受限试用。** 仓库目前私有，需要访问权限才能克隆；不展示无法公开核验的 Star 数、CI 成功或许可证徽章。
+**源码已公开（2026-10-22）。** 仓库现为公开状态，可克隆查阅；产品仍为受限试用，不承诺可用性。项目尚无 `LICENSE` 文件，未声明开源授权。
 
 [约50秒真实操作视频](docs/portfolio/signal-map-demo.mp4) · [录制方法与结果](docs/portfolio/DEMO.md)
 
