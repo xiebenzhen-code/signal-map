@@ -28,6 +28,15 @@ export const registeredFeeds: RegisteredFeed[] = [
   {id: "chrome", name: "Chrome Releases", url: "https://chromereleases.googleblog.com/feeds/posts/default", publisherHosts: ["chromereleases.googleblog.com"], aliases: ["chrome", "chromium", "谷歌浏览器"], topics: ["浏览器安全", "browser security"], official: true, cloudVerified: false},
   {id: "infoq", name: "InfoQ 中文", url: "https://www.infoq.cn/feed", publisherHosts: ["infoq.cn"], aliases: ["infoq"], topics: ["国内技术资讯", "软件架构", "技术管理", "云原生"], official: false, cloudVerified: false},
   {id: "oschina", name: "开源中国资讯", url: "https://www.oschina.net/news/rss", publisherHosts: ["oschina.net"], aliases: ["oschina", "开源中国"], topics: ["国内技术资讯", "开源社区", "开源软件", "开源工具"], official: false, cloudVerified: false},
+  // RSSHub pilot relays (2026-10-23). Transport was verified from the API runtime
+  // with the product safe reader and parser (docs/verification/rsshub-pilot-20261023.md:
+  // verdict CLOUD_READ_AND_PARSE_OK, 0 model calls, 0 research submissions). That is
+  // transport evidence only — never a claim about long-term stability or content truth.
+  // The *.sh.run.tcloudbase.com address is the platform's development-test domain and is
+  // temporary; publisher hosts stay with the publishers, and topics stay empty so these
+  // relays never enter subject-based selection.
+  {id: "36kr-flashes", name: "36氪快讯（RSSHub 转接）", url: "https://signal-map-rsshub-323338-4-1408253594.sh.run.tcloudbase.com/36kr/newsflashes?limit=5", publisherHosts: ["36kr.com"], aliases: ["36氪", "36kr"], topics: [], official: false, cloudVerified: true},
+  {id: "geekpark-ai", name: "极客公园 AI 新浪潮观察（RSSHub 转接）", url: "https://signal-map-rsshub-323338-4-1408253594.sh.run.tcloudbase.com/geekpark/304?limit=5", publisherHosts: ["geekpark.net"], aliases: ["极客公园", "geekpark"], topics: [], official: false, cloudVerified: true},
 ];
 
 function contains(text: string, term: string) {

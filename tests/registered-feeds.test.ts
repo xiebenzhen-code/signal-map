@@ -276,6 +276,131 @@ test("a failed source ends the run as incomplete, never as a quiet zero-result d
 
 
 
+/**
+ * Trimmed fixtures from the two RSSHub pilot responses read on 2026-10-22
+ * (docs/verification/rsshub-pilot-20261023.md). Titles, original article URLs
+ * and publication dates are verbatim; descriptions are truncated so the
+ * repository never carries article bodies. The double-escaped HTML in the
+ * Geekpark description mirrors the real response.
+ */
+const rsshub36krXml = `<?xml version="1.0" encoding="UTF-8"?><rss xmlns:atom="http://www.w3.org/2005/Atom" version="2.0"><channel><title>36氪 - 快讯</title><link>https://www.36kr.com/newsflashes</link><atom:link href="https://signal-map-rsshub-323338-4-1408253594.sh.run.tcloudbase.com/36kr/newsflashes?limit=5" rel="self" type="application/rss+xml"></atom:link><description>36氪 - 快讯 - Powered by RSSHub</description><lastBuildDate>Thu, 22 Oct 2026 21:04:01 GMT</lastBuildDate><ttl>60</ttl><item><title>沃尔沃集团宣布设立Volvo Mining</title><description>沃尔沃集团宣布设立Volvo Mining。根据规划，Volvo Mining将面向矿业客户及其承包商，提供沃尔沃卡车…（摘要截断）</description><link>https://www.36kr.com/newsflashes/4036991939826561</link><pubDate>Thu, 22 Oct 2026 12:57:24 GMT</pubDate></item><item><title>Meta信用风险指标创纪录新高，AI扩产发债预期引发市场担忧</title><description>Meta Platforms一项信用风险指标飙升至历史新高，公司债券同步下跌…（摘要截断）</description><link>https://www.36kr.com/newsflashes/4037043141661831</link><pubDate>Thu, 22 Oct 2026 12:52:38 GMT</pubDate></item><item><title>东阳光：第三季度实现营收52.97亿元，同比增长37.7%</title><description>36氪获悉，东阳光公告，第三季度实现营收52.97亿元…（摘要截断）</description><link>https://www.36kr.com/newsflashes/4036985032921987</link><pubDate>Thu, 22 Oct 2026 12:50:20 GMT</pubDate></item></channel></rss>`;
+const rsshubGeekparkXml = `<?xml version="1.0" encoding="UTF-8"?><rss xmlns:atom="http://www.w3.org/2005/Atom" version="2.0"><channel><title>AI新浪潮观察 | 极客公园</title><link>https://geekpark.net/column/304</link><atom:link href="https://signal-map-rsshub-323338-4-1408253594.sh.run.tcloudbase.com/geekpark/304?limit=5" rel="self" type="application/rss+xml"></atom:link><description>极客公园AI系列文章 - Powered by RSSHub</description><lastBuildDate>Thu, 22 Oct 2026 21:04:08 GMT</lastBuildDate><ttl>60</ttl><item><title>宇树 10 周年，王兴兴：我劝你相信 AI</title><description>&lt;figure&gt;&lt;img src=&quot;https://imgslim.geekpark.net/uploads/image/file/d3/02/d302.png&quot;/&gt;&lt;/figure&gt;&lt;p&gt;（摘要截断）&lt;/p&gt;</description><link>https://geekpark.net/news/372759</link><pubDate>Thu, 22 Oct 2026 11:56:03 GMT</pubDate></item><item><title>AI 漫剧越做越快，赚钱却没那么容易了</title><description>&lt;p&gt;（摘要截断）&lt;/p&gt;</description><link>https://geekpark.net/news/372746</link><pubDate>Thu, 22 Oct 2026 08:20:34 GMT</pubDate></item><item><title>大模型内卷之后，AI 竞争进入搜索基础设施时代</title><description>&lt;p&gt;（摘要截断）&lt;/p&gt;</description><link>https://geekpark.net/news/372743</link><pubDate>Thu, 22 Oct 2026 08:15:50 GMT</pubDate></item></channel></rss>`;
+const rsshubFeed = (id: string) => registeredFeeds.find(feed => feed.id === id)!;
+
+test("RSSHub pilot feeds enter the catalogue as media with publisher hosts and no topic broadening", () => {
+  assert.equal(registeredFeeds.length, 19);
+  const kr = rsshubFeed("36kr-flashes");
+  assert.equal(kr.url, "https://signal-map-rsshub-323338-4-1408253594.sh.run.tcloudbase.com/36kr/newsflashes?limit=5");
+  assert.deepEqual(kr.publisherHosts, ["36kr.com"], "publisher hosts stay with the publisher, never the relay host");
+  assert.equal(kr.official, false, "a relayed media feed is never an official source");
+  assert.equal(kr.cloudVerified, true, "transport was verified from the API runtime, nothing more");
+  assert.deepEqual(kr.topics, [], "the trial feed must not broaden subject selection");
+  const gp = rsshubFeed("geekpark-ai");
+  assert.equal(gp.url, "https://signal-map-rsshub-323338-4-1408253594.sh.run.tcloudbase.com/geekpark/304?limit=5");
+  assert.deepEqual(gp.publisherHosts, ["geekpark.net"]);
+  assert.equal(gp.official, false);
+  assert.equal(gp.cloudVerified, true);
+  assert.deepEqual(gp.topics, []);
+  assert.deepEqual(selectRegisteredFeeds({entities: [], query: "未归类的面包配方"}).map(feed => feed.id), [], "the additions are not default sources");
+});
+
+test("named publishers select their RSSHub feed; official-only and explicit exclusion keep it unread", async () => {
+  assert.deepEqual(selectRegisteredFeeds({entities: ["36氪"], query: ""}).map(feed => feed.id), ["36kr-flashes"]);
+  assert.deepEqual(selectRegisteredFeeds({entities: [], query: "36kr 今天有什么新变化"}).map(feed => feed.id), ["36kr-flashes"]);
+  assert.deepEqual(selectRegisteredFeeds({entities: ["极客公园"], query: ""}).map(feed => feed.id), ["geekpark-ai"]);
+  assert.deepEqual(selectRegisteredFeeds({entities: ["36氪", "极客公园"], query: ""}).map(feed => feed.id), ["36kr-flashes", "geekpark-ai"]);
+  assert.deepEqual(selectRegisteredFeeds({entities: ["36氪", "极客公园"], query: "", selectedSourceType: "OFFICIAL"}), [], "media feeds never satisfy an official-only request");
+  let reads = 0;
+  const reader: typeof readCustomSource = async url => {reads++; return {url, status: "readable", reason: "fixture", requestCount: 1, content: rsshub36krXml};};
+  const excluded = await retrieveRegisteredFeeds({entities: ["36氪"], query: "", allowed: true, reader, excludedEntities: ["36氪"]});
+  assert.equal(reads, 0, "an excluded publisher's feed must not be fetched at all");
+  assert.equal(excluded.items.length, 0);
+  assert.equal(excluded.outcomes[0].execution, "not_searched");
+  assert.equal(excluded.outcomes[0].blockedBy, "no_candidate_source");
+});
+
+test("RSSHub bodies keep original article URLs, dates and publisher identity", () => {
+  const kr = rsshubFeed("36kr-flashes");
+  const parsed = parseRegisteredFeed(rsshub36krXml, kr);
+  assert.equal(parsed.rawCount, 3);
+  assert.deepEqual(parsed.entries.map(entry => entry.url), [
+    "https://www.36kr.com/newsflashes/4036991939826561",
+    "https://www.36kr.com/newsflashes/4037043141661831",
+    "https://www.36kr.com/newsflashes/4036985032921987",
+  ]);
+  assert.deepEqual(parsed.entries.map(entry => entry.publishedAt), [
+    "2026-10-22T12:57:24.000Z",
+    "2026-10-22T12:52:38.000Z",
+    "2026-10-22T12:50:20.000Z",
+  ]);
+  assert.equal(parsed.entries[0].title, "沃尔沃集团宣布设立Volvo Mining");
+  const gp = rsshubFeed("geekpark-ai");
+  const gpParsed = parseRegisteredFeed(rsshubGeekparkXml, gp);
+  assert.equal(gpParsed.rawCount, 3);
+  assert.equal(gpParsed.entries[0].url, "https://geekpark.net/news/372759");
+  assert.equal(gpParsed.entries[0].publishedAt, "2026-10-22T11:56:03.000Z");
+  assert.equal(gpParsed.entries[0].title, "宇树 10 周年，王兴兴：我劝你相信 AI");
+  assert.ok(!gpParsed.entries[0].snippet.includes("&lt;"), "escaped markup is decoded once, not left as entities");
+  assert.ok(gpParsed.entries[0].snippet.includes("（摘要截断）"));
+});
+
+test("RSSHub duplicates, foreign hosts and unsafe documents are rejected before candidates exist", () => {
+  const kr = rsshubFeed("36kr-flashes");
+  const duplicated = rsshub36krXml.replace("</channel>", `<item><title>沃尔沃集团宣布设立Volvo Mining</title><link>https://www.36kr.com/newsflashes/4036991939826561#ref</link></item></channel>`);
+  const parsed = parseRegisteredFeed(duplicated, kr);
+  assert.equal(parsed.rawCount, 4);
+  assert.equal(parsed.entries.length, 3, "the same article URL must not create a second candidate");
+  const throughRssHub = rsshub36krXml.replace("https://www.36kr.com/newsflashes/4036991939826561", "https://signal-map-rsshub-323338-4-1408253594.sh.run.tcloudbase.com/36kr/newsflashes/4036991939826561");
+  const filtered = parseRegisteredFeed(throughRssHub, kr);
+  assert.equal(filtered.entries.length, 2, "a link on the relay host is not the publisher's article");
+  assert.ok(filtered.entries.every(entry => new URL(entry.url).hostname.endsWith("36kr.com")));
+  assert.throws(() => parseRegisteredFeed(`<!DOCTYPE rss [<!ENTITY x SYSTEM "file:///etc/passwd">]>${rsshub36krXml}`, kr), /FEED_UNSAFE_XML/);
+  const credentialed = rsshub36krXml.replace("https://www.36kr.com/newsflashes/4036991939826561", "https://user:pass@www.36kr.com/newsflashes/4036991939826561");
+  assert.equal(parseRegisteredFeed(credentialed, kr).entries.length, 2, "credentials in an article URL are never accepted");
+});
+
+test("RSSHub candidates stay industry media and a failed feed never reads as empty results", async () => {
+  const reader: typeof readCustomSource = async url => ({url, status: "readable", reason: "fixture", requestCount: 1, content: url.includes("36kr") ? rsshub36krXml : rsshubGeekparkXml});
+  const both = await retrieveRegisteredFeeds({entities: ["36氪", "极客公园"], query: "", allowed: true, reader});
+  assert.equal(both.items.length, 6);
+  assert.ok(both.items.every(item => item.sourceType === "industry_media" && item.origin === "news" && item.authority === 60 && item.channel === "社区"));
+  assert.ok(both.items.every(item => item.dataOrigin === "live" && item.providerId === "registered-feeds"));
+  assert.equal(both.items.filter(item => new URL(item.url).hostname.endsWith("36kr.com")).length, 3);
+  assert.equal(both.items.filter(item => new URL(item.url).hostname.endsWith("geekpark.net")).length, 3);
+  assert.deepEqual(both.failures, []);
+  const failed = await retrieveRegisteredFeeds({entities: ["36氪"], query: "", allowed: true, reader: async url => ({url, status: "failed", reason: "FEED_TIMEOUT", requestCount: 1})});
+  assert.equal(failed.items.length, 0);
+  assert.equal(failed.outcomes[0].execution, "failed", "a transport failure is never recorded as an empty result");
+  assert.equal(failed.outcomes[0].sourceId, "36kr-flashes");
+  assert.match(failed.failures[0], /FEED_TIMEOUT/);
+  const empty = await retrieveRegisteredFeeds({entities: ["36氪"], query: "", allowed: true, reader: async url => ({url, status: "readable", reason: "read", requestCount: 1, content: "<rss><channel></channel></rss>"})});
+  assert.equal(empty.outcomes[0].execution, "searched_no_results");
+  assert.deepEqual(empty.failures, [], "a healthy empty feed is not a failure");
+});
+
+test("RSSHub media feed flows through the existing pipeline gates and freshness screening", async () => {
+  const before = globalThis.fetch;
+  globalThis.fetch = async () => new Response("<rss><channel></channel></rss>", {status: 200});
+  try {
+    const reads: string[] = [];
+    const question = {queries: ["36氪快讯近期有哪些变化"], allowedProviderIds: ["registered-feeds"], selectedSourceType: "INDEPENDENT_MEDIA"};
+    const entityInput = {...input, trackedEntities: "36氪", industry: "科技媒体", focusAreas: "36氪快讯", currentQuestions: "36氪快讯近期有哪些变化"};
+    const result = await runResearchPipeline(entityInput, undefined, {
+      customSourceReader: async url => {reads.push(url); return {url, status: "readable", reason: "fixture", requestCount: 1, content: rsshub36krXml};},
+    }, question);
+    assert.deepEqual(reads, [rsshubFeed("36kr-flashes").url], "only the named publisher feed is fetched");
+    const outcome = result.coverage.outcomes.find(item => item.providerId === "registered-feeds")!;
+    assert.equal(outcome.rawResultCount, 3);
+    assert.equal(outcome.normalizedCandidateCount, 3);
+    assert.equal(outcome.execution, "searched_with_results");
+    const stale = rsshub36krXml.replace(/<pubDate>[^<]+<\/pubDate>/g, new Date(Date.now() - 400 * 86400_000).toUTCString());
+    const staleRun = await runResearchPipeline(entityInput, undefined, {
+      customSourceReader: async url => ({url, status: "readable", reason: "fixture", requestCount: 1, content: stale}),
+    }, question);
+    assert.equal(staleRun.signals.length, 0, "stale entries from the pilot feed must not become research signals");
+  } finally { globalThis.fetch = before; }
+});
+
 test("feed failures preserve safe detailed codes through search phase diagnostics", async () => {
   for (const [reason, expected] of [["FEED_PRIVATE_ADDRESS", "FEED_PRIVATE_ADDRESS"], ["FEED_TIMEOUT", "FEED_TIMEOUT"], ["FEED_HTTP_503", "FEED_HTTP_503"], ["https://user:password@example.com/?token=secret", "FEED_READ_FAILED"]]) {
     const phases: Array<{phase: string; diagnostic?: Record<string, unknown>}> = [];
