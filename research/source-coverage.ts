@@ -5,6 +5,12 @@ export type ProviderRejectionSample = {
   urlPresent: boolean;
   rejectionStage: "normalization" | "candidate_admission";
   rejectionReason: string;
+  /** 原始候选链接（观察层展示用；未知时缺省，不用抓取时间或推断值替代）。 */
+  url?: string;
+  /** 原始发布日期（未知时缺省）。 */
+  publishedAt?: string;
+  /** 原始摘要片段（截断后；缺失时缺省）。 */
+  summary?: string;
 };
 
 /**

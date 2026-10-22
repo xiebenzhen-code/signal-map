@@ -1,5 +1,6 @@
 import type { ResearchOverview, ResearchSignal } from "../research/types.ts";
 import type { SourceCoverage } from "../research/source-coverage.ts";
+import type { ObservationLayer } from "./observation.ts";
 
 export type FreshnessWindow = "24h" | "3d" | "7d" | "30d" | "90d";
 export type SourceScope = "domestic" | "global" | "hybrid" | "custom";
@@ -60,6 +61,8 @@ export type InformationRunPayload = {
   signals: ResearchSignal[];
   overview: ResearchOverview;
   coverage: ProviderCoverage;
+  /** 待判断候选观察层：仅随本次响应展示，不持久化，不作为确认结论。 */
+  observation?: ObservationLayer;
   filteringSummary?: import("../research/types.ts").FilteringSummary;
   // Query plan is part of the /api/signals response; the home page reads the
   // requested freshness window from it to keep "today" gates window-aware.

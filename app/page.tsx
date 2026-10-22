@@ -55,6 +55,7 @@ import type {
   ProviderCoverage,
   SourceScope,
 } from "@/information/types";
+import type { ObservationLayer } from "@/information/observation";
 import { createAlphaStorage } from "@/lib/alpha-storage";
 import { LocalAccountBoundary } from "./components/local-account-boundary";
 import { CustomSourcesEditor } from "./components/custom-sources-editor";
@@ -202,6 +203,45 @@ function reliabilityLabel(score: number) {
   if (score >= 85) return "高可靠性";
   if (score >= 70) return "中等可靠性";
   return "低可靠性";
+}
+
+function ObservationSection({ observation, formalCount }: { observation?: ObservationLayer; formalCount: number }) {
+  if (!observation || !observation.items.length) return null;
+  const noFormal = formalCount === 0;
+  return (
+    <details className="mt-5 rounded-2xl border border-[#e4e7eb] bg-white p-4">
+      <summary className="cursor-pointer text-sm font-black">
+        待判断材料 · {observation.items.length} 条
+        {observation.collapsedCount > 0 ? `（另有 ${observation.collapsedCount} 条重复材料已折叠）` : ""}
+        <span className="ml-2 text-xs font-normal text-[#727b87]">待核对，未作为确认结论</span>
+      </summary>
+      {noFormal ? (
+        <p className="mt-2 rounded-lg bg-[#f5f7fa] px-3 py-2 text-xs leading-5 text-[#4a5563]">
+          暂无正式入选结果，另有若干材料可供核对。
+        </p>
+      ) : null}
+      <ul className="mt-3 grid gap-3">
+        {observation.items.map((item, index) => (
+          <li key={`${item.title}-${index}`} className="rounded-xl border border-[#eceff2] p-3">
+            <p className="text-sm font-bold leading-5">
+              {item.url
+                ? <a href={item.url} target="_blank" rel="noreferrer" className="text-[#1a4fd6] hover:underline">
+                    {item.titleTranslated ?? item.title}
+                  </a>
+                : (item.titleTranslated ?? item.title)}
+            </p>
+            {item.titleTranslated ? <p className="mt-1 text-xs leading-5 text-[#727b87]">原文：{item.title}</p> : null}
+            {item.summary ? <p className="mt-1 text-xs leading-5 text-[#4a5563]">{item.summary}</p> : null}
+            <p className="mt-2 text-xs leading-5 text-[#727b87]">
+              来源：{item.source} ｜ 发布时间：{item.publishedAt ?? "未知"} ｜ 未入选：{item.reasonZh}
+              {item.duplicateCount > 0 ? ` ｜ 另有 ${item.duplicateCount} 条重复材料已折叠` : ""}
+            </p>
+            <p className="mt-1 text-xs text-[#9aa3ad]">待核对，未作为确认结论。</p>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
 }
 
 function FilteringSummaryCard({ summary }: { summary?: FilteringSummary }) {
@@ -1636,6 +1676,9 @@ function AccountHomePage({ currentUser }: { currentUser: CurrentUser }) {
         </section>
       )}
       {!loading && !error && response && <FilteringSummaryCard summary={response.filteringSummary} />}
+      {!loading && !error && response && (
+        <ObservationSection observation={response.observation} formalCount={response.signals.length} />
+      )}
       {!loading && !error && response && todayPresentation.kind === "caught_up" && <EmptyToday onRefresh={() => activeFilter && activeContext && void refreshToday(activeContext, activeFilter)} />}
       {!loading && mustRead.length > 0 && (
         <>

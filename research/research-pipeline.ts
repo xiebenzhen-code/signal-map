@@ -32,7 +32,8 @@ import {
   assessNoveltyAttribution,
   type NoveltyClusterMember,
 } from "./novelty-attribution.ts";
-import { translateSignalsForPresentation } from "./translation.ts";
+import { translateSignalsForPresentation, translateSingleText } from "./translation.ts";
+import { buildObservationLayer } from "../information/observation.ts";
 import { buildSourceCoverage, type ProviderRejectionSample, type SourceExecutionOutcome } from "./source-coverage.ts";
 import { fuseSignal } from "../signal-fusion/fusion.ts";
 import type { FusionEvidence } from "../signal-fusion/types.ts";
@@ -609,7 +610,7 @@ export type ArxivNormalizationResult = {
 };
 
 function rejectionSample(
-  result: { title?: string; url?: string },
+  result: { title?: string; url?: string; publishedAt?: string; snippet?: string },
   rejectionStage: ProviderRejectionSample["rejectionStage"],
   rejectionReason: string,
 ): ProviderRejectionSample {
@@ -618,15 +619,22 @@ function rejectionSample(
     urlPresent: Boolean(result.url?.trim()),
     rejectionStage,
     rejectionReason,
+    // Observation-layer display fields: the raw candidate identity travels
+    // with the rejection so the UI can show what was filtered and why.
+    ...(result.url?.trim() ? { url: result.url.trim() } : {}),
+    ...(result.publishedAt?.trim() ? { publishedAt: result.publishedAt.trim() } : {}),
+    ...(result.snippet?.trim() ? { summary: result.snippet.replace(/\s+/g, " ").trim().slice(0, 200) } : {}),
   };
 }
+
+const MAX_REJECTION_SAMPLES_PER_PROVIDER = 8;
 
 export function normalizeArxivResults(rawResults: ArxivRawResult[], retrievedAt = new Date().toISOString()): ArxivNormalizationResult {
   const normalizationRejectionReasons: Record<string, number> = {};
   const normalizationRejectedSamples: ProviderRejectionSample[] = [];
   const incrementRejected = (result: ArxivRawResult, reason: string) => {
     normalizationRejectionReasons[reason] = (normalizationRejectionReasons[reason] || 0) + 1;
-    if (normalizationRejectedSamples.length < 3) {
+    if (normalizationRejectedSamples.length < MAX_REJECTION_SAMPLES_PER_PROVIDER) {
       normalizationRejectedSamples.push(rejectionSample(result, "normalization", reason));
     }
   };
@@ -729,7 +737,7 @@ async function searchDirectProvider(
       }
       const reason = "TOPIC_MISMATCH";
       candidateAdmissionRejectionReasons[reason] = (candidateAdmissionRejectionReasons[reason] || 0) + 1;
-      if (candidateAdmissionRejectedSamples.length < 3) {
+      if (candidateAdmissionRejectedSamples.length < MAX_REJECTION_SAMPLES_PER_PROVIDER) {
         candidateAdmissionRejectedSamples.push(rejectionSample(item, "candidate_admission", reason));
       }
       return [];
@@ -2783,8 +2791,15 @@ export async function runResearchPipeline(
     const included = presentation.signals.some(signal => signal.sourceUrl === url || signal.sources.some(source => source.sourceUrl === url));
     check.reason = customSourceReadReason(included);
   }
+  // Observation layer: show safely displayable non-selected candidates with
+  // their original rejection reasons. Pure response payload — never persisted,
+  // never merged into knowledge/evidence, and the formal gates stay untouched.
+  const observation = await buildObservationLayer(coverage.outcomes, {
+    translate: (text) => translateSingleText(text),
+  });
   return {
     ...(customSourceChecks.length ? { customSourceChecks } : {}),
+    ...(observation.items.length ? { observation } : {}),
     signals: presentation.signals,
     status: coverage.outcomes.map((outcome) => ({
       name: outcome.source,
