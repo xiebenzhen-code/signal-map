@@ -24,6 +24,7 @@ function outcome(overrides: Partial<SourceExecutionOutcome> = {}): SourceExecuti
 
 const TOPIC_MISMATCH = {
   title: "Example CMS adds markdown export",
+  summary: "The export dialog now preserves heading levels.",
   url: "https://example.com/blog/markdown-export",
   publishedAt: "2026-10-12T00:00:00.000Z",
   urlPresent: true,
@@ -53,6 +54,19 @@ test("TOPIC_MISMATCH 材料保留原始筛选阶段与理由（不改写）", as
   assert.ok(layer.items[0].reasonZh.includes("主题"), "必须给出中文说明");
   assert.equal(layer.items[0].url, "https://example.com/blog/markdown-export", "原始链接保留");
   assert.equal(layer.items[0].publishedAt, "2026-10-12T00:00:00.000Z", "原始日期保留");
+  assert.equal(layer.items[0].summary, "The export dialog now preserves heading levels.", "摘要从拒绝样本透传");
+});
+
+test("没有摘要时不编造，不用标题拼接充当摘要", async () => {
+  const layer = await buildObservationLayer([
+    outcome({
+      candidateAdmissionRejectedSamples: [
+        { ...TOPIC_MISMATCH, summary: undefined },
+      ],
+    }),
+  ]);
+  assert.equal(layer.items[0].summary, undefined, "缺摘要保持缺省");
+  assert.ok(!String(layer.items[0].summary ?? "").includes(layer.items[0].title), "不得用标题充当摘要");
 });
 
 test("明确无关材料默认收起，重复标题折叠并保留首条代表与计数", async () => {
@@ -79,7 +93,8 @@ test("明确无关材料默认收起，重复标题折叠并保留首条代表�
   assert.equal(layer.items[0].duplicateCount, 1, "重复计数并关联原候选");
   assert.equal(layer.items[0].source, "Official Feed · Example Releases", "折叠保留首个代表来源");
   assert.equal(layer.excludedSafetyCount, 1, "明确无效材料只计数量，不展开");
-  assert.equal(layer.collapsedCount, 0, "无重复折叠时收起计数为 0");
+  assert.equal(layer.collapsedCount, 1, "同标题镜像计入重复折叠");
+  assert.equal(layer.overflowCount, 0, "未超上限时超限计数为 0");
   assert.equal(
     layer.items.some((item) => item.reason === "invalid_url"),
     false,
@@ -128,13 +143,38 @@ test("翻译失败回退原文；数字、链接、日期不被改写", async ()
   assert.equal(layer.items[0].publishedAt, "2026-10-12T00:00:00.000Z");
 });
 
-test("翻译成功时提供中文标题并保留原文切换", async () => {
+test("译文数字一致时提供中文标题并保留原文切换", async () => {
   const layer = await buildObservationLayer(
-    [outcome({ candidateAdmissionRejectedSamples: [TOPIC_MISMATCH] })],
-    { translate: async () => "示例 CMS 增加导出功能 20 次" },
+    [outcome({
+      candidateAdmissionRejectedSamples: [
+        { ...TOPIC_MISMATCH, title: "Example CMS 26.04.1 adds markdown export" },
+      ],
+    })],
+    { translate: async () => "示例 CMS 26.04.1 增加导出功能" },
   );
-  assert.equal(layer.items[0].titleTranslated, "示例 CMS 增加导出功能 20 次");
-  assert.equal(layer.items[0].title, "Example CMS adds markdown export", "原文仍保留供切换");
+  assert.equal(layer.items[0].titleTranslated, "示例 CMS 26.04.1 增加导出功能");
+  assert.equal(layer.items[0].title, "Example CMS 26.04.1 adds markdown export", "原文仍保留供切换");
+});
+
+test("原文数字在译文中被新增、删除或改变时回退原文", async () => {
+  const title = "Example CMS 26.04.1 adds markdown export";
+  const layer = await buildObservationLayer(
+    [outcome({
+      candidateAdmissionRejectedSamples: [
+        { ...TOPIC_MISMATCH, title },
+        { ...TOPIC_MISMATCH, title: "Example CMS 26.04.1 adds 2 export modes" },
+      ],
+    })],
+    {
+      translate: async (text) => text.includes("2 export modes")
+        ? "示例 CMS 26.04.1 增加 3 种导出模式"   // 数字被改变
+        : "示例 CMS v26.04.2 增加导出功能",        // 版本号被改变
+    },
+  );
+  for (const item of layer.items) {
+    assert.equal(item.titleTranslated, undefined, "数字不一致的译文必须回退原文");
+    assert.equal(item.title.includes("26.04.1"), true, "原文版本号保持不变");
+  }
 });
 
 test("观察层不携带持久化字段，仅随响应展示", async () => {
@@ -145,7 +185,7 @@ test("观察层不携带持久化字段，仅随响应展示", async () => {
   for (const forbidden of ["knowledgeStatus", "attentionDecision", "knowledgeChanges", "evidenceRecords"]) {
     assert.equal(blob.includes(forbidden), false, `观察层不得携带持久化字段：${forbidden}`);
   }
-  assert.deepEqual(Object.keys(layer).sort(), ["collapsedCount", "excludedSafetyCount", "items"]);
+  assert.deepEqual(Object.keys(layer).sort(), ["collapsedCount", "excludedSafetyCount", "items", "overflowCount"]);
 });
 
 test("条数边界：可查看候选不超过 8 条", async () => {
@@ -158,4 +198,6 @@ test("条数边界：可查看候选不超过 8 条", async () => {
     outcome({ candidateAdmissionRejectedSamples: samples }),
   ]);
   assert.equal(layer.items.length, 8);
+  assert.equal(layer.overflowCount, 4, "超出展示上限的候选单独计数");
+  assert.equal(layer.collapsedCount, 0, "超限材料不得被称为重复材料");
 });

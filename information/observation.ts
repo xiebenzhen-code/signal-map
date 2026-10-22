@@ -30,11 +30,23 @@ export type ObservationItem = {
 
 export type ObservationLayer = {
   items: ObservationItem[];
+  /** 同标题重复折叠的条数（与超限计数相互独立）。 */
   collapsedCount: number;
+  /** 安全拒绝与无效内容计数（不可见，仅数量）。 */
   excludedSafetyCount: number;
+  /** 有待核对候选但超出展示上限、本轮未展示的条数。 */
+  overflowCount: number;
 };
 
 export const OBSERVATION_MAX_ITEMS = 8;
+
+/** 译文数字序列必须与原文完全一致（新增、删除或改变任一数字都回退原文）。 */
+function digitsConsistent(original: string, translated: string) {
+  const pattern = /\d+(?:\.\d+)?/g;
+  const of = original.match(pattern) ?? [];
+  const tf = translated.match(pattern) ?? [];
+  return of.length === tf.length && of.every((value, index) => value === tf[index]);
+}
 
 const SAFE_REASON_PATTERN = /^FEED_/;
 const SAFE_NORMALIZATION_REASONS = new Set(["invalid_url", "missing_url", "missing_title"]);
@@ -92,6 +104,7 @@ export async function buildObservationLayer(
           title: sample.title,
           url: sample.url,
           publishedAt: sample.publishedAt,
+          summary: sample.summary,
           source: outcome.source,
           stage: sample.rejectionStage,
           reason: sample.rejectionReason,
@@ -104,7 +117,8 @@ export async function buildObservationLayer(
   }
 
   const representatives = [...groups.values()].slice(0, OBSERVATION_MAX_ITEMS);
-  collapsedCount = Math.max(0, groups.size - representatives.length);
+  collapsedCount = representatives.reduce((total, group) => total + group.duplicateCount, 0);
+  const overflowCount = Math.max(0, groups.size - representatives.length);
 
   const items: ObservationItem[] = [];
   for (const group of representatives) {
@@ -113,7 +127,8 @@ export async function buildObservationLayer(
     if (options.translate) {
       try {
         const translated = await options.translate(item.title);
-        if (translated && translated.trim() && translated.trim() !== item.title) {
+        if (translated && translated.trim() && translated.trim() !== item.title
+          && digitsConsistent(item.title, translated.trim())) {
           item.titleTranslated = translated.trim();
         }
       } catch {
@@ -123,5 +138,5 @@ export async function buildObservationLayer(
     items.push(item);
   }
 
-  return { items, collapsedCount, excludedSafetyCount };
+  return { items, collapsedCount, excludedSafetyCount, overflowCount };
 }

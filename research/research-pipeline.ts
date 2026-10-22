@@ -32,7 +32,7 @@ import {
   assessNoveltyAttribution,
   type NoveltyClusterMember,
 } from "./novelty-attribution.ts";
-import { translateSignalsForPresentation, translateSingleText } from "./translation.ts";
+import { translateSignalsForPresentation } from "./translation.ts";
 import { buildObservationLayer } from "../information/observation.ts";
 import { buildSourceCoverage, type ProviderRejectionSample, type SourceExecutionOutcome } from "./source-coverage.ts";
 import { fuseSignal } from "../signal-fusion/fusion.ts";
@@ -2794,9 +2794,10 @@ export async function runResearchPipeline(
   // Observation layer: show safely displayable non-selected candidates with
   // their original rejection reasons. Pure response payload — never persisted,
   // never merged into knowledge/evidence, and the formal gates stay untouched.
-  const observation = await buildObservationLayer(coverage.outcomes, {
-    translate: (text) => translateSingleText(text),
-  });
+  // Phase 1 boundary: the observation layer ships with ORIGINAL titles only —
+  // building it must not trigger any translation service call. On-demand
+  // translation at expand time is registered as follow-up work.
+  const observation = await buildObservationLayer(coverage.outcomes);
   return {
     ...(customSourceChecks.length ? { customSourceChecks } : {}),
     ...(observation.items.length ? { observation } : {}),

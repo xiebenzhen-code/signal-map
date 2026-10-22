@@ -213,6 +213,7 @@ function ObservationSection({ observation, formalCount }: { observation?: Observ
       <summary className="cursor-pointer text-sm font-black">
         待判断材料 · {observation.items.length} 条
         {observation.collapsedCount > 0 ? `（另有 ${observation.collapsedCount} 条重复材料已折叠）` : ""}
+        {observation.overflowCount > 0 ? `（另有 ${observation.overflowCount} 条候选本轮未展示）` : ""}
         <span className="ml-2 text-xs font-normal text-[#727b87]">待核对，未作为确认结论</span>
       </summary>
       {noFormal ? (

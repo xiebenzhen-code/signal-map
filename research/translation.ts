@@ -160,22 +160,6 @@ function fieldsForSignal(signal: ResearchSignal) {
   ];
 }
 
-/**
- * Single-text translation for the observation layer: reuses the same
- * translateBatch pipeline (cache, protected terms, fallback), never throws,
- * and returns null when the translation fails or the text should stay as-is.
- * Callers must fall back to the original text on null.
- */
-export async function translateSingleText(text: string): Promise<string | null> {
-  if (process.env.TRANSLATION_ENABLED?.toLowerCase() === "false") return null;
-  if (!shouldTranslate(text)) return null;
-  try {
-    return await translateBatch(text);
-  } catch {
-    return null;
-  }
-}
-
 export async function translateSignalsForPresentation(
   signals: ResearchSignal[],
 ) {
