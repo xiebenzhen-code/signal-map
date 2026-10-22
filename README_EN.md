@@ -20,7 +20,11 @@ An information-filtering tool for independent developers and creators: research 
 
 ## Why this tool exists
 
-Following a product takes more than finding articles. You also need to know whether a source answers your question, fits the time window, or repeats information you already have.
+I started Signal Map because there was too much information and too little clarity about what to trust or spend time on. A constant stream of updates can make judgment harder and add to information anxiety.
+
+The project explores a way to filter, check and revisit public information: reduce irrelevant or repeated material, retain original sources and dates, and help decide what deserves attention and what remains uncertain. Reducing information anxiety and supporting judgment are goals, not demonstrated user outcomes. The tool cannot automatically guarantee that a claim is true.
+
+Content research is another intended use: discover leads in public updates, check their sources, dates and applicability, then decide whether they are worth covering. Existing retrieval, filtering and source records provide part of that foundation. Topic value, audience performance and continuous proactive filtering have not been validated.
 
 Signal Map implements a bounded workflow:
 
