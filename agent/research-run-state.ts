@@ -222,13 +222,25 @@ function mergeResearchResponses(previous: ResearchResponse | undefined, next: Re
     evidenceRecordsFromResponse(next),
   );
   const acceptedCount = acceptedEvidenceRecords({ ...next, signals: mergedSignals }).length;
+  const coverage = buildSourceCoverage([...(previous.coverage?.outcomes ?? []), ...(next.coverage?.outcomes ?? [])]);
+  const progress = [...previous.progress, ...next.progress];
+  // Completion describes the cumulative run, not only its last empty slice.
+  // Keep historical phases intact, but never turn an unresolved read failure
+  // into a claim that nothing changed when the run produced no signals.
+  if (!mergedSignals.length && coverage.outcomes?.some(outcome => outcome.execution === "failed")) {
+    for (let index = progress.length - 1; index >= 0; index--) {
+      if (progress[index].stage !== "complete") continue;
+      progress[index] = {...progress[index], label: "研究未完成 · 来源读取失败或证据不足，请稍后再试"};
+      break;
+    }
+  }
   return mergeResponseSourceOutcomes(previous, {
     ...next,
     signals: mergedSignals,
-    coverage: buildSourceCoverage([...(previous.coverage?.outcomes ?? []), ...(next.coverage?.outcomes ?? [])]),
+    coverage,
     evidenceRecords: mergedEvidenceRecords,
     status: [...previous.status, ...next.status],
-    progress: [...previous.progress, ...next.progress],
+    progress,
     failures: [...previous.failures, ...next.failures],
     dataMode: previous.dataMode === next.dataMode ? next.dataMode : "mixed",
     sourceDiagnostics: [...(previous.sourceDiagnostics ?? []), ...(next.sourceDiagnostics ?? [])],

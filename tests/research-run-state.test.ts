@@ -303,3 +303,33 @@ test("coverage preserves concrete source history across skipped and failed slice
   assert.deepEqual(retried.coverage.usedProviders, [success.source]);
   assert.ok(retried.coverage.failedProviders.includes(success.source));
 });
+
+test("failed feed in an earlier slice cannot end as a quiet day after an empty later slice", () => {
+  const failed = response([], {
+    coverage: buildSourceCoverage([{source: "36kr feed", providerId: "registered-feeds", sourceId: "36kr-flashes", execution: "failed", searched: true, requestCount: 1, resultCount: 0, failureCode: "upstream_error", detailFailureCode: "FEED_TIMEOUT"}]),
+    progress: [{stage: "complete", label: "研究未完成 · 来源读取失败或证据不足，请稍后再试", counts: {} as never}],
+    failures: ["36kr feed: FEED_TIMEOUT"],
+  });
+  const quiet = response([], {
+    coverage: buildSourceCoverage([{source: "arXiv", providerId: "arxiv", execution: "searched_no_results", searched: true, requestCount: 1, resultCount: 0}]),
+    progress: [{stage: "complete", label: "研究完成 · 今天没有重要变化", counts: {} as never}],
+  });
+  const merged = mergeRoundAttempts(failed, quiet);
+  assert.match(merged.progress.at(-1)?.label ?? "", /研究未完成/);
+  assert.doesNotMatch(merged.progress.at(-1)?.label ?? "", /今天没有重要变化/);
+  assert.equal(merged.coverage.outcomes?.find(o => o.sourceId === "36kr-flashes")?.detailFailureCode, "FEED_TIMEOUT");
+  assert.deepEqual(merged.failures, failed.failures);
+});
+
+test("two successfully empty slices keep the quiet complete label", () => {
+  const quiet = response([], {coverage: buildSourceCoverage([{source: "feed", execution: "searched_no_results", searched: true, requestCount: 1, resultCount: 0}]), progress: [{stage: "complete", label: "研究完成 · 今天没有重要变化", counts: {} as never}]});
+  assert.match(mergeRoundAttempts(quiet, quiet).progress.at(-1)?.label ?? "", /研究完成 · 今天没有重要变化/);
+});
+
+test("a later slice with a selected signal keeps its positive completion label", () => {
+  const failed = response([], {coverage: buildSourceCoverage([{source: "failed", execution: "failed", searched: true, requestCount: 1, resultCount: 0}])});
+  const found = response([signal()], {progress: [{stage: "complete", label: "研究完成 · 今天 1 条值得注意", counts: {} as never}]});
+  const merged = mergeRoundAttempts(failed, found);
+  assert.equal(merged.signals.length, 1);
+  assert.match(merged.progress.at(-1)?.label ?? "", /今天 1 条值得注意/);
+});
