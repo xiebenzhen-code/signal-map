@@ -78,7 +78,7 @@ https://tcb.cloud.tencent.com/dev?envId=signal-map-prod-d7feg55r886aa857#/platfo
 - 健康：`GET /health` → **200** `{"status":"ok"}`（0.30s）。
 - 本次未触发回退，未判定运行回归；022 仍为回退参照。
 
-### 复验：单次提交被站点边缘阻断，研究结果 0 条
+### 复验：单次提交被站点边缘阻断，未取得产品研究结果
 
 - 运行前确认本轮无请求记录（retest 目录只有 `run-once.mjs`，脚本 SHA256 与上一轮一致），随后执行脚本 **1 次**；脚本内部 `attempts=1`，无重试。
 - 结果：`POST https://signal.benzhenlab.com/api/signals` → **HTTP 403**、`content-type: text/html; charset=UTF-8`、耗时 **1226ms**；响应体是 Cloudflare "Attention Required!" 阻断页，**Cloudflare Ray ID: a4f08f03acf83385**，不是产品 JSON。
@@ -93,7 +93,7 @@ https://tcb.cloud.tencent.com/dev?envId=signal-map-prod-d7feg55r886aa857#/platfo
 |---|---|
 | 代码与 Git | 2984cb0 已推送；本轮仅追加本报告文档提交 |
 | 部署 | 023 成功、100% 承流、配置保持、健康 200 |
-| 本次研究 | 0 条（单次请求被 Cloudflare 403 阻断，未到达产品） |
+| 本次研究 | **HTTP403 边缘阻断，未取得产品研究结果；候选与信号数量 UNKNOWN** |
 | 未验证 | 两路来源成败与计数、候选/信号/观察层、complete 标签修补、超时根因 |
 
 ### 额度
