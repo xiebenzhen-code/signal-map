@@ -49,15 +49,23 @@
 
 ## 三（续）｜2026-10-24 P2-E 修订 + P2-F 统一后的版本对账
 
-### 版本对账表（当前 vs 待部署）
+### 版本对账表（当前 vs 待部署）——P2-G 更新
 | 模块 | 线上版本(源) | master 状态 | 待部署 |
 |---|---|---|---|
 | Web | Sites55（Sites 快照 `0d1457397bea6a111caf3df68d3b1d452e5f83ee`） | 语义 delta 已全部并入 | 下次发布以 master 确定提交构建（未授权） |
-| API | 024（源 `33635cc`，镜像 digest `sha256:37946680f3cd14fe8add566ca0e2ec801d9e9290dbeb109bd8a21233a2a6ad3c`） | 领先：Sites55 移植 + relay 配置化 | **候选 025 = master `0ab6cf28dbb550c8387eb24ad1a03225b0c28d92`**（未授权发布） |
-| RSSHub | rsshub-001（digest `sha256:5503609009925e464ddea3830844f7a77090b61b81061de6dcb80c19efc995ff`）故障中 | 外部固定依赖（不并入本仓） | 独立宿主迁移待授权（见下） |
+| API | 024（源 `33635cc`，镜像 digest `sha256:37946680f3cd14fe8add566ca0e2ec801d9e9290dbeb109bd8a21233a2a6ad3c`） | 领先：Sites55 移植 + relay 配置化 + P2-G 加固 | **唯一候选 025 = master `3f0d84cdebf85d8a4a3a316ef1ed5e10702426fb`**（未授权发布；`0ab6cf2` 为其历史前置，不再是候选） |
+| RSSHub | rsshub-001（digest `sha256:5503609009925e464ddea3830844f7a77090b61b81061de6dcb80c19efc995ff`）故障中 | 外部固定依赖（不并入本仓） | Lighthouse 宿主迁移待授权（见下） |
 
-### master 新增（本节）
-- `0ab6cf2` feat(feeds): RSSHUB_BASE_URL/RSSHUB_ACCESS_KEY 受控配置——路由固定常量、缺配/非 https 即禁用并 not_configured 上报、密钥仅存在于出站请求 URL（outcomes/候选/failures/诊断零泄漏，测试锁定）。门禁：tsc 0 / lint 0 err / 945・939・0・6s / build 0。
+### P2-G 新增（2026-10-24，`3f0d84c`）
+- **严格 origin 解析**：`RSSHUB_BASE_URL` 经 WHATWG URL 严格校验——仅 HTTPS、无 userinfo、无路径、无查询、无 fragment（`base_not_origin` 拒绝）；运行时 SSRF/DNS/TLS 门禁不变。
+- **生产密钥策略**：`NODE_ENV=production` 缺 `RSSHUB_ACCESS_KEY` → relays 拒绝启用（`missing_key`→`not_configured`，零抓取，无静默开放代理）。
+- **安全测试 14 用例**：严格拒/无 key 拒/跨域跳转不携带 key（读取器跳转 URL=Location 原样）/超时码映射/缓存复用零泄漏。门禁：tsc 0 / lint 0 err / 951・945・0・6s / build 0。
+- **RSSHUB_KEY_TRANSPORT 风险（未闭合，生产不批）**：当前实现 key 走 URL query——TLS 保护传输，但会出现在 relay 自身访问日志与其上游日志中；跨域跳转已证不携带。**生产批准前置**：固定 HTTPS 网关 `X-Relay-Key` 头部鉴权+剥离方案（需安全读取器支持自定义头，后续补丁）。
+
+### Lighthouse 宿主（P2-G 实时只读核实，非历史推断）
+- **`lhins-pfzwcoao`**：**RUNNING**，ap-shanghai-4，**2 CPU / 2 GB**，Ubuntu Server 22.04 LTS，有公网 IP，到期 2026-11-17（NOTIFY_AND_MANUAL_RENEW）。
+- 防火墙现开 22/80/ICMP——**443/1200 未开**（迁移需另授权加规则+反代）；Docker 状态/磁盘余量/月费 UNKNOWN（需 SSH 或用户确认）。
+- 结论：**可复用性初步成立**（资源 2C2G 足够 0.25C/512MiB RSSHub），上线前缺 Docker/443 核验。
 
 ### RSSHub 宿主修订（P2-E STEP 2，不依赖 CloudBase Run 控制面）
 | 候选 | 结论 |
@@ -72,3 +80,4 @@
 ## 三、变更历史
 - 2026-10-24: 建立。master 7268bf8→33635cc（ff, RSSHub 分支收口）→6238890（ff, Sites55 移植）。
 - 2026-10-24（二）: master 9309611→0ab6cf2（relay 配置化+测试）；版本对账与宿主修订入清单。
+- 2026-10-24（三）P2-G: master 9347a23→3f0d84c（严格origin+生产key策略+14安全用例）；Lighthouse lhins-pfzwcoao 实时核实入清单；候选 025 唯一化为 3f0d84c。
