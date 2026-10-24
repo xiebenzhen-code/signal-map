@@ -53,7 +53,7 @@
 | 模块 | 线上版本(源) | master 状态 | 待部署 |
 |---|---|---|---|
 | Web | Sites55（Sites 快照 `0d1457397bea6a111caf3df68d3b1d452e5f83ee`） | 语义 delta 已全部并入 | 下次发布以 master 确定提交构建（未授权） |
-| API | 024（源 `33635cc`，镜像 digest `sha256:37946680f3cd14fe8add566ca0e2ec801d9e9290dbeb109bd8a21233a2a6ad3c`） | 领先：Sites55 移植 + relay 配置化 + P2-G 加固 | **唯一候选 025 = master `32955ad75a60e7dcee552f8076a46982b49c3efe`**（未授权发布；`3f0d84c`/`0ab6cf2` 为历史前置，不再是候选） |
+| API | 024（源 `33635cc`，镜像 digest `sha256:37946680f3cd14fe8add566ca0e2ec801d9e9290dbeb109bd8a21233a2a6ad3c`） | 领先：Sites55 移植 + relay 配置化 + P2-G 加固 | **唯一候选 025 = master `25032736aa4950f8cffe4dc3e747f6d7c2ae6b36`**（未授权发布；`32955ad`/`3f0d84c`/`0ab6cf2` 为历史前置，不再是候选） |
 | RSSHub | rsshub-001（digest `sha256:5503609009925e464ddea3830844f7a77090b61b81061de6dcb80c19efc995ff`）故障中 | 外部固定依赖（不并入本仓） | Lighthouse 宿主迁移待授权（见下） |
 
 ### P2-G 新增（2026-10-24，`3f0d84c`）
@@ -88,3 +88,9 @@
 - 门禁：tsc 0 / lint 0 err / 专项 71・71 / 全量 954・948・0・6s / build 0 / api:build 0。
 - 上线需开端口：仅 **443/TCP**（1200 保持关闭，容器仅绑 127.0.0.1）。
 - 变更历史：master 1774cb8→32955ad（ff）。
+
+### P2-I v1.1（2026-10-24，`2503273`）
+- **geekpark 官方 RSS 直连**（静态 `geekpark-news`，生产网络实测 200/xml/30条）；36kr 无官方源（SPA 壳，本地产证+生产实测），保留 env 门控 relay。
+- 真实快照回放：N=30→A=30→M=30→K=4（七日内 25 条）；遗留宽源门控语义已记录（别名命中可放行边缘条、部分真 AI 条进观察层——既有行为未改）。
+- 门禁：tsc0/lint0err/专项43・43/全量954・948・0・6s/build0/api:build0。
+- Lighthouse 迁移**降级为备选**：geekpark 已免中继；仅 36kr 仍需 RSSHub（工单未结）。
