@@ -35,11 +35,9 @@ test("non-URL or non-https base is rejected as insecure_base", () => {
 test("https base builds the two fixed routes; the key rides relayAuth, never the URL", () => {
   const status = rsshubRelayFeeds({RSSHUB_BASE_URL: "https://rsshub.example", RSSHUB_ACCESS_KEY: "s3cret key/+:&"} as never);
   assert.equal(status.reason, null);
-  assert.equal(status.feeds.length, 2);
+  assert.equal(status.feeds.length, 1, "only the 36kr relay remains");
   const kr = status.feeds.find(feed => feed.id === "36kr-flashes")!;
-  const gp = status.feeds.find(feed => feed.id === "geekpark-ai")!;
   assert.equal(kr.url, "https://rsshub.example/36kr/newsflashes?limit=5");
-  assert.equal(gp.url, "https://rsshub.example/geekpark/304?limit=5");
   assert.deepEqual(kr.relayAuth, {origin: "https://rsshub.example", name: "X-Relay-Key", value: "s3cret key/+:&"});
   assert.ok(!JSON.stringify(status.feeds.map(feed => feed.url)).includes("key="));
   assert.deepEqual(kr.publisherHosts, ["36kr.com"]);
@@ -82,7 +80,7 @@ test("without configuration the relays are absent from selection and reported di
   const feeds = selectRegisteredFeeds(QUERY, env);
   assert.equal(feeds.some(feed => feed.id === "36kr-flashes"), false);
   const disabled = disabledRsshubFeeds(QUERY, env);
-  assert.equal(disabled.length, 2);
+  assert.equal(disabled.length, 1, "only 36kr remains relay-gated");
   assert.equal(disabled[0]!.reason, "missing_base");
 });
 
@@ -100,7 +98,7 @@ test("a question that never mentions the relays gets no not_configured noise", (
   assert.deepEqual(disabled, []);
 });
 
-test("retrieve reports not_configured relays honestly and fetches nothing", async () => {
+test("retrieve reports not_configured relays honestly; the 36kr relay never fetches", async () => {
   const savedBase = process.env.RSSHUB_BASE_URL;
   const savedKey = process.env.RSSHUB_ACCESS_KEY;
   delete process.env.RSSHUB_BASE_URL;
@@ -108,14 +106,15 @@ test("retrieve reports not_configured relays honestly and fetches nothing", asyn
   let fetches = 0;
   const reader = async (url: string) => {
     fetches++;
-    return {url, status: "readable" as const, reason: "ok", content: readableXml("36kr.com"), requestCount: 1};
+    return {url, status: "readable" as const, reason: "ok", content: readableXml(url.includes("36kr") ? "36kr.com" : "geekpark.net"), requestCount: 1};
   };
   try {
     const run = await retrieveRegisteredFeeds({...QUERY, allowed: true, reader: reader as never});
     const outcome = run.outcomes.find(o => o.sourceId === "36kr-flashes")!;
     assert.equal(outcome.execution, "not_configured");
     assert.equal(outcome.detailFailureCode, "FEED_RSSHUB_MISSING_BASE");
-    assert.equal(fetches, 0, "nothing fetched for an unconfigured relay");
+    assert.equal(fetches, 1, "only the always-on geekpark official feed fetches");
+    assert.ok(run.outcomes.some(o => o.sourceId === "geekpark-news" && o.execution === "searched_with_results"), "geekpark official feed works without any relay config");
   } finally {
     if (savedBase === undefined) delete process.env.RSSHUB_BASE_URL; else process.env.RSSHUB_BASE_URL = savedBase;
     if (savedKey === undefined) delete process.env.RSSHUB_ACCESS_KEY; else process.env.RSSHUB_ACCESS_KEY = savedKey;
@@ -130,14 +129,15 @@ test("missing key in production disables relays and reports FEED_RSSHUB_MISSING_
   let fetches = 0;
   const reader: Reader = (async (url: string) => {
     fetches++;
-    return {url, status: "readable", reason: "fixture", requestCount: 1, content: readableXml("36kr.com")};
+    return {url, status: "readable", reason: "fixture", requestCount: 1, content: readableXml("geekpark.net")};
   }) as never;
   try {
     const run = await retrieveRegisteredFeeds({...QUERY, allowed: true, reader});
     const outcome = run.outcomes.find(o => o.sourceId === "36kr-flashes")!;
     assert.equal(outcome.execution, "not_configured");
     assert.equal(outcome.detailFailureCode, "FEED_RSSHUB_MISSING_KEY");
-    assert.equal(fetches, 0, "a production relay without a key never fetches");
+    assert.equal(fetches, 1, "geekpark official feed still fetches; only the relay is blocked");
+    assert.ok(!JSON.stringify(run.outcomes).includes("rsshub.example"), "the relay base never appears");
     assert.ok(!JSON.stringify(run.outcomes).includes("rsshub.example"));
   } finally {
     if (saved.NODE_ENV === undefined) delete (process.env as Record<string, string | undefined>).NODE_ENV;
@@ -157,7 +157,7 @@ test("retrieve sends the relay key as a same-origin header and leaks it nowhere"
   const reader = (async (url: string, options?: ReaderOptions) => {
     seenUrls.push(url);
     seenOptions.push(options ?? {});
-    return {url, status: "readable" as const, reason: "ok", content: readableXml("36kr.com"), requestCount: 1};
+    return {url, status: "readable" as const, reason: "ok", content: readableXml(url.includes("36kr") ? "36kr.com" : "geekpark.net"), requestCount: 1};
   }) as never;
   try {
     process.env.RSSHUB_BASE_URL = "https://rsshub.example";
@@ -213,7 +213,7 @@ test("the cache key is the key-free URL, so credentials never enter cache keys",
   process.env.RSSHUB_BASE_URL = "https://rsshub.example";
   process.env.RSSHUB_ACCESS_KEY = "SECRET9";
   const cache = new Map();
-  const reader = (async (url: string) => ({url, status: "readable" as const, reason: "ok", content: readableXml("36kr.com"), requestCount: 1})) as never;
+  const reader = (async (url: string) => ({url, status: "readable" as const, reason: "ok", content: readableXml("geekpark.net"), requestCount: 1})) as never;
   try {
     await retrieveRegisteredFeeds({...QUERY, allowed: true, reader, cache});
     for (const key of cache.keys()) {

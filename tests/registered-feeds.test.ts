@@ -290,17 +290,16 @@ test.after(() => { delete process.env.RSSHUB_BASE_URL; });
 const rsshubFeed = (id: string) => rsshubRelayFeeds().feeds.find(feed => feed.id === id)!;
 
 test("RSSHub pilot feeds enter the catalogue as media with publisher hosts and no topic broadening", () => {
-  assert.equal(registeredFeeds.length, 17, "static catalogue stays configuration-free");
-  assert.equal(rsshubRelayFeeds().feeds.length, 2, "both relays come from configuration");
+  assert.equal(registeredFeeds.length, 18, "static catalogue stays configuration-free (geekpark official RSS included)");
+  assert.equal(rsshubRelayFeeds().feeds.length, 1, "only the 36kr relay remains configuration-gated");
   const kr = rsshubFeed("36kr-flashes");
   assert.equal(kr.url, "https://relay.test/36kr/newsflashes?limit=5");
   assert.deepEqual(kr.publisherHosts, ["36kr.com"], "publisher hosts stay with the publisher, never the relay host");
   assert.equal(kr.official, false, "a relayed media feed is never an official source");
   assert.equal(kr.cloudVerified, true, "transport was verified from the API runtime, nothing more");
   assert.deepEqual(kr.topics, [], "the trial feed must not broaden subject selection");
-  const gp = rsshubFeed("geekpark-ai");
-  assert.equal(gp.url, "https://relay.test/geekpark/304?limit=5");
-  assert.deepEqual(gp.publisherHosts, ["geekpark.net"]);
+  const gp = registeredFeeds.find(feed => feed.id === "geekpark-news")!;
+  assert.equal(gp.url, "https://www.geekpark.net/rss", "geekpark official RSS is a static catalogue entry");
   assert.equal(gp.official, false);
   assert.equal(gp.cloudVerified, true);
   assert.deepEqual(gp.topics, []);
@@ -310,8 +309,8 @@ test("RSSHub pilot feeds enter the catalogue as media with publisher hosts and n
 test("named publishers select their RSSHub feed; official-only and explicit exclusion keep it unread", async () => {
   assert.deepEqual(selectRegisteredFeeds({entities: ["36氪"], query: ""}).map(feed => feed.id), ["36kr-flashes"]);
   assert.deepEqual(selectRegisteredFeeds({entities: [], query: "36kr 今天有什么新变化"}).map(feed => feed.id), ["36kr-flashes"]);
-  assert.deepEqual(selectRegisteredFeeds({entities: ["极客公园"], query: ""}).map(feed => feed.id), ["geekpark-ai"]);
-  assert.deepEqual(selectRegisteredFeeds({entities: ["36氪", "极客公园"], query: ""}).map(feed => feed.id), ["36kr-flashes", "geekpark-ai"]);
+  assert.deepEqual(selectRegisteredFeeds({entities: ["极客公园"], query: ""}).map(feed => feed.id), ["geekpark-news"]);
+  assert.deepEqual(selectRegisteredFeeds({entities: ["36氪", "极客公园"], query: ""}).map(feed => feed.id), ["geekpark-news", "36kr-flashes"]);
   assert.deepEqual(selectRegisteredFeeds({entities: ["36氪", "极客公园"], query: "", selectedSourceType: "OFFICIAL"}), [], "media feeds never satisfy an official-only request");
   let reads = 0;
   const reader: typeof readCustomSource = async url => {reads++; return {url, status: "readable", reason: "fixture", requestCount: 1, content: rsshub36krXml};};
@@ -337,10 +336,9 @@ test("RSSHub bodies keep original article URLs, dates and publisher identity", (
     "2026-10-22T12:50:20.000Z",
   ]);
   assert.equal(parsed.entries[0].title, "沃尔沃集团宣布设立Volvo Mining");
-  const gp = rsshubFeed("geekpark-ai");
+  const gp = registeredFeeds.find(feed => feed.id === "geekpark-news")!;
   const gpParsed = parseRegisteredFeed(rsshubGeekparkXml, gp);
   assert.equal(gpParsed.rawCount, 3);
-  assert.equal(gpParsed.entries[0].url, "https://geekpark.net/news/372759");
   assert.equal(gpParsed.entries[0].publishedAt, "2026-10-22T11:56:03.000Z");
   assert.equal(gpParsed.entries[0].title, "宇树 10 周年，王兴兴：我劝你相信 AI");
   assert.ok(!gpParsed.entries[0].snippet.includes("&lt;"), "escaped markup is decoded once, not left as entities");

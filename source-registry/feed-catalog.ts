@@ -34,6 +34,10 @@ const staticFeeds: RegisteredFeed[] = [
   {id: "chrome", name: "Chrome Releases", url: "https://chromereleases.googleblog.com/feeds/posts/default", publisherHosts: ["chromereleases.googleblog.com"], aliases: ["chrome", "chromium", "谷歌浏览器"], topics: ["浏览器安全", "browser security"], official: true, cloudVerified: false},
   {id: "infoq", name: "InfoQ 中文", url: "https://www.infoq.cn/feed", publisherHosts: ["infoq.cn"], aliases: ["infoq"], topics: ["国内技术资讯", "软件架构", "技术管理", "云原生"], official: false, cloudVerified: false},
   {id: "oschina", name: "开源中国资讯", url: "https://www.oschina.net/news/rss", publisherHosts: ["oschina.net"], aliases: ["oschina", "开源中国"], topics: ["国内技术资讯", "开源社区", "开源软件", "开源工具"], official: false, cloudVerified: false},
+  // 极客公园官方全站 RSS（P2-I 2026-10-24 实测：生产 API 网络可达 200/application/xml，
+  // 真实 30 条含标题/日期/链接）。综合源不做预过滤：AI 主题筛选由既有逐条相关性门承担，
+  // 非 AI 条目会被判定 TOPIC_MISMATCH——替代 relay 时代的 /geekpark/304 专栏预过滤。
+  {id: "geekpark-news", name: "极客公园（官方 RSS）", url: "https://www.geekpark.net/rss", publisherHosts: ["geekpark.net"], aliases: ["极客公园", "geekpark"], topics: [], official: false, cloudVerified: true},
 ];
 
 function contains(text: string, term: string) {
@@ -47,12 +51,13 @@ export type RsshubRelayStatus = { feeds: RegisteredFeed[]; reason: null | "missi
 
 // RSSHub relay feeds are environment-gated (P2-E/P2-F, 2026-10-24). RSSHUB_BASE_URL and
 // RSSHUB_ACCESS_KEY are deployment configuration and never live in this repository. The
-// two routes below are FIXED constants: the environment configures the origin, never the
+// route(s) below are FIXED constants: the environment configures the origin, never the
 // path, so no configuration can redirect reads to arbitrary routes. Publisher hosts stay
 // with the publishers, and topics stay empty so relays never enter subject selection.
 const RSSHUB_FEED_DEFS = [
+  // 36氪快讯没有官方 RSS（feed-newsflash 等 URL 均为 SPA HTML 壳，生产网络实测同）。
+  // 仅此一个来源仍需 RSSHub 中继；极客公园已于 2026-10-24 改走官方 RSS 直连。
   {id: "36kr-flashes", name: "36氪快讯（RSSHub 转接）", route: "/36kr/newsflashes?limit=5", publisherHosts: ["36kr.com"], aliases: ["36氪", "36kr"]},
-  {id: "geekpark-ai", name: "极客公园 AI 新浪潮观察（RSSHub 转接）", route: "/geekpark/304?limit=5", publisherHosts: ["geekpark.net"], aliases: ["极客公园", "geekpark"]},
 ] as const;
 
 /**
