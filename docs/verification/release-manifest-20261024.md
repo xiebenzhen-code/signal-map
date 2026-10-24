@@ -52,22 +52,22 @@
 ### 版本对账表（当前 vs 待部署）
 | 模块 | 线上版本(源) | master 状态 | 待部署 |
 |---|---|---|---|
-| Web | Sites55（Sites 快照 ） | 语义 delta 已全部并入 | 下次发布以 master 确定提交构建（未授权） |
-| API | 024（源 ，镜像 digest ） | 领先：Sites55 移植 + relay 配置化 | **候选 025 = master **（未授权发布） |
-| RSSHub | rsshub-001（digest ）故障中 | 外部固定依赖（不并入本仓） | 独立宿主迁移待授权（见下） |
+| Web | Sites55（Sites 快照 `0d1457397bea6a111caf3df68d3b1d452e5f83ee`） | 语义 delta 已全部并入 | 下次发布以 master 确定提交构建（未授权） |
+| API | 024（源 `33635cc`，镜像 digest `sha256:37946680f3cd14fe8add566ca0e2ec801d9e9290dbeb109bd8a21233a2a6ad3c`） | 领先：Sites55 移植 + relay 配置化 | **候选 025 = master `0ab6cf28dbb550c8387eb24ad1a03225b0c28d92`**（未授权发布） |
+| RSSHub | rsshub-001（digest `sha256:5503609009925e464ddea3830844f7a77090b61b81061de6dcb80c19efc995ff`）故障中 | 外部固定依赖（不并入本仓） | 独立宿主迁移待授权（见下） |
 
 ### master 新增（本节）
--  feat(feeds): RSSHUB_BASE_URL/RSSHUB_ACCESS_KEY 受控配置——路由固定常量、缺配/非 https 即禁用并 not_configured 上报、密钥仅存在于出站请求 URL（outcomes/候选/failures/诊断零泄漏，测试锁定）。门禁：tsc 0 / lint 0 err / 945・939・0・6s / build 0。
+- `0ab6cf2` feat(feeds): RSSHUB_BASE_URL/RSSHUB_ACCESS_KEY 受控配置——路由固定常量、缺配/非 https 即禁用并 not_configured 上报、密钥仅存在于出站请求 URL（outcomes/候选/failures/诊断零泄漏，测试锁定）。门禁：tsc 0 / lint 0 err / 945・939・0・6s / build 0。
 
 ### RSSHub 宿主修订（P2-E STEP 2，不依赖 CloudBase Run 控制面）
 | 候选 | 结论 |
 |---|---|
-| 用户腾讯云 Lighthouse 轻量应用服务器（ 体系，2026-10-18 文档先例） | **首选待核**：账号内既有；规格/区域/负载/Docker 状态 UNKNOWN（本会话无该通道）——需用户确认实例身份后按本清单核验 |
-| 本机 Windows Docker Desktop | P2-D 已验证可跑（同 digest 0.25C/512MiB 双 Feed 全过）；**受阻于无合规公网 HTTPS 入口**（无隧道工具），仅作应急备选 |
-| CloudBase Run（任何形态，含 v2） | 排除：控制面故障未结（TaskId 2443142 ），与目标相悖 |
+| 用户腾讯云 Lighthouse 轻量应用服务器（`lhins-*` 体系，2026-10-18 文档先例） | **首选待核**：账号内既有；规格/区域/负载/Docker 状态 UNKNOWN（本会话无该通道）——需用户确认实例身份后按本清单核验 |
+| 本机 Windows Docker Desktop | P2-D 已验证可跑（同 digest `sha256:5503…5ff`、0.25C/512MiB 双 Feed 全过）；**受阻于无合规公网 HTTPS 入口**（无隧道工具），仅作应急备选 |
+| CloudBase Run（任何形态，含 v2） | 排除：控制面故障未结（TaskId 2443142 `DescribeVersion_internal_error_`），与目标相悖 |
 | 新购轻量/CVM | 本轮禁止；若 Lighthouse 不可用，待单独授权评估 |
 
-安全接入设计（随  已就绪）：HTTPS 反代 + RSSHub ACCESS_KEY；API 侧 RSSHUB_BASE_URL/KEY env；固定两条路由；SSRF/DNS/TLS 零放宽。
+安全接入设计（随 `0ab6cf2` 已就绪）：HTTPS 反代 + RSSHub ACCESS_KEY；API 侧 RSSHUB_BASE_URL/KEY env；固定两条路由；SSRF/DNS/TLS 零放宽。
 
 ## 三、变更历史
 - 2026-10-24: 建立。master 7268bf8→33635cc（ff, RSSHub 分支收口）→6238890（ff, Sites55 移植）。
