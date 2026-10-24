@@ -53,7 +53,7 @@
 | 模块 | 线上版本(源) | master 状态 | 待部署 |
 |---|---|---|---|
 | Web | Sites55（Sites 快照 `0d1457397bea6a111caf3df68d3b1d452e5f83ee`） | 语义 delta 已全部并入 | 下次发布以 master 确定提交构建（未授权） |
-| API | 024（源 `33635cc`，镜像 digest `sha256:37946680f3cd14fe8add566ca0e2ec801d9e9290dbeb109bd8a21233a2a6ad3c`） | 领先：Sites55 移植 + relay 配置化 + P2-G 加固 | **唯一候选 025 = master `3f0d84cdebf85d8a4a3a316ef1ed5e10702426fb`**（未授权发布；`0ab6cf2` 为其历史前置，不再是候选） |
+| API | 024（源 `33635cc`，镜像 digest `sha256:37946680f3cd14fe8add566ca0e2ec801d9e9290dbeb109bd8a21233a2a6ad3c`） | 领先：Sites55 移植 + relay 配置化 + P2-G 加固 | **唯一候选 025 = master `32955ad75a60e7dcee552f8076a46982b49c3efe`**（未授权发布；`3f0d84c`/`0ab6cf2` 为历史前置，不再是候选） |
 | RSSHub | rsshub-001（digest `sha256:5503609009925e464ddea3830844f7a77090b61b81061de6dcb80c19efc995ff`）故障中 | 外部固定依赖（不并入本仓） | Lighthouse 宿主迁移待授权（见下） |
 
 ### P2-G 新增（2026-10-24，`3f0d84c`）
@@ -81,3 +81,10 @@
 - 2026-10-24: 建立。master 7268bf8→33635cc（ff, RSSHub 分支收口）→6238890（ff, Sites55 移植）。
 - 2026-10-24（二）: master 9309611→0ab6cf2（relay 配置化+测试）；版本对账与宿主修订入清单。
 - 2026-10-24（三）P2-G: master 9347a23→3f0d84c（严格origin+生产key策略+14安全用例）；Lighthouse lhins-pfzwcoao 实时核实入清单；候选 025 唯一化为 3f0d84c。
+
+### P2-H（2026-10-24，`32955ad`）
+- **URL key 传输已废除**：relay 凭据改 `X-Relay-Key` 头（仅同源跳附带），URL 永不携带；relay 跨域重定向一律拒绝（`FEED_CROSS_ORIGIN_REDIRECT`）；缓存键=outbound URL（无凭据）。安全套件 17 用例。网关设计：`rsshub-gateway-design-20261024.md`（仅设计）。
+- **Lighthouse SSH = BLOCKED**（TCP 通、SSH banner 交换超时；本机密钥与 lhins 无授权配对；Docker/磁盘/负载 UNKNOWN 不猜）。API 只读复核：`lhins-pfzwcoao` RUNNING 2C2G Ubuntu22.04 公网 123.207.183.232 至 2026-11-17。
+- 门禁：tsc 0 / lint 0 err / 专项 71・71 / 全量 954・948・0・6s / build 0 / api:build 0。
+- 上线需开端口：仅 **443/TCP**（1200 保持关闭，容器仅绑 127.0.0.1）。
+- 变更历史：master 1774cb8→32955ad（ff）。
