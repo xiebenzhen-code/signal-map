@@ -1,12 +1,24 @@
-import type { InformationRun } from "./types.ts";
+import type { InformationRun, InformationRunPayload } from "./types.ts";
+
+type ResearchRunState = Pick<InformationRunPayload, "status" | "reason" | "sourceStatus"> & Partial<Pick<InformationRunPayload, "coverage">>;
+
+/** A response can preserve useful evidence without completing the research. */
+export function researchRunOutcome(run: ResearchRunState): "completed" | "failed" | "incomplete" {
+  if (run.status === "failed") return "failed";
+  if (run.status === "needs_more_evidence" || run.reason === "deadline_exhausted_no_evidence" ||
+      (run.coverage?.failedProviders.length ?? 0) > 0 ||
+      run.coverage?.outcomes.some((source) => source.execution === "failed") ||
+      run.sourceStatus?.some((source) => source.state === "failed")) return "incomplete";
+  return "completed";
+}
 
 export function todayContextNotice(input: {
   loading: boolean;
   error: string;
   filterId: string;
   researchContextRevision: number;
-  previousRun: Pick<InformationRun, "filterId" | "generatedFromResearchContextRevision" | "status"> | null;
-}): { kind: "never_researched" | "stale" | "failed"; message: string } | null {
+  previousRun: (Pick<InformationRun, "filterId" | "generatedFromResearchContextRevision"> & ResearchRunState) | null;
+}): { kind: "never_researched" | "stale" | "failed" | "incomplete"; message: string } | null {
   if (input.loading || input.error) return null;
   if (!input.previousRun || input.previousRun.filterId !== input.filterId) {
     return { kind: "never_researched", message: "这个过滤器还没有研究结果，请输入关注的问题并开始研究。" };
@@ -14,13 +26,24 @@ export function todayContextNotice(input: {
   if (input.previousRun.status === "failed") {
     return { kind: "failed", message: "上次研究未完成，未作为本次有效结果。请点击重新过滤。" };
   }
+  if (researchRunOutcome(input.previousRun) === "incomplete") {
+    return { kind: "incomplete", message: "本次研究未完成：来源读取失败或证据不足，暂时无法判断是否有新变化。已取得的部分结果仍可查看，请稍后重新尝试。" };
+  }
   if (input.previousRun.generatedFromResearchContextRevision !== input.researchContextRevision) {
     return { kind: "stale", message: "你的认知或过滤条件已更新，之前的结果已失效。点击重新过滤，查看基于当前认知的结果。" };
   }
   return null;
 }
 
-export function todayResultCopy(displayedCount: number, retrievedCount: number, acceptedCount = 0) {
+export function todayResultCopy(displayedCount: number, retrievedCount: number, acceptedCount = 0, run: ResearchRunState = {}) {
+  if (researchRunOutcome(run) !== "completed") {
+    return {
+      headline: displayedCount > 0 ? "本次已有 " + displayedCount + " 条可阅读，研究未完成。" : "本次研究未完成。",
+      supporting: displayedCount > 0 || acceptedCount > 0
+        ? "已取得且通过筛选的部分结果仍可查看，来源检查尚未完成。请稍后重新尝试。"
+        : "来源读取失败或证据不足，暂时无法判断是否有新变化。请稍后重新尝试。",
+    };
+  }
   if (displayedCount > 0) {
     return {
       headline: `今天只需阅读 ${displayedCount} 条。`,

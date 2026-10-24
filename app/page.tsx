@@ -39,7 +39,7 @@ import {
   type NaturalResearchOptions,
 } from "@/information/natural-research-intent";
 import { selectTodayPresentation } from "@/information/today-selection";
-import { todayContextNotice, todayResultCopy } from "@/information/today-copy";
+import { researchRunOutcome, todayContextNotice, todayResultCopy } from "@/information/today-copy";
 import { accountKnowledgeVerificationLabel } from "@/information/knowledge-labels";
 import type {
   ActiveKnowledgeContext,
@@ -1033,6 +1033,7 @@ function AccountHomePage({ currentUser }: { currentUser: CurrentUser }) {
         activeContext.researchContextRevision,
       )
     : null;
+  const runOutcome = response ? researchRunOutcome(response) : null;
   const contextNotice = activeContext && activeFilterId
     ? todayContextNotice({
         loading,
@@ -1188,7 +1189,7 @@ function AccountHomePage({ currentUser }: { currentUser: CurrentUser }) {
       const current = currentResearchContextRef.current;
       if (current.filterId !== result.filterId || current.researchContextRevision !== result.generatedFromResearchContextRevision) return;
       setLastRunByFilterId((runs) => ({ ...runs, [result.filterId]: result }));
-      if (researchObservation.current) researchObservation.current.outcome = "completed";
+      if (researchObservation.current) researchObservation.current.outcome = researchRunOutcome(result);
     } catch (requestError) {
       if (researchObservation.current) researchObservation.current.outcome = "failed";
       setError(requestError instanceof Error ? requestError.message : "暂时无法完成信息过滤");
@@ -1636,7 +1637,7 @@ function AccountHomePage({ currentUser }: { currentUser: CurrentUser }) {
         <div>
           <p className="signal-eyebrow">{todayDate}</p>
           <h1 className="signal-display mt-2 text-5xl sm:text-6xl">今日</h1>
-          {contextNotice && (
+          {contextNotice && (!response || runOutcome === "completed") && (
             <p role="status" className="mt-3 max-w-xl text-sm leading-6 text-[#737c88]">{contextNotice.message}</p>
           )}
           {!loading && error && response && (
@@ -1646,7 +1647,7 @@ function AccountHomePage({ currentUser }: { currentUser: CurrentUser }) {
             </div>
           )}
           {!loading && !error && response && (() => {
-            const copy = todayResultCopy(todayPresentation.items.length, response.filteringSummary?.retrievedCount ?? 0, response.filteringSummary?.displayedCount ?? response.signals.length);
+            const copy = todayResultCopy(todayPresentation.items.length, response.filteringSummary?.retrievedCount ?? 0, response.filteringSummary?.displayedCount ?? response.signals.length, response);
             return <><p className="mt-3 text-[22px] font-semibold tracking-[-.045em] text-[#172033]">{copy.headline}</p><p className="mt-3 max-w-xl text-sm leading-6 text-[#737c88]">{copy.supporting}</p></>;
           })()}
         </div>
@@ -1680,7 +1681,7 @@ function AccountHomePage({ currentUser }: { currentUser: CurrentUser }) {
       {!loading && !error && response && (
         <ObservationSection observation={response.observation} formalCount={response.signals.length} />
       )}
-      {!loading && !error && response && todayPresentation.kind === "caught_up" && <EmptyToday onRefresh={() => activeFilter && activeContext && void refreshToday(activeContext, activeFilter)} />}
+      {!loading && !error && response && runOutcome === "completed" && todayPresentation.kind === "caught_up" && <EmptyToday onRefresh={() => activeFilter && activeContext && void refreshToday(activeContext, activeFilter)} />}
       {!loading && mustRead.length > 0 && (
         <>
           <div className="mt-10 flex items-center justify-between gap-4">
@@ -1748,6 +1749,7 @@ function AccountHomePage({ currentUser }: { currentUser: CurrentUser }) {
         <p className="signal-eyebrow">筛选后的事件 · 不是信息流</p>
         <h1 className="signal-display mt-2 text-5xl">信息</h1>
         <p className="mt-3 text-sm leading-6 text-[#737c88]">只展示经过聚合、验证和认知比较后仍具有价值的事件。</p>
+        {!loading && contextNotice && <p role="status" className="mt-3 text-sm leading-6 text-amber-800">{contextNotice.message}</p>}
 
         {response && (
           <div className="mt-7 grid grid-cols-4 border-y border-[#e5e7e4] py-4 text-center">

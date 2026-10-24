@@ -57,6 +57,8 @@ export type InformationRunPayload = {
   modelUsage?: ReturnType<ReturnType<typeof import("../agent/models/usage-observation.ts").createModelUsageCollector>["snapshot"]>;
   customSourceChecks?: import("../lib/custom-sources.ts").CustomSourceCheck[];
   status?: "completed" | "failed" | "needs_more_evidence";
+  reason?: string;
+  sourceStatus?: import("../research/types.ts").ResearchResponse["status"];
   requestId?: string;
   signals: ResearchSignal[];
   overview: ResearchOverview;
