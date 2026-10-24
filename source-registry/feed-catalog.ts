@@ -37,7 +37,7 @@ function contains(text: string, term: string) {
 
 const feedKey = (value: string) => value.toLocaleLowerCase().replace(/[\p{P}\p{S}\s]+/gu, "").trim();
 
-export type RsshubRelayStatus = { feeds: RegisteredFeed[]; reason: null | "missing_base" | "insecure_base" };
+export type RsshubRelayStatus = { feeds: RegisteredFeed[]; reason: null | "missing_base" | "insecure_base" | "base_not_origin" | "missing_key" };
 
 // RSSHub relay feeds are environment-gated (P2-E/P2-F, 2026-10-24). RSSHUB_BASE_URL and
 // RSSHUB_ACCESS_KEY are deployment configuration and never live in this repository. The
@@ -49,13 +49,38 @@ const RSSHUB_FEED_DEFS = [
   {id: "geekpark-ai", name: "极客公园 AI 新浪潮观察（RSSHub 转接）", route: "/geekpark/304?limit=5", publisherHosts: ["geekpark.net"], aliases: ["极客公园", "geekpark"]},
 ] as const;
 
-/** Reads deployment config at call time so tests and runtime share one behavior. */
+/**
+ * Reads deployment config at call time so tests and runtime share one behavior.
+ *
+ * Strict base parsing (P2-G): the base must be a bare HTTPS origin — no user
+ * information, no path, no query, no fragment. Anything else is rejected so
+ * configuration can never smuggle request components past the fixed routes.
+ * The runtime SSRF/DNS/TLS gates in the shared safe reader stay fully in force.
+ *
+ * Production key policy: when NODE_ENV=production the relays refuse to enable
+ * without RSSHUB_ACCESS_KEY (reason "missing_key") — no silent open-proxy mode.
+ * The currently implemented transport carries the key in the request URL query
+ * (see RSSHUB_KEY_TRANSPORT risks in the release manifest); the preferred
+ * production topology is a fixed HTTPS gateway authenticating an X-Relay-Key
+ * request header and stripping it before proxying, which the safe reader does
+ * not support yet.
+ */
 export function rsshubRelayFeeds(env: NodeJS.ProcessEnv = process.env): RsshubRelayStatus {
   const base = env.RSSHUB_BASE_URL?.trim() ?? "";
   const key = env.RSSHUB_ACCESS_KEY?.trim() ?? "";
   if (!base) return {feeds: [], reason: "missing_base"};
-  if (!/^https:\/\/[^\s/]+/i.test(base)) return {feeds: [], reason: "insecure_base"};
-  const origin = base.replace(/\/+$/, "");
+  let parsed: URL;
+  try {
+    parsed = new URL(base);
+  } catch {
+    return {feeds: [], reason: "insecure_base"};
+  }
+  if (parsed.protocol !== "https:") return {feeds: [], reason: "insecure_base"};
+  if (parsed.username || parsed.password) return {feeds: [], reason: "base_not_origin"};
+  if (parsed.pathname !== "/" && parsed.pathname !== "") return {feeds: [], reason: "base_not_origin"};
+  if (parsed.search || parsed.hash) return {feeds: [], reason: "base_not_origin"};
+  if (env.NODE_ENV === "production" && !key) return {feeds: [], reason: "missing_key"};
+  const origin = parsed.origin;
   const feeds: RegisteredFeed[] = RSSHUB_FEED_DEFS.map(def => ({
     id: def.id,
     name: def.name,
