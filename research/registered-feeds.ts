@@ -1,6 +1,6 @@
 import { publicSourceUrl } from "../lib/custom-sources.ts";
 import { readCustomSource } from "../source-enrichment/custom-source.ts";
-import { selectRegisteredFeeds, type RegisteredFeed } from "../source-registry/feed-catalog.ts";
+import { selectRegisteredFeeds, disabledRsshubFeeds, type RegisteredFeed } from "../source-registry/feed-catalog.ts";
 import type { ResearchCandidate } from "./types.ts";
 import type { SourceExecutionOutcome } from "./source-coverage.ts";
 
@@ -151,6 +151,12 @@ export async function retrieveRegisteredFeeds(input: {entities: string[]; query:
   const feeds = selectRegisteredFeeds(input);
   const items: ResearchCandidate[] = [];
   const outcomes: SourceExecutionOutcome[] = [];
+  // Relays the question asked for but whose deployment configuration is absent or
+  // insecure are reported as not_configured — never silently skipped, never fetched
+  // against a fabricated URL. The access key never appears in any outcome field.
+  for (const relay of disabledRsshubFeeds(input)) {
+    outcomes.push({source: `General Web Feed · ${relay.name}`, providerId: "registered-feeds", sourceId: relay.id, execution: "not_configured", detailFailureCode: `FEED_RSSHUB_${relay.reason.toUpperCase()}`, searched: false, resultCount: 0, requestCount: 0});
+  }
   const failures: string[] = [];
   const cache: FeedReadCache = input.cache ?? new Map();
   if (!feeds.length || !input.allowed || (input.deadlineAt !== undefined && input.deadlineAt - Date.now() < FEED_MIN_USEFUL_BUDGET_MS)) {

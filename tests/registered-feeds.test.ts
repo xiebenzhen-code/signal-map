@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { runResearchPipeline } from "../research/research-pipeline.ts";
 import { readCustomSource } from "../source-enrichment/custom-source.ts";
-import { registeredFeeds, selectRegisteredFeeds } from "../source-registry/feed-catalog.ts";
+import { rsshubRelayFeeds, registeredFeeds, selectRegisteredFeeds } from "../source-registry/feed-catalog.ts";
 import { parseRegisteredFeed, retrieveRegisteredFeeds, type FeedReadCache } from "../research/registered-feeds.ts";
 
 const publishedAt = new Date(Date.now() - 3600_000).toISOString();
@@ -285,18 +285,21 @@ test("a failed source ends the run as incomplete, never as a quiet zero-result d
  */
 const rsshub36krXml = `<?xml version="1.0" encoding="UTF-8"?><rss xmlns:atom="http://www.w3.org/2005/Atom" version="2.0"><channel><title>36氪 - 快讯</title><link>https://www.36kr.com/newsflashes</link><atom:link href="https://signal-map-rsshub-323338-4-1408253594.sh.run.tcloudbase.com/36kr/newsflashes?limit=5" rel="self" type="application/rss+xml"></atom:link><description>36氪 - 快讯 - Powered by RSSHub</description><lastBuildDate>Thu, 22 Oct 2026 21:04:01 GMT</lastBuildDate><ttl>60</ttl><item><title>沃尔沃集团宣布设立Volvo Mining</title><description>沃尔沃集团宣布设立Volvo Mining。根据规划，Volvo Mining将面向矿业客户及其承包商，提供沃尔沃卡车…（摘要截断）</description><link>https://www.36kr.com/newsflashes/4036991939826561</link><pubDate>Thu, 22 Oct 2026 12:57:24 GMT</pubDate></item><item><title>Meta信用风险指标创纪录新高，AI扩产发债预期引发市场担忧</title><description>Meta Platforms一项信用风险指标飙升至历史新高，公司债券同步下跌…（摘要截断）</description><link>https://www.36kr.com/newsflashes/4037043141661831</link><pubDate>Thu, 22 Oct 2026 12:52:38 GMT</pubDate></item><item><title>东阳光：第三季度实现营收52.97亿元，同比增长37.7%</title><description>36氪获悉，东阳光公告，第三季度实现营收52.97亿元…（摘要截断）</description><link>https://www.36kr.com/newsflashes/4036985032921987</link><pubDate>Thu, 22 Oct 2026 12:50:20 GMT</pubDate></item></channel></rss>`;
 const rsshubGeekparkXml = `<?xml version="1.0" encoding="UTF-8"?><rss xmlns:atom="http://www.w3.org/2005/Atom" version="2.0"><channel><title>AI新浪潮观察 | 极客公园</title><link>https://geekpark.net/column/304</link><atom:link href="https://signal-map-rsshub-323338-4-1408253594.sh.run.tcloudbase.com/geekpark/304?limit=5" rel="self" type="application/rss+xml"></atom:link><description>极客公园AI系列文章 - Powered by RSSHub</description><lastBuildDate>Thu, 22 Oct 2026 21:04:08 GMT</lastBuildDate><ttl>60</ttl><item><title>宇树 10 周年，王兴兴：我劝你相信 AI</title><description>&lt;figure&gt;&lt;img src=&quot;https://imgslim.geekpark.net/uploads/image/file/d3/02/d302.png&quot;/&gt;&lt;/figure&gt;&lt;p&gt;（摘要截断）&lt;/p&gt;</description><link>https://geekpark.net/news/372759</link><pubDate>Thu, 22 Oct 2026 11:56:03 GMT</pubDate></item><item><title>AI 漫剧越做越快，赚钱却没那么容易了</title><description>&lt;p&gt;（摘要截断）&lt;/p&gt;</description><link>https://geekpark.net/news/372746</link><pubDate>Thu, 22 Oct 2026 08:20:34 GMT</pubDate></item><item><title>大模型内卷之后，AI 竞争进入搜索基础设施时代</title><description>&lt;p&gt;（摘要截断）&lt;/p&gt;</description><link>https://geekpark.net/news/372743</link><pubDate>Thu, 22 Oct 2026 08:15:50 GMT</pubDate></item></channel></rss>`;
-const rsshubFeed = (id: string) => registeredFeeds.find(feed => feed.id === id)!;
+process.env.RSSHUB_BASE_URL = "https://relay.test";
+test.after(() => { delete process.env.RSSHUB_BASE_URL; });
+const rsshubFeed = (id: string) => rsshubRelayFeeds().feeds.find(feed => feed.id === id)!;
 
 test("RSSHub pilot feeds enter the catalogue as media with publisher hosts and no topic broadening", () => {
-  assert.equal(registeredFeeds.length, 19);
+  assert.equal(registeredFeeds.length, 17, "static catalogue stays configuration-free");
+  assert.equal(rsshubRelayFeeds().feeds.length, 2, "both relays come from configuration");
   const kr = rsshubFeed("36kr-flashes");
-  assert.equal(kr.url, "https://signal-map-rsshub-323338-4-1408253594.sh.run.tcloudbase.com/36kr/newsflashes?limit=5");
+  assert.equal(kr.url, "https://relay.test/36kr/newsflashes?limit=5");
   assert.deepEqual(kr.publisherHosts, ["36kr.com"], "publisher hosts stay with the publisher, never the relay host");
   assert.equal(kr.official, false, "a relayed media feed is never an official source");
   assert.equal(kr.cloudVerified, true, "transport was verified from the API runtime, nothing more");
   assert.deepEqual(kr.topics, [], "the trial feed must not broaden subject selection");
   const gp = rsshubFeed("geekpark-ai");
-  assert.equal(gp.url, "https://signal-map-rsshub-323338-4-1408253594.sh.run.tcloudbase.com/geekpark/304?limit=5");
+  assert.equal(gp.url, "https://relay.test/geekpark/304?limit=5");
   assert.deepEqual(gp.publisherHosts, ["geekpark.net"]);
   assert.equal(gp.official, false);
   assert.equal(gp.cloudVerified, true);
