@@ -130,7 +130,7 @@ async function readFeed(feed: RegisteredFeed, reader: typeof readCustomSource, d
   const base = {source, providerId: "registered-feeds", sourceId: feed.id, searched: false, resultCount: 0, requestCount: 0};
   let requestCount = 0;
   try {
-    const result = await reader(feed.url, {format: "feed", deadlineAt});
+    const result = await reader(feed.url, {format: "feed", deadlineAt, ...(feed.relayAuth ? {relayAuth: feed.relayAuth, forbidCrossOriginRedirects: true} : {})});
     requestCount = result.requestCount;
     if (result.status !== "readable" || !result.content) {
       const notStarted = result.status === "not_searched";

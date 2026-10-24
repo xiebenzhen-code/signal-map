@@ -8,11 +8,26 @@ import { getSourceDoHResolver } from "./doh-resolver.ts";
 type Address = { address: string; family: number };
 type PageResponse = { status: number; headers: Record<string, string | undefined>; body: string };
 export type CustomSourceResult = CustomSourceCheck & { content?: string };
+type RelayAuth = {
+  /** Origin the credential is valid for. Hops to any other origin never carry it. */
+  origin: string;
+  name: string;
+  value: string;
+};
 type ReadOptions = {
   format?: "feed";
   deadlineAt?: number;
   lookup?: (host: string) => Promise<Address[]>;
-  request?: (url: URL, address: Address, signal: AbortSignal) => Promise<PageResponse>;
+  request?: (url: URL, address: Address, signal: AbortSignal, headers?: Record<string, string>) => Promise<PageResponse>;
+  /**
+   * Server-configured relay credential (P2-H). Attached to the request headers only
+   * on hops whose origin matches, so a cross-origin redirect can never forward it.
+   * Only the registered-feed catalog constructs this from deployment environment —
+   * the generic custom-source reader never accepts headers from user input.
+   */
+  relayAuth?: RelayAuth;
+  /** Registered relays refuse cross-origin redirects instead of following them. */
+  forbidCrossOriginRedirects?: boolean;
 };
 const MAX_BYTES = 512 * 1024;
 const DEFAULT_READ_BUDGET_MS = 5000;
@@ -33,11 +48,11 @@ const FEED_READ_BUDGET_MS = 12000;
 const FEED_MIN_USEFUL_MS = 2000;
 
 /** Pin the validated address at socket creation, retaining the original Host/SNI. */
-function pinnedRequest(url: URL, address: Address, signal: AbortSignal, feed = false): Promise<PageResponse> {
+function pinnedRequest(url: URL, address: Address, signal: AbortSignal, feed = false, extraHeaders?: Record<string, string>): Promise<PageResponse> {
   return new Promise((resolve, reject) => {
     const request = (url.protocol === "https:" ? httpsRequest : httpRequest)(url, {
       signal, agent: false,
-      headers: { "User-Agent": "SignalMapResearch/0.4", Accept: feed ? "application/rss+xml,application/atom+xml,application/xml,text/xml" : "text/html,text/plain" },
+      headers: { "User-Agent": "SignalMapResearch/0.4", Accept: feed ? "application/rss+xml,application/atom+xml,application/xml,text/xml" : "text/html,text/plain", ...(extraHeaders ?? {}) },
       lookup: (_host, options, callback) => {
         if (typeof options === "object" && options.all) callback(null, [address] as never);
         else callback(null, address.address, address.family);
@@ -166,11 +181,19 @@ export async function readCustomSource(value: string, options: ReadOptions = {})
         }
         if (controller.signal.aborted) throw new Error("TIMEOUT");
         requestCount++;
-        const response = await (options.request ?? ((target, address, signal) => pinnedRequest(target, address, signal, options.format === "feed")))(url, addresses[0], controller.signal);
+        // Same-origin-only credential: the relay key rides a request header, never the
+        // URL, and is attached only when this hop's origin matches the configured one.
+        const hopHeaders = options.relayAuth && url.origin === options.relayAuth.origin
+          ? {[options.relayAuth.name]: options.relayAuth.value}
+          : undefined;
+        const response = await (options.request ?? ((target, address, signal, headers) => pinnedRequest(target, address, signal, options.format === "feed", headers)))(url, addresses[0], controller.signal, hopHeaders);
         if ([301, 302, 303, 307, 308].includes(response.status)) {
           const location = response.headers.location;
           const next = location ? publicSourceUrl(new URL(location, url).href) : undefined;
           if (!next) return finish("blocked", "来源跳转到不支持的地址，已停止抓取。");
+          if (options.forbidCrossOriginRedirects && new URL(next).origin !== new URL(current!).origin) {
+            return finish("blocked", "FEED_CROSS_ORIGIN_REDIRECT");
+          }
           current = next;
           continue;
         }

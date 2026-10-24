@@ -8,6 +8,12 @@ export type RegisteredFeed = {
   official: boolean;
   /** Transport evidence only, never a claim-quality certification. */
   cloudVerified: boolean;
+  /**
+   * Server-configured relay credential (P2-H). Constructed only by this catalog from
+   * deployment environment; rides the X-Relay-Key request header on same-origin hops
+   * and must never be serialized into outcomes, logs, or client-facing payloads.
+   */
+  relayAuth?: {origin: string; name: string; value: string};
 };
 
 const staticFeeds: RegisteredFeed[] = [
@@ -84,7 +90,8 @@ export function rsshubRelayFeeds(env: NodeJS.ProcessEnv = process.env): RsshubRe
   const feeds: RegisteredFeed[] = RSSHUB_FEED_DEFS.map(def => ({
     id: def.id,
     name: def.name,
-    url: key ? `${origin}${def.route}&key=${encodeURIComponent(key)}` : `${origin}${def.route}`,
+    url: `${origin}${def.route}`,
+    ...(key ? {relayAuth: {origin, name: "X-Relay-Key", value: key}} : {}),
     publisherHosts: [...def.publisherHosts],
     aliases: [...def.aliases],
     topics: [],
