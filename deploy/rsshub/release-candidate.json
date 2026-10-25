@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "date": "2026-10-25",
-  "status": "PREDEPLOY_NOT_ACCEPTED",
+  "status": "RELAY_READY_API_ACCEPTANCE_PENDING",
   "signalMapBaseCommit": "8be8574b3b5e7e322dc64a830574df31fe36c2f5",
   "integrationCodeCommit": "25032736aa4950f8cffe4dc3e747f6d7c2ae6b36",
   "rsshubImage": "ghcr.io/diygod/rsshub@sha256:5503609009925e464ddea3830844f7a77090b61b81061de6dcb80c19efc995ff",
@@ -28,17 +28,36 @@
     "identityEvidence": "user console screenshots, not live server query"
   },
   "pending": [
-    "pinned image download confirmation",
-    "Lighthouse local feed check",
-    "relay domain and certificate",
-    "HTTPS gateway validation",
     "production safe-reader and parser acceptance",
     "API controlled deployment",
-    "one browser research acceptance"
+    "one browser research acceptance",
+    "certificate renewal before expiry"
   ],
   "lastReportedProduction": {
     "apiDeployId": "024",
     "liveVerifiedThisStage": false
   },
-  "runtimeMatchesCandidate": false
+  "runtimeMatchesCandidate": false,
+  "relayOrigin": "https://rsshub.benzhenlab.com",
+  "gatewayMapHashBucketSize": 128,
+  "verifiedEvidence": {
+    "certificateNotAfterUtc": "2027-01-23T01:59:59Z",
+    "pinnedImageRepoDigest": "matches rsshubImage",
+    "nginxConfigCheck": "successful after map_hash_bucket_size 128",
+    "localRss": {
+      "bytes": 5030,
+      "rawCount": 5
+    },
+    "localHttpsAuthenticated": {
+      "elapsedSeconds": 0.690222,
+      "httpStatus": 200,
+      "rawCount": 5
+    },
+    "source": "user terminal screenshots and prior external curl observation, not a fresh server inspection",
+    "externalHttpsUnauthenticated": {
+      "elapsedSeconds": 2.110084,
+      "httpStatus": 401,
+      "tlsVerifyResult": 0
+    }
+  }
 }

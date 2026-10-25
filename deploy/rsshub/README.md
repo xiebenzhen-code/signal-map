@@ -1,4 +1,4 @@
-# RSSHub 发布候选（部署前材料）
+# RSSHub 部署候选与接入状态
 
 本目录与所在 Git 提交一起固定 Signal Map 接入代码、RSSHub 镜像和部署步骤。
 RSSHub 负责通过已登记路由采集公开信息并转换为 RSS；本候选仅开放 36氪快讯。
@@ -8,11 +8,13 @@ RSSHub 负责通过已登记路由采集公开信息并转换为 RSS；本候选
 
 基线 master 为 8be8574，接入代码为 2503273。完整 SHA、镜像 digest、配置约束见 release-candidate.json。
 候选身份是包含本目录的 Git commit；下载时使用该提交的 git archive，不能混用旧主工作区。
-API 024 是此前报告的在架版本，本轮未实时核对。候选尚未完成部署与线上验收。
+API 024 是此前报告的在架版本，本轮未实时核对。新 RSSHub 网关已就绪，Signal Map 生产读取与研究尚未验收。
 
-新实例 lhins-lbffbux2（124.220.183.159）已由用户截图确认安装 Docker。
-上次固定镜像下载仍未确认完成；不要重复启动已有下载任务。
-域名和证书尚未指定，因此 nginx 文件是待填域名的配置模板，不能直接启用。
+新实例 lhins-lbffbux2（124.220.183.159）固定镜像下载、容器启动、本机 RSS 与带鉴权 HTTPS 读取均已有用户终端截图证据。
+域名已确定为 rsshub.benzhenlab.com；证书已安装并匹配，2027-01-23 01:59:59 UTC 到期。
+本机 HTTPS 带密钥返回 200、5 条 RSS、0.690222 秒；公网无密钥返回 401，TLS 校验通过（2.110084 秒）。
+模板补上 map_hash_bucket_size 128，对齐用户已验证的哈希桶修正；应用时仍须替换 RELAY_DOMAIN。
+上述运行证据不等于当前模板与服务器配置已逐字节核对，也不证明生产 API 已接入。
 
 ## 1. 固定镜像到位后在服务器启动
 
@@ -60,7 +62,9 @@ unset task_key
 MAKE_RELAY_KEY
 ```
 
-将 nginx.conf.template 中唯一的 RELAY_DOMAIN 替换为已确认域名，放入 nginx 的 http include 目录。
+将 nginx.conf.template 中的 RELAY_DOMAIN 替换为已确认域名，放入 nginx 的 http include 目录。
+替换使用 sed 全局替换，注释中的同名标记也会一并替换；实际 server_name 只能配置已确认域名。
+64 字符鉴权键需要 map_hash_bucket_size 128；缺少它时实际 nginx 1.24.0 曾报 could not build map_hash。
 该模板仅暴露一个精确路径，丢弃外来 query，固定 limit=5；鉴权成功后剥离 X-Relay-Key。
 使用正确指令 client_max_body_size；历史设计稿中的 proxy_max_body_size 不是有效 nginx 指令。
 
