@@ -2,6 +2,7 @@ import { publicSourceUrl } from "../lib/custom-sources.ts";
 import { readCustomSource } from "../source-enrichment/custom-source.ts";
 import { selectRegisteredFeeds, disabledRsshubFeeds, type RegisteredFeed } from "../source-registry/feed-catalog.ts";
 import type { ResearchCandidate } from "./types.ts";
+import { formatCoverageNotice } from "./source-coverage.ts";
 import type { SourceExecutionOutcome } from "./source-coverage.ts";
 
 /**
@@ -138,8 +139,26 @@ async function readFeed(feed: RegisteredFeed, reader: typeof readCustomSource, d
         failure: notStarted ? undefined : `${source}: ${safeFeedFailureCode(result.reason)}`};
     }
     const parsed = parseRegisteredFeed(result.content, feed);
+    // P2-N coverage observation: unique-URL entry count, raw request count, and
+    // the observed publish-date range. routeLimit comes from the fixed route
+    // (limit=5); an earliest date later than the research window start means
+    // the route returned only the most recent slice — never full-window coverage.
+    const dated = parsed.entries.map(entry => entry.publishedAt).filter(Boolean) as string[];
+    const undatedCount = parsed.entries.length - dated.length;
+    const routeLimitMatch = feed.url.match(/[?&]limit=(\d+)/);
+    const coverage = {
+      returnedCount: parsed.entries.length,
+      ...(routeLimitMatch ? {routeLimit: Number(routeLimitMatch[1])} : {}),
+      undatedCount,
+      ...(dated.length ? {
+        observedEarliest: new Date(Math.min(...dated.map(d => Date.parse(d)))).toISOString(),
+        observedLatest: new Date(Math.max(...dated.map(d => Date.parse(d)))).toISOString(),
+      } : {}),
+      notice: "",
+    };
+    coverage.notice = formatCoverageNotice({...coverage, execution: "searched_with_results", searched: true, requestCount: result.requestCount, resultCount: parsed.entries.length});
     return {entries: parsed.entries, retrievedAt: new Date().toISOString(), outcome: {...base, searched: true, execution: parsed.entries.length ? "searched_with_results" : "searched_no_results", requestCount: result.requestCount,
-      resultCount: parsed.entries.length, rawResultCount: parsed.rawCount, normalizedCandidateCount: parsed.entries.length, rejectedRawCount: parsed.rawCount - parsed.entries.length}};
+      resultCount: parsed.entries.length, rawResultCount: parsed.rawCount, normalizedCandidateCount: parsed.entries.length, rejectedRawCount: parsed.rawCount - parsed.entries.length, coverage}};
   } catch (error) {
     // Parser errors are fixed codes; never expose an arbitrary transport exception or credential-bearing URL.
     const code = safeFeedFailureCode(error instanceof Error ? error.message : undefined);

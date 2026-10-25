@@ -1,5 +1,52 @@
 import type { FilteringReason, FilteringSummary, ResearchSignal } from "./types.ts";
 import { userFacingLabel } from "../lib/user-facing-labels.ts";
+import type { SourceExecutionOutcome } from "./source-coverage.ts";
+
+/**
+ * Zero-display explanation enum (P2-N). Computed from existing verdicts and
+ * source outcomes — no new filtering rules. Priority follows the pipeline
+ * order: a failed source never reads as "everything irrelevant".
+ */
+export type ZeroDisplayReason =
+  | "SOURCE_FAILED"
+  | "NO_MATERIAL"
+  | "SOURCE_NOT_SEARCHED"
+  | "ALL_UNCERTAIN"
+  | "ALL_IRRELEVANT"
+  | "MIXED_FILTERED";
+
+export function explainZeroDisplay(input: {
+  retrievedCount: number;
+  displayedCount: number;
+  outcomes: Pick<SourceExecutionOutcome, "execution" | "searched" | "resultCount">[];
+  allSignals: Pick<ResearchSignal, "topicRelevance">[];
+}): ZeroDisplayReason {
+  if (input.displayedCount > 0) return "MIXED_FILTERED";
+  if (input.outcomes.some(outcome => outcome.execution === "failed" || outcome.execution === "unavailable")) return "SOURCE_FAILED";
+  if (input.retrievedCount === 0 || !input.outcomes.some(outcome => outcome.searched)) return "NO_MATERIAL";
+  if (input.outcomes.some(outcome => outcome.searched && outcome.execution === "not_configured")) return "SOURCE_NOT_SEARCHED";
+  const decisions = input.allSignals.map(signal => signal.topicRelevance?.decision).filter(Boolean);
+  if (decisions.length && decisions.every(decision => decision === "UNCERTAIN")) return "ALL_UNCERTAIN";
+  if (decisions.length && decisions.every(decision => decision === "TOPIC_MISMATCH")) return "ALL_IRRELEVANT";
+  return "MIXED_FILTERED";
+}
+
+/**
+ * Splits signals by verdict certainty (P2-N). UNCERTAIN items are possible
+ * leads for the collapsed "可能相关" group — never presented as confirmed
+ * conclusions, never counted as MUST_READ evidence.
+ */
+export function partitionByVerdictCertainty(signals: ResearchSignal[]): {
+  confirmed: ResearchSignal[];
+  possibleRelated: ResearchSignal[];
+} {
+  const confirmed: ResearchSignal[] = [];
+  const possibleRelated: ResearchSignal[] = [];
+  for (const signal of signals) {
+    (signal.topicRelevance?.decision === "UNCERTAIN" ? possibleRelated : confirmed).push(signal);
+  }
+  return { confirmed, possibleRelated };
+}
 
 const emptyReasons = (): FilteringSummary["filteredReasons"] => ({
   stale: 0,
@@ -75,6 +122,7 @@ export function buildFilteringSummary(input: {
     const reason = primaryFilteringReason(signal);
     if (reason) increment(filteredReasons, reason);
   }
+  const uncertain = input.allSignals.filter(signal => signal.topicRelevance?.decision === "UNCERTAIN");
   const topReasons = Object.entries(filteredReasons)
     .filter(([, count]) => count > 0)
     .sort((left, right) => right[1] - left[1])
@@ -88,6 +136,13 @@ export function buildFilteringSummary(input: {
     clusteredCount: input.clusteredCount,
     displayedCount: input.displayedSignals.length,
     filteredReasons,
+    uncertainCount: uncertain.length,
+    possibleRelated: uncertain.map(signal => ({
+      id: signal.id,
+      title: signal.title,
+      url: signal.sourceUrl,
+      reason: signal.topicRelevance?.reason,
+    })),
     detailEnrichment: input.detailEnrichment,
     strongestHiddenSignal: strongestHidden(hidden),
     filteringDetails: input.allSignals.map((signal) => {
