@@ -99,6 +99,8 @@ export type Claim = {
 
 export type QueryPlan = {
   originalNeed: string;
+  /** User's question alone, without inferred industry or memory context. */
+  requestedQuestion?: string;
   coreKeywords: string[];
   topicAnchors?: string[];
   topicKeywords?: string[];

@@ -178,6 +178,7 @@ export function resolvePipelinePlan(input: ResearchInput, upstream?: RetrievalPl
       agentGeneratedQueries: cleanQueries,
       plan: {
         originalNeed: input.currentQuestions?.trim() || input.industry,
+        requestedQuestion: input.currentQuestions,
         coreKeywords: deterministicTerms([input.focusAreas, input.trackedEntities, input.currentQuestions, ...cleanQueries])
           .filter((term) => !isExcludedTerm(term)),
         topicAnchors: upstream.topicAnchors ?? derivedPlan.topicAnchors,

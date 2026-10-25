@@ -4,6 +4,51 @@ import { cleanContent, extractClaim, buildEvidenceSnippet, mapSignalPresentation
 import { buildFilteringSummary } from "../research/filtering-summary.ts";
 import type { ResearchSignal } from "../research/types.ts";
 
+// Reconstructed from API025's rendered result, not an original HTTP snapshot.
+const mediaNavigation = "氪出海 36氪研究院 潮生TIDE 36氪企服点评 36氪财经 职场bonus 36碳 后浪研究所 暗涌Waves 硬氪 氪睿研究院 媒体品牌 企业号 企服点评 企业服务 核心服务 城市之窗 政府服务 创投发布 LP源计划 VClub 投资人认证 投资人服务 项目推荐";
+
+test("a flattened media navigation menu cannot manufacture a release claim", () => {
+  const cleaned = cleanContent(mediaNavigation, "36氪快讯");
+  assert.equal(cleaned.quality, "INSUFFICIENT_CONTENT");
+  assert.equal(extractClaim(cleaned, "36氪快讯").quality, "INSUFFICIENT_CONTENT");
+});
+
+test("navigation preceding a genuine report is removed without losing the report", () => {
+  const news = "阅文发布首批 AI 精品动画项目，将 DramaBuddy 漫剧助手升级为一站式平台。";
+  const cleaned = cleanContent(`${mediaNavigation}\n${news}`, "阅文AI动画更新");
+  assert.doesNotMatch(cleaned.mainContent, /媒体品牌|创投发布|投资人服务/);
+  assert.match(extractClaim(cleaned, "阅文AI动画更新").statement, /阅文发布/);
+});
+
+test("a report about navigation features is not removed as a menu", () => {
+  const news = "平台发布企业服务升级，新增项目推荐与投资人认证功能。媒体品牌也可使用新的管理后台。";
+  assert.equal(extractClaim(cleanContent(news, "企业服务升级"), "企业服务升级").quality, "VALID");
+  const unpunctuated = "平台发布企业服务 核心服务 政府服务 项目推荐功能";
+  assert.equal(cleanContent(unpunctuated, "企业服务升级").cleanedContent, unpunctuated);
+});
+
+test("menu punctuation and inline layout do not change the supported claim", () => {
+  for (const menu of [mediaNavigation + "。", mediaNavigation.replaceAll(" ", " | ")]) {
+    assert.equal(extractClaim(cleanContent(menu, "媒体快讯"), "媒体快讯").quality, "INSUFFICIENT_CONTENT");
+    const report = "阅文发布AI动画制作功能，支持从文字到影像的完整制作流程以及后续项目管理。";
+    const claim = extractClaim(cleanContent(menu + " " + report, "阅文更新"), "阅文更新");
+    assert.equal(claim.quality, "VALID");
+    assert.match(claim.statement, /阅文发布/);
+    assert.doesNotMatch(claim.statement, /创投发布|项目推荐/);
+  }
+});
+
+test("an article can reuse menu labels after its own subject and action", () => {
+  for (const report of [
+    "阅文发布AI动画制作功能，新增项目推荐与商业创作管理，并支持完整制作流程。",
+    "阅文发布AI企业服务平台，支持从文字到影像的完整制作流程以及商业创作管理。",
+  ]) {
+    const cleaned = cleanContent(mediaNavigation + " " + report, "阅文更新");
+    assert.equal(cleaned.mainContent, report);
+    assert.equal(extractClaim(cleaned, "阅文更新").quality, "VALID");
+  }
+});
+
 test("Content Cleaner removes CSS, JS, attributes, navigation, footer, cookies, and repeated titles", () => {
   const raw = `
     <nav>Login Menu Sign up</nav>

@@ -60,6 +60,10 @@ const RSSHUB_FEED_DEFS = [
   {id: "36kr-flashes", name: "36氪快讯（RSSHub 转接）", route: "/36kr/newsflashes?limit=5", publisherHosts: ["36kr.com"], aliases: ["36氪", "36kr"]},
 ] as const;
 
+/** Public identities only: no deployment config or relay credentials. */
+export const registeredPublisherNames = [...staticFeeds, ...RSSHUB_FEED_DEFS]
+  .flatMap(feed => [feed.name.replace(/[（(].*$/, "").trim(), ...feed.aliases]);
+
 /**
  * Reads deployment config at call time so tests and runtime share one behavior.
  *

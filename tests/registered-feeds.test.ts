@@ -6,6 +6,34 @@ import { rsshubRelayFeeds, registeredFeeds, selectRegisteredFeeds } from "../sou
 import { parseRegisteredFeed, retrieveRegisteredFeeds, type FeedReadCache } from "../research/registered-feeds.ts";
 
 const publishedAt = new Date(Date.now() - 3600_000).toISOString();
+
+test("offline media replay keeps AI material provenance but navigation cannot become valid evidence", async () => {
+  const before = globalThis.fetch;
+  const date = new Date(Date.now() - 3600_000).toISOString();
+  const nav = "媒体品牌 企业号 企业服务 核心服务 城市之窗 政府服务 创投发布 投资人认证 投资人服务 项目推荐";
+  const xml = `<rss><channel>
+    <item><title>国内AI产品更新</title><link>https://www.geekpark.net/news/navigation-fixture</link><pubDate>${date}</pubDate><description>${nav}</description></item>
+    <item><title>阅文AI动画发布</title><link>https://www.geekpark.net/news/ai-fixture</link><pubDate>${date}</pubDate><description>阅文发布首批AI精品动画项目，将DramaBuddy漫剧助手升级为一站式平台，新增从文字到影像的制作流程。</description></item>
+    <item><title>新产品发布</title><link>https://www.geekpark.net/news/pcb-fixture</link><pubDate>${date}</pubDate><description>企业发布矢量网络分析仪新产品及PCB测试解决方案，推动测试产业发展。</description></item>
+  </channel></rss>`;
+  let detailFetches = 0;
+  globalThis.fetch = async () => { detailFetches++; return new Response(`<html><body>${nav}</body></html>`, {status: 200}); };
+  try {
+    const result = await runResearchPipeline({...input,
+      trackedEntities: "", industry: "人工智能与产品工具", focusAreas: "AI 产品",
+      currentQuestions: "过去7天，极客公园报道了哪些与国内AI产品或产业有关的新进展？", freshnessWindow: "7d",
+    }, undefined, {deadlineAt: Date.now() + 20000,
+      customSourceReader: async url => ({url, status: "readable", requestCount: 1, reason: "offline fixture", content: xml}),
+    }, {queries: ["极客公园"], allowedProviderIds: ["registered-feeds"], selectedSourceType: "INDEPENDENT_MEDIA"});
+    assert.ok(result.coverage.outcomes.some(o => o.sourceId === "geekpark-news" && o.rawResultCount === 3));
+    assert.ok(result.signals.every(s => !s.sources.some(source => /navigation-fixture|pcb-fixture/.test(source.sourceUrl))), "menus and unrelated products must never become displayed signals");
+    const ai = result.signals.find(s => s.sources.some(source => source.sourceUrl.endsWith("/ai-fixture")));
+    assert.ok(ai, "literal AI report remains in the material stream");
+    assert.equal(ai.topicRelevance?.decision, "MATCH");
+    assert.equal(ai.sources[0].publishedAt, date);
+    assert.ok(detailFetches <= 5, "existing detail budget stays bounded");
+  } finally { globalThis.fetch = before; }
+});
 const checkoutFeed = `<rss version="2.0"><channel><title>Shopify</title><item>
 <title>Shopify checkout payment API released for US merchants</title>
 <link>https://shopify.dev/changelog/checkout-payment-update</link>
