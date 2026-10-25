@@ -36,7 +36,7 @@ const staticFeeds: RegisteredFeed[] = [
   {id: "oschina", name: "开源中国资讯", url: "https://www.oschina.net/news/rss", publisherHosts: ["oschina.net"], aliases: ["oschina", "开源中国"], topics: ["国内技术资讯", "开源社区", "开源软件", "开源工具"], official: false, cloudVerified: false},
   // 极客公园官方全站 RSS（P2-I 2026-10-24 实测：生产 API 网络可达 200/application/xml，
   // 真实 30 条含标题/日期/链接）。综合源不做预过滤：AI 主题筛选由既有逐条相关性门承担，
-  // 非 AI 条目会被判定 TOPIC_MISMATCH——替代 relay 时代的 /geekpark/304 专栏预过滤。
+  // 相关性判定仍存在边缘放行与误拒，不能保证全站 RSS 的所有 AI 条目均被选中。
   {id: "geekpark-news", name: "极客公园（官方 RSS）", url: "https://www.geekpark.net/rss", publisherHosts: ["geekpark.net"], aliases: ["极客公园", "geekpark"], topics: [], official: false, cloudVerified: true},
 ];
 
@@ -55,7 +55,7 @@ export type RsshubRelayStatus = { feeds: RegisteredFeed[]; reason: null | "missi
 // path, so no configuration can redirect reads to arbitrary routes. Publisher hosts stay
 // with the publishers, and topics stay empty so relays never enter subject selection.
 const RSSHUB_FEED_DEFS = [
-  // 36氪快讯没有官方 RSS（feed-newsflash 等 URL 均为 SPA HTML 壳，生产网络实测同）。
+  // 已测试的 36氪 feed-newsflash 等地址返回 SPA HTML，尚未找到可用官方 RSS。
   // 仅此一个来源仍需 RSSHub 中继；极客公园已于 2026-10-24 改走官方 RSS 直连。
   {id: "36kr-flashes", name: "36氪快讯（RSSHub 转接）", route: "/36kr/newsflashes?limit=5", publisherHosts: ["36kr.com"], aliases: ["36氪", "36kr"]},
 ] as const;
@@ -70,11 +70,9 @@ const RSSHUB_FEED_DEFS = [
  *
  * Production key policy: when NODE_ENV=production the relays refuse to enable
  * without RSSHUB_ACCESS_KEY (reason "missing_key") — no silent open-proxy mode.
- * The currently implemented transport carries the key in the request URL query
- * (see RSSHUB_KEY_TRANSPORT risks in the release manifest); the preferred
- * production topology is a fixed HTTPS gateway authenticating an X-Relay-Key
- * request header and stripping it before proxying, which the safe reader does
- * not support yet.
+ * Credentials use the X-Relay-Key header on same-origin requests only.
+ * A fixed HTTPS gateway authenticates and strips the header before proxying.
+ * The safe reader rejects cross-origin relay redirects; URLs never carry keys.
  */
 export function rsshubRelayFeeds(env: NodeJS.ProcessEnv = process.env): RsshubRelayStatus {
   const base = env.RSSHUB_BASE_URL?.trim() ?? "";

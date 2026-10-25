@@ -1,0 +1,37 @@
+# TEMPLATE ONLY: include from nginx http{} after replacing RELAY_DOMAIN.
+# /etc/nginx/rsshub-secret.map is root-owned mode 600 and contains:
+# "<64 hex character server-generated key>" 1;
+map $http_x_relay_key $rsshub_authorized {
+    default 0;
+    include /etc/nginx/rsshub-secret.map;
+}
+limit_req_zone $binary_remote_addr zone=signal_map_rsshub:10m rate=2r/s;
+log_format signal_map_rsshub '$remote_addr $request_method $uri $status $request_time';
+
+server {
+    listen 443 ssl;
+    server_name RELAY_DOMAIN;
+    ssl_certificate /etc/ssl/rsshub/fullchain.pem;
+    ssl_certificate_key /etc/ssl/rsshub/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    access_log /var/log/nginx/rsshub-access.log signal_map_rsshub;
+    client_max_body_size 1k;
+
+    location / { return 404; }
+    location = /36kr/newsflashes {
+        if ($request_method != GET) { return 405; }
+        if ($rsshub_authorized = 0) { return 401; }
+        limit_req zone=signal_map_rsshub burst=4 nodelay;
+        # Drop incoming query arguments: this gateway supports one fixed feed.
+        proxy_pass http://127.0.0.1:1200/36kr/newsflashes?limit=5;
+        proxy_http_version 1.1;
+        proxy_set_header X-Relay-Key "";
+        proxy_set_header Host localhost;
+        proxy_set_header Connection "";
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 12s;
+        proxy_buffering on;
+    }
+}
