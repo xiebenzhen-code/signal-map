@@ -138,6 +138,59 @@ test("pipeline output carries fusion context and direct provider candidates", as
   assert.equal(result.signals[0].independentEvidenceCount >= 1, true);
 });
 
+test("original long task stays in possibleRelated and never becomes a formal signal", async (t) => {
+  const published = new Date(Date.now() - 60 * 60 * 1000).toUTCString();
+  t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => {
+    const url = String(target);
+    if (url.includes("hn.algolia.com")) {
+      return Response.json({ hits: [{
+        objectID: "42",
+        title: "Claude Code released a new planning feature",
+        url: "https://news.ycombinator.com/item?id=42",
+        created_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+        points: 25,
+        author: "tester",
+      }] });
+    }
+    if (url.includes("news.google.com")) {
+      return new Response(`<rss><channel><item><title>Claude Code released a new planning feature</title><link>https://blog.example.com/claude-code-planning</link><description>Independent Blog reports that Claude Code released a new planning feature for AI developer tools today. The update adds plan review steps and cites the product changelog as supporting evidence.</description><source url="https://blog.example.com">Independent Blog</source><pubDate>${published}</pubDate></item></channel></rss>`);
+    }
+    if (url.includes("api.github.com")) return Response.json({ message: "not found" }, { status: 404 });
+    return new Response("<feed></feed>");
+  });
+  // Verbatim original input of the fusion test above, before it was narrowed to
+  // "planning feature" for N4. This is the regression guard: the long task must
+  // stay a possible lead, not disappear and not become a confirmed conclusion.
+  const input: ResearchInput = {
+    identity: "AI product builder",
+    industry: "AI developer tools",
+    focusAreas: "Claude Code",
+    currentQuestions: "Claude Code planning feature update",
+    knownInformation: "",
+    informationGaps: "new planning feature",
+    trackedEntities: "Claude Code",
+    trackedEvents: "",
+    userJudgements: "",
+    evidenceHistory: "",
+    freshnessWindow: "7d",
+  };
+  const result = await runResearchPipeline(input, undefined, undefined, {
+    primarySourceType: "GENERAL_WEB",
+    fallbackSourceTypes: [],
+    allowedProviderIds: ["public-web", "hacker-news"],
+    reason: "test",
+  });
+  const possible = result.filteringSummary?.possibleRelated ?? [];
+  assert.equal(result.signals.length, 0);
+  assert.equal(possible.length, 1);
+  assert.equal(possible[0].reason, "UNCERTAIN_TASK_CONSTRAINT");
+  assert.match(possible[0].title, /planning feature/i);
+  assert.equal(
+    result.filteringSummary?.uncertainCount,
+    possible.length,
+  );
+});
+
 test("Product Hunt adapter enters the pipeline but does not create a standalone FACT", async (t) => {
   t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => {
     const url = String(target);
