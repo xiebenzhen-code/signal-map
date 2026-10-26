@@ -112,10 +112,24 @@ test("postgres transport probe is login protected and POST only", async () => {
   );
   assert.equal(getResponse.status, 405);
 
-  const postResponse = await handleBackendRequest(
-    new Request("http://localhost/api/diagnostics/postgres-transport", { method: "POST" }),
-  );
-  assert.equal(postResponse.status, 401);
+  // Default-off: without an operator token the endpoint does not exist.
+  await withSupabaseEnv({ SIGNAL_MAP_DIAGNOSTIC_TOKEN: undefined }, async () => {
+    const disabled = await handleBackendRequest(
+      new Request("http://localhost/api/diagnostics/postgres-transport", { method: "POST" }),
+    );
+    assert.equal(disabled.status, 404);
+  });
+
+  // With a token configured, a caller who presents it still needs a session.
+  await withSupabaseEnv({ SIGNAL_MAP_DIAGNOSTIC_TOKEN: "probe-token" }, async () => {
+    const postResponse = await handleBackendRequest(
+      new Request("http://localhost/api/diagnostics/postgres-transport", {
+        method: "POST",
+        headers: { "x-signal-map-diagnostic-token": "probe-token" },
+      }),
+    );
+    assert.equal(postResponse.status, 401);
+  });
 });
 
 test("postgres transport probe redacts connection secrets in error text", () => {
