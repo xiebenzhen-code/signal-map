@@ -1,0 +1,2 @@
+# Preserve the captured response bytes across Windows/Linux checkouts.
+d06-chrome.xml -text

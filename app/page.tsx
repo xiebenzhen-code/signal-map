@@ -59,6 +59,7 @@ import type { ObservationLayer } from "@/information/observation";
 import { createAlphaStorage } from "@/lib/alpha-storage";
 import { LocalAccountBoundary } from "./components/local-account-boundary";
 import { CustomSourcesEditor } from "./components/custom-sources-editor";
+import { ResearchDiagnostics } from "./components/research-diagnostics";
 import { parseCustomSources } from "@/lib/custom-sources";
 import { signalTypeLabel, userFacingReason } from "@/lib/user-facing-labels";
 
@@ -1678,6 +1679,7 @@ function AccountHomePage({ currentUser }: { currentUser: CurrentUser }) {
         </section>
       )}
       {!loading && !error && response && <FilteringSummaryCard summary={response.filteringSummary} />}
+      {!loading && !error && response && <ResearchDiagnostics summary={response.filteringSummary} outcomes={response.coverage.outcomes} />}
       {!loading && !error && response && (
         <ObservationSection observation={response.observation} formalCount={response.signals.length} />
       )}

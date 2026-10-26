@@ -26,7 +26,7 @@ import {
 import { resolveCompanySources } from "../source-registry/resolver.ts";
 import { classifySource } from "./source-classifier.ts";
 import { describesRecentChange } from "./recent-signal.ts";
-import { buildFilteringSummary } from "./filtering-summary.ts";
+import { buildFilteringSummary, partitionByVerdictCertainty } from "./filtering-summary.ts";
 import { cleanContent, extractClaim, mapSignalPresentation } from "../content-processing/index.ts";
 import {
   assessNoveltyAttribution,
@@ -2522,6 +2522,7 @@ export async function runResearchPipeline(
     const passesGates =
       signal.reliabilityScore >= 70 &&
       signal.topicRelevance?.decision !== "TOPIC_MISMATCH" &&
+      signal.topicRelevance?.decision !== "UNCERTAIN" &&
       signal.relevanceScore >= 75 &&
       signal.noveltyScore >= 60 &&
       signal.judgementImpactScore >= 48 &&
@@ -2555,6 +2556,7 @@ export async function runResearchPipeline(
       signal.attentionDecision !== "MUST_READ" &&
       signal.actionabilityStatus !== "BACKGROUND" &&
       signal.topicRelevance?.decision !== "TOPIC_MISMATCH" &&
+      signal.topicRelevance?.decision !== "UNCERTAIN" &&
       signal.contentQuality !== "INSUFFICIENT_CONTENT" &&
       signal.eventStatus === "SIGNAL" &&
       signal.timestampStatus === "valid" &&
@@ -2574,8 +2576,10 @@ export async function runResearchPipeline(
       worthWatchingCount += 1;
     }
   }
-  const signals = allSignals
-    .filter((signal) => signal.attentionDecision !== "IGNORE" && signal.contentQuality !== "INSUFFICIENT_CONTENT");
+  // UNCERTAIN remains in allSignals for possibleRelated and trace summaries,
+  // but cannot enter formal results through LIBRARY_ONLY either.
+  const signals = partitionByVerdictCertainty(allSignals
+    .filter((signal) => signal.attentionDecision !== "IGNORE" && signal.contentQuality !== "INSUFFICIENT_CONTENT")).confirmed;
   markPhase("evidence_finished", true, allSignals.length);
   detailEnrichment.stillInsufficient = allSignals.reduce(
     (total, signal) =>

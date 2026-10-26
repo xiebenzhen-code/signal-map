@@ -113,7 +113,9 @@ test("pipeline output carries fusion context and direct provider candidates", as
     identity: "AI product builder",
     industry: "AI developer tools",
     focusAreas: "Claude Code",
-    currentQuestions: "Claude Code planning feature update",
+    // Keep this a positive fusion test with an explicit, matched task. The old
+    // long task was UNCERTAIN and must now stay in possibleRelated (N4).
+    currentQuestions: "planning feature",
     knownInformation: "",
     informationGaps: "new planning feature",
     trackedEntities: "Claude Code",
@@ -130,6 +132,7 @@ test("pipeline output carries fusion context and direct provider candidates", as
   });
   assert.equal(result.sourceOutcomes?.some((outcome) => outcome.providerId === "hacker-news" && outcome.executed), true);
   assert.equal(result.signals.length > 0, true);
+  assert.equal(result.signals[0].topicRelevance?.decision, "MATCH");
   assert.equal(typeof result.signals[0].signalType, "string");
   assert.ok(result.signals[0].signalCluster);
   assert.equal(result.signals[0].independentEvidenceCount >= 1, true);

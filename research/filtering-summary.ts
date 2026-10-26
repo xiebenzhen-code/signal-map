@@ -19,12 +19,12 @@ export function explainZeroDisplay(input: {
   retrievedCount: number;
   displayedCount: number;
   outcomes: Pick<SourceExecutionOutcome, "execution" | "searched" | "resultCount">[];
-  allSignals: Pick<ResearchSignal, "topicRelevance">[];
+  allSignals: { topicRelevance?: Pick<NonNullable<ResearchSignal["topicRelevance"]>, "decision"> }[];
 }): ZeroDisplayReason {
   if (input.displayedCount > 0) return "MIXED_FILTERED";
   if (input.outcomes.some(outcome => outcome.execution === "failed" || outcome.execution === "unavailable")) return "SOURCE_FAILED";
+  if (input.outcomes.some(outcome => outcome.execution === "not_configured")) return "SOURCE_NOT_SEARCHED";
   if (input.retrievedCount === 0 || !input.outcomes.some(outcome => outcome.searched)) return "NO_MATERIAL";
-  if (input.outcomes.some(outcome => outcome.searched && outcome.execution === "not_configured")) return "SOURCE_NOT_SEARCHED";
   const decisions = input.allSignals.map(signal => signal.topicRelevance?.decision).filter(Boolean);
   if (decisions.length && decisions.every(decision => decision === "UNCERTAIN")) return "ALL_UNCERTAIN";
   if (decisions.length && decisions.every(decision => decision === "TOPIC_MISMATCH")) return "ALL_IRRELEVANT";

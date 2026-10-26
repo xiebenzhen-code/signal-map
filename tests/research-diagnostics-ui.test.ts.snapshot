@@ -1,0 +1,23 @@
+exports[`diagnostic rendering snapshot: ALL_IRRELEVANT 1`] = `
+"<section class=\\"mt-5 rounded-2xl border border-[#e4e7eb] bg-white p-4 text-sm\\"><p role=\\"status\\" class=\\"font-semibold text-[#172033]\\">取得的材料都与问题无关</p><details class=\\"mt-3\\"><summary class=\\"cursor-pointer text-sm font-bold\\">本次来源读取情况</summary><ul class=\\"mt-3 grid gap-2 text-xs leading-5 text-[#596473]\\"><li><span class=\\"font-bold\\">Chrome Releases：</span>本次取得该来源最近 25 条，发布时间 A 至 B。</li></ul></details></section>"
+`;
+
+exports[`diagnostic rendering snapshot: ALL_UNCERTAIN 1`] = `
+"<section class=\\"mt-5 rounded-2xl border border-[#e4e7eb] bg-white p-4 text-sm\\"><p role=\\"status\\" class=\\"font-semibold text-[#172033]\\">材料与问题的关系不确定，已放入可能相关</p><details class=\\"mt-3\\"><summary class=\\"cursor-pointer text-sm font-bold\\">本次来源读取情况</summary><ul class=\\"mt-3 grid gap-2 text-xs leading-5 text-[#596473]\\"><li><span class=\\"font-bold\\">Chrome Releases：</span>本次取得该来源最近 25 条，发布时间 A 至 B。</li></ul></details><details class=\\"mt-4 rounded-xl border border-[#e4e7eb] p-3\\"><summary class=\\"cursor-pointer font-bold\\">可能相关 · 1 条 <span class=\\"ml-2 text-xs font-normal text-[#727b87]\\">未确认</span></summary><p class=\\"mt-2 text-xs text-[#727b87]\\">这些材料与问题的关系尚不确定，供你核对，未作为确认结论。</p><ul class=\\"mt-3 grid gap-3\\"><li><a href=\\"https://example.org/update\\" target=\\"_blank\\" rel=\\"noreferrer\\" class=\\"text-[#1a4fd6] hover:underline\\">Chrome update</a><p class=\\"mt-1 text-xs text-[#727b87]\\">未确认 · 相关性不确定（UNCERTAIN_TASK_CONSTRAINT）</p></li></ul></details></section>"
+`;
+
+exports[`diagnostic rendering snapshot: MIXED_FILTERED 1`] = `
+"<section class=\\"mt-5 rounded-2xl border border-[#e4e7eb] bg-white p-4 text-sm\\"><p role=\\"status\\" class=\\"font-semibold text-[#172033]\\">材料被多种原因过滤</p><details class=\\"mt-3\\"><summary class=\\"cursor-pointer text-sm font-bold\\">本次来源读取情况</summary><ul class=\\"mt-3 grid gap-2 text-xs leading-5 text-[#596473]\\"><li><span class=\\"font-bold\\">Chrome Releases：</span>本次取得该来源最近 25 条，发布时间 A 至 B。</li></ul></details></section>"
+`;
+
+exports[`diagnostic rendering snapshot: NO_MATERIAL 1`] = `
+"<section class=\\"mt-5 rounded-2xl border border-[#e4e7eb] bg-white p-4 text-sm\\"><p role=\\"status\\" class=\\"font-semibold text-[#172033]\\">本次没有取得材料</p><details class=\\"mt-3\\"><summary class=\\"cursor-pointer text-sm font-bold\\">本次来源读取情况</summary><ul class=\\"mt-3 grid gap-2 text-xs leading-5 text-[#596473]\\"><li><span class=\\"font-bold\\">Chrome Releases：</span>本次读取成功，但该来源没有返回条目。</li></ul></details></section>"
+`;
+
+exports[`diagnostic rendering snapshot: SOURCE_FAILED 1`] = `
+"<section class=\\"mt-5 rounded-2xl border border-[#e4e7eb] bg-white p-4 text-sm\\"><p role=\\"status\\" class=\\"font-semibold text-[#172033]\\">来源读取失败（FEED_TIMEOUT）</p><details class=\\"mt-3\\"><summary class=\\"cursor-pointer text-sm font-bold\\">本次来源读取情况</summary><ul class=\\"mt-3 grid gap-2 text-xs leading-5 text-[#596473]\\"><li><span class=\\"font-bold\\">Chrome Releases：</span>本次读取失败（FEED_TIMEOUT），未取得该来源条目。</li></ul></details></section>"
+`;
+
+exports[`diagnostic rendering snapshot: SOURCE_NOT_SEARCHED 1`] = `
+"<section class=\\"mt-5 rounded-2xl border border-[#e4e7eb] bg-white p-4 text-sm\\"><p role=\\"status\\" class=\\"font-semibold text-[#172033]\\">部分来源未搜索（未配置）</p><details class=\\"mt-3\\"><summary class=\\"cursor-pointer text-sm font-bold\\">本次来源读取情况</summary><ul class=\\"mt-3 grid gap-2 text-xs leading-5 text-[#596473]\\"><li><span class=\\"font-bold\\">未配置来源：</span>本次未搜索该来源（未配置）。</li></ul></details></section>"
+`;

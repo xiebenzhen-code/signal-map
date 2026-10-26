@@ -1,0 +1,133 @@
+{
+  "id": "D06",
+  "sourceIds": [
+    "chrome"
+  ],
+  "question": "过去7天 Chrome 浏览器的安全更新有哪些变化？",
+  "questionOrigin": "diagnostic authored question over existing real snapshots",
+  "planOrigin": "regenerated offline at 5142a67; not historical runtime plan",
+  "input": {
+    "identity": "离线诊断",
+    "industry": "浏览器安全",
+    "focusAreas": "安全更新",
+    "currentQuestions": "过去7天 Chrome 浏览器的安全更新有哪些变化？",
+    "knownInformation": "",
+    "informationGaps": "",
+    "trackedEntities": "Chrome",
+    "trackedEvents": "",
+    "userJudgements": "",
+    "evidenceHistory": "",
+    "freshnessWindow": "7d"
+  },
+  "plan": {
+    "originalNeed": "浏览器安全；安全更新；过去7天 Chrome 浏览器的安全更新有哪些变化？；Chrome；7d",
+    "requestedQuestion": "过去7天 Chrome 浏览器的安全更新有哪些变化？",
+    "coreKeywords": [
+      "浏览器安全",
+      "安全更新",
+      "过去7天 Chrome 浏览器的安全更新有哪些变化？",
+      "Chrome"
+    ],
+    "topicAnchors": [],
+    "topicKeywords": [
+      "浏览器安全",
+      "安全更新",
+      "Chrome"
+    ],
+    "englishKeywords": [
+      "Chrome"
+    ],
+    "synonyms": [],
+    "entities": [
+      "Chrome"
+    ],
+    "industryKeywords": [
+      "浏览器安全"
+    ],
+    "changeKeywords": [
+      "latest",
+      "today",
+      "update",
+      "new",
+      "release",
+      "announcement",
+      "release notes",
+      "changelog",
+      "GitHub",
+      "new feature",
+      "new limitation",
+      "pricing",
+      "API",
+      "policy",
+      "hiring",
+      "this week"
+    ],
+    "knowledgeAwareQueries": [],
+    "searchCombinations": [
+      "Chrome latest update",
+      "Chrome today announcement",
+      "Chrome release notes changelog",
+      "Chrome GitHub release this week",
+      "Chrome new feature new limitation pricing API policy hiring",
+      "Chrome Investor Relations",
+      "Chrome official announcement",
+      "浏览器安全 product launch release",
+      "安全更新 Chrome workflow tool",
+      "安全更新 Chrome research model",
+      "浏览器安全 official documentation release notes",
+      "安全更新 Chrome implementation commercial workflow",
+      "浏览器安全 官方公告",
+      "浏览器安全 权威媒体",
+      "浏览器安全 Chrome",
+      "安全更新 Chrome",
+      "过去7天 Chrome 浏览器的安全更新有哪些变化？ Chrome",
+      "Chrome Chrome"
+    ],
+    "retrievalWindows": [
+      "24h",
+      "3d",
+      "7d",
+      "30d"
+    ],
+    "requestedFreshnessWindow": "7d",
+    "resolvedEntities": [
+      {
+        "canonicalEntity": "Chrome",
+        "aliasesConsidered": [
+          "Chrome"
+        ]
+      }
+    ],
+    "aliasesConsidered": [
+      "Chrome"
+    ],
+    "excludedEntities": [],
+    "excludedContentTypes": [],
+    "queryBudget": 24,
+    "deduplicatedQueryCount": 18
+  },
+  "asOf": "2026-10-20T08:30:06.367Z",
+  "asOfOrigin": "capture metadata",
+  "windowStart": "2026-10-13T08:30:06.367Z",
+  "rawCount": 25,
+  "normalizedCount": 25,
+  "reasonDistribution": {
+    "UNCERTAIN_TASK_CONSTRAINT": 25
+  },
+  "decisionDistribution": {
+    "UNCERTAIN": 25
+  },
+  "dateDistribution": {
+    "IN_WINDOW": 16,
+    "OUTSIDE_WINDOW": 9
+  },
+  "inWindowDecisionDistribution": {
+    "UNCERTAIN": 16
+  },
+  "profilePresent": false,
+  "profileTaskAnchorsEmpty": null,
+  "productionDisplayCount": null,
+  "humanGoldCount": 0,
+  "falseZeroRate": null,
+  "displayPrecision": null
+}
