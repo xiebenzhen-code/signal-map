@@ -186,15 +186,17 @@ export const handlePostgresTransportProbe = withSession(async (request: Request)
 
 ## 5. 本轮门禁执行记录
 
-执行于 HEAD `7ea2d88`（本文件写入前，代码与测试未变）：
+两次执行，结果一致：
 
-| 命令 | 退出码 | 结果 |
-|---|---|---|
-| `npm run quality` | 0 | 980 项测试：974 通过、6 条件跳过、0 失败；typecheck / lint / knip / deps:check 均通过 |
-| `npm run build` | 0 | vinext build 完成 |
-| `npm run api:build` | 0 | `dist-api/server.mjs` 1.5 MB |
+| 执行点 | quality | build | api:build | 测试 |
+|---|---|---|---|---|
+| `7ea2d88`（本文件写入前） | 0 | 0 | 0 | 980 项：974 通过、6 跳过、0 失败 |
+| `f25bd6c`（本文件提交后复跑） | 0 | 0 | 0 | 980 项：974 通过、6 跳过、0 失败 |
 
-条件跳过 6 项不计作通过，原因是数据库测试环境缺失。本阶段只新增 Markdown 与惰性补丁文本，不改变测试集合，故未在写入后重跑全量门禁；这一点在报告中列为未验证项。
+quality 覆盖 typecheck、lint、knip 与依赖检查；lint 仍输出既有警告（本轮日志 31 行含 `warning`，非精确规则计数，未逐条归类）。
+条件跳过 6 项不计作通过，原因是数据库测试环境缺失。
+
+本阶段只新增 Markdown 与惰性补丁文本，测试集合未变，因此两次结果相同属于预期；这不构成产品行为验收。
 
 ## 6. 未完成 / UNKNOWN 汇总
 
