@@ -1024,10 +1024,8 @@ function AccountHomePage({ currentUser }: { currentUser: CurrentUser }) {
       setLogoutMessage(result.message);
       return;
     }
-    // Drop in-flight research before leaving, so a late result cannot render
-    // into the anonymous partition after the account view is gone.
-    currentResearchContextRef.current = { filterId: null, researchContextRevision: -1 };
-    researchObservation.current?.complete("incomplete");
+    // A full navigation replaces the document, so the account partition, its
+    // in-flight research and every rendered card are discarded together.
     window.location.replace("/");
   }, [logoutState]);
   const accountKnowledgeForCurrentUser = currentUser && accountKnowledgeUserId === currentUser.id
