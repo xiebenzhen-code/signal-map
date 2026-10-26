@@ -1,3 +1,5 @@
+> **Historical snapshot (2026-10-02)**: numbers and status reflect that date only, not the current branch, and are not product-effect evidence.
+
 # Signal Map Project Report
 
 Status date: 2026-10-02. This report records only behavior confirmed in code, tests, or prior calibration traces. It is not a product pitch that upgrades local fixtures into real-world closure.
