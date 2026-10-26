@@ -19,6 +19,8 @@
 # misc
 .DS_Store
 *.pem
+# Public CA certificates shipped on purpose; private keys stay ignored.
+!certs/*.pem
 
 # debug
 npm-debug.log*
