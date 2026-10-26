@@ -1,0 +1,48 @@
+diff --git a/tests/backend-server.test.ts b/tests/backend-server.test.ts
+index 6860c7c..fa1db5e 100644
+--- a/tests/backend-server.test.ts
++++ b/tests/backend-server.test.ts
+@@ -419,3 +419,43 @@ test("preference endpoint exists and rejects unauthenticated access", async () =
+   );
+   assert.equal(method.status, 405);
+ });
++
++// --- Phase 0 probe guard: expected to FAIL until the diagnostic-token gate lands ---
++
++test("postgres transport probe is default-off when no diagnostic token is configured", async () => {
++  await withSupabaseEnv({ SIGNAL_MAP_DIAGNOSTIC_TOKEN: undefined }, async () => {
++    const disabled = await handleBackendRequest(
++      new Request("http://localhost/api/diagnostics/postgres-transport", { method: "POST" }),
++    );
++    assert.equal(disabled.status, 404);
++  });
++});
++
++test("postgres transport probe rejects a missing or wrong diagnostic token", async () => {
++  await withSupabaseEnv({ SIGNAL_MAP_DIAGNOSTIC_TOKEN: "probe-token" }, async () => {
++    const noToken = await handleBackendRequest(
++      new Request("http://localhost/api/diagnostics/postgres-transport", { method: "POST" }),
++    );
++    assert.equal(noToken.status, 401);
++
++    const wrongToken = await handleBackendRequest(
++      new Request("http://localhost/api/diagnostics/postgres-transport", {
++        method: "POST",
++        headers: { "x-signal-map-diagnostic-token": "not-the-token" },
++      }),
++    );
++    assert.equal(wrongToken.status, 401);
++  });
++});
++
++test("postgres transport probe still requires a session after the token passes", async () => {
++  await withSupabaseEnv({ SIGNAL_MAP_DIAGNOSTIC_TOKEN: "probe-token" }, async () => {
++    const response = await handleBackendRequest(
++      new Request("http://localhost/api/diagnostics/postgres-transport", {
++        method: "POST",
++        headers: { "x-signal-map-diagnostic-token": "probe-token" },
++      }),
++    );
++    assert.equal(response.status, 401);
++  });
++});
