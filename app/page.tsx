@@ -34,6 +34,7 @@ import {
 } from "@/information/run-information";
 import { createResearchRequest } from "@/information/research-request";
 import { createBrowserResearchObservation } from "@/information/browser-observation";
+import { performLogout } from "@/lib/session-controls";
 import {
   inferNaturalResearchDraft,
   type NaturalResearchOptions,
@@ -1010,6 +1011,25 @@ function AccountHomePage({ currentUser }: { currentUser: CurrentUser }) {
   const [newJudgement, setNewJudgement] = useState("");
   const [knowledgeDrafts, setKnowledgeDrafts] = useState<Record<string, string>>({});
   const loggedIn = Boolean(currentUser);
+  const [logoutState, setLogoutState] = useState<"idle" | "pending" | "failed">("idle");
+  const [logoutMessage, setLogoutMessage] = useState("");
+  const signOut = useCallback(async () => {
+    if (logoutState === "pending") return;
+    setLogoutState("pending");
+    setLogoutMessage("");
+    const result = await performLogout();
+    if (result.status !== "signed_out") {
+      // The server still owns a live session; keep the signed-in view and say so.
+      setLogoutState("failed");
+      setLogoutMessage(result.message);
+      return;
+    }
+    // Drop in-flight research before leaving, so a late result cannot render
+    // into the anonymous partition after the account view is gone.
+    currentResearchContextRef.current = { filterId: null, researchContextRevision: -1 };
+    researchObservation.current?.complete("incomplete");
+    window.location.replace("/");
+  }, [logoutState]);
   const accountKnowledgeForCurrentUser = currentUser && accountKnowledgeUserId === currentUser.id
     ? accountKnowledge
     : [];
@@ -2099,15 +2119,25 @@ function AccountHomePage({ currentUser }: { currentUser: CurrentUser }) {
             ))}
           </nav>
           {loggedIn ? (
-            <button
-              onClick={() => {
-                setLibraryView("knowledge");
-                navigate("library");
-              }}
-              className="rounded-full border border-[#dfe3e7] px-3 py-2 text-[10px] font-black text-[#596473]"
-            >
-              长期记忆
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setLibraryView("knowledge");
+                  navigate("library");
+                }}
+                className="rounded-full border border-[#dfe3e7] px-3 py-2 text-[10px] font-black text-[#596473]"
+              >
+                长期记忆
+              </button>
+              <button
+                onClick={() => void signOut()}
+                disabled={logoutState === "pending"}
+                className="min-h-9 rounded-full border border-[#dfe3e7] px-3 py-2 text-[10px] font-black text-[#596473] disabled:opacity-60"
+              >
+                {logoutState === "pending" ? "退出中…" : "退出登录"}
+              </button>
+              {logoutState === "failed" && <span className="max-w-40 text-[10px] font-bold text-rose-700">{logoutMessage}</span>}
+            </div>
           ) : (
             <a href="/control" className="rounded-full border border-[#dfe3e7] px-3 py-2 text-[10px] font-black text-[#596473]">登录 / 注册</a>
           )}
