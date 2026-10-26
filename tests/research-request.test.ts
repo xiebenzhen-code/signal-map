@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { createResearchRequest } from "../information/research-request.ts";
 import { planQuery } from "../research/query-planner.ts";
+import { selectRegisteredFeeds } from "../source-registry/feed-catalog.ts";
 import type { ActiveKnowledgeContext } from "../information/types.ts";
 
 const knowledge: ActiveKnowledgeContext = {
@@ -75,4 +76,87 @@ test("research request does not expose identity ownership or secrets", () => {
   assert.equal(bodyKeys.some((key) => key.includes("token")), false);
   assert.equal(bodyKeys.some((key) => key.includes("secret")), false);
   assert.equal(bodyKeys.some((key) => key.includes("password")), false);
+});
+
+// --- STEP 2: the fixed domestic-AI question must survive the whole entry path ---
+
+const DOMESTIC_AI_QUESTION = "过去 7 天，36氪快讯和极客公园 AI 报道了哪些国内 AI 产业新进展？";
+
+// Mirrors backend/handlers.ts inputFromRecord: arrays are joined with "\n".
+function backendInput(body: Record<string, unknown>) {
+  const field = (value: unknown) => Array.isArray(value)
+    ? value.map((item) => String(item)).join("\n").trim()
+    : typeof value === "string" ? value.trim() : "";
+  return {
+    identity: field(body.identity),
+    industry: field(body.industry),
+    focusAreas: field(body.focusAreas),
+    currentQuestions: field(body.currentQuestions),
+    knownInformation: "",
+    informationGaps: "",
+    trackedEntities: "",
+    trackedEvents: "",
+    userJudgements: "",
+    evidenceHistory: "",
+    freshnessWindow: field(body.freshnessWindow) || "7d",
+    customSources: "",
+  };
+}
+
+test("the fixed domestic AI question reaches /api/signals and the planner intact", () => {
+  const request = createResearchRequest({
+    ...knowledge,
+    industry: "人工智能与产品工具",
+    focusAreas: ["AI 产品"],
+    currentQuestions: [DOMESTIC_AI_QUESTION],
+    freshnessWindow: "7d",
+  });
+
+  // 1. The page posts to /api/signals, never to a query string.
+  assert.equal(request.url, "/api/signals");
+  assert.equal(request.method, "POST");
+
+  const body = JSON.parse(String(request.body)) as Record<string, unknown>;
+  // 2. The original question is carried verbatim in currentQuestions.
+  assert.deepEqual(body.currentQuestions, [DOMESTIC_AI_QUESTION]);
+  // 3. It is not smuggled in through industry.
+  assert.notEqual(body.industry, DOMESTIC_AI_QUESTION);
+  assert.equal(String(body.industry).includes("36氪"), false);
+  // 4. The date window is part of the request, not left to a default.
+  assert.equal(body.freshnessWindow, "7d");
+
+  const plan = planQuery(backendInput(body) as never);
+  // 5. Downstream planning keeps the whole question, not a truncated keyword.
+  assert.equal(plan.requestedQuestion, DOMESTIC_AI_QUESTION);
+  // 6. The freshness window survives planning.
+  assert.equal(plan.requestedFreshnessWindow, "7d");
+  // 7. Both named publishers are still visible in the plan's material.
+  assert.ok(plan.originalNeed.includes("36氪"));
+  assert.ok(plan.originalNeed.includes("极客公园"));
+});
+
+test("a request that only carries industry leaves requestedQuestion empty", () => {
+  const request = createResearchRequest({
+    ...knowledge,
+    industry: "人工智能与产品工具",
+    focusAreas: ["AI 产品"],
+    currentQuestions: [],
+  });
+  const body = JSON.parse(String(request.body)) as Record<string, unknown>;
+  assert.deepEqual(body.currentQuestions, []);
+
+  const plan = planQuery(backendInput(body) as never);
+  // This is the failure mode the entry contract exists to prevent: with no
+  // currentQuestions the planner has no research intent to preserve.
+  assert.equal(plan.requestedQuestion, "");
+});
+
+test("the fixed question keeps both named publishers selectable as feeds", () => {
+  const env = {
+    RSSHUB_BASE_URL: "https://relay.example.com",
+    RSSHUB_ACCESS_KEY: "test-only-relay-key",
+  } as unknown as NodeJS.ProcessEnv;
+  const selected = selectRegisteredFeeds({ entities: [], query: DOMESTIC_AI_QUESTION }, env).map((feed) => feed.id);
+  assert.ok(selected.includes("geekpark-news"), `selected: ${selected.join(",")}`);
+  assert.ok(selected.includes("36kr-flashes"), `selected: ${selected.join(",")}`);
 });

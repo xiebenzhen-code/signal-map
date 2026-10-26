@@ -448,3 +448,94 @@ test("feed failures preserve safe detailed codes through search phase diagnostic
     assert.ok(!JSON.stringify(diagnostic).includes("token=secret"));
   }
 });
+
+// --- STEP 3: one failing feed must not suppress another feed's readable items ---
+
+const DOMESTIC_AI_QUESTION = "过去 7 天，36氪快讯和极客公园 AI 报道了哪些国内 AI 产业新进展？";
+
+function geekparkFeed(count: number) {
+  const items = Array.from({ length: count }, (_, index) =>
+    `<item><title>国内AI产品进展 ${index + 1}</title><link>https://www.geekpark.net/news/ai-${index + 1}</link>` +
+    `<pubDate>${publishedAt}</pubDate><description>国内企业发布人工智能产品的新进展。</description></item>`).join("");
+  return `<rss><channel>${items}</channel></rss>`;
+}
+
+async function withRelayEnv<T>(env: Record<string, string | undefined>, run: () => Promise<T>): Promise<T> {
+  const keys = ["RSSHUB_BASE_URL", "RSSHUB_ACCESS_KEY"] as const;
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  try {
+    return await run();
+  } finally {
+    for (const key of keys) {
+      const value = previous[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+test("a failing 36kr relay keeps the readable geekpark feed and its items", async () => {
+  await withRelayEnv({ RSSHUB_BASE_URL: "https://relay.example.com", RSSHUB_ACCESS_KEY: "test-only-relay-key" }, async () => {
+    const reader: typeof readCustomSource = async (url) => {
+      if (url.includes("/36kr/")) return { url, status: "failed", reason: "FEED_TIMEOUT", requestCount: 1 };
+      return { url, status: "readable", reason: "read", requestCount: 1, content: geekparkFeed(2) };
+    };
+
+    const result = await retrieveRegisteredFeeds({ entities: [], query: DOMESTIC_AI_QUESTION, allowed: true, reader });
+    const geekpark = result.outcomes.find((outcome) => outcome.sourceId === "geekpark-news");
+    const kr36 = result.outcomes.find((outcome) => outcome.sourceId === "36kr-flashes");
+    assert.ok(geekpark && kr36, `outcomes: ${result.outcomes.map((outcome) => outcome.sourceId).join(",")}`);
+
+    // The healthy source keeps reading and keeps its items.
+    assert.equal(geekpark.execution, "searched_with_results");
+    assert.equal(geekpark.resultCount, 2);
+    // The failing source keeps its own failure state and is never relabelled.
+    assert.equal(kr36.execution, "failed");
+    assert.equal(kr36.failureCode, "upstream_error");
+    assert.equal(kr36.detailFailureCode, "FEED_TIMEOUT");
+    assert.equal(kr36.searched, true);
+    assert.equal(kr36.resultCount, 0);
+
+    // Items come only from the readable source; a failure never pads the count.
+    assert.equal(result.items.length, 2);
+    assert.ok(result.items.every((item) => item.source.includes("极客公园")));
+    assert.equal(result.failures.length, 1);
+    assert.match(result.failures[0], /36氪/);
+  });
+});
+
+test("an unconfigured relay is not_configured, never a fabricated success", async () => {
+  await withRelayEnv({ RSSHUB_BASE_URL: undefined, RSSHUB_ACCESS_KEY: undefined }, async () => {
+    const reader: typeof readCustomSource = async (url) => ({ url, status: "readable", reason: "read", requestCount: 1, content: geekparkFeed(1) });
+    const result = await retrieveRegisteredFeeds({ entities: [], query: DOMESTIC_AI_QUESTION, allowed: true, reader });
+
+    const kr36 = result.outcomes.find((outcome) => outcome.sourceId === "36kr-flashes");
+    assert.ok(kr36, `outcomes: ${result.outcomes.map((outcome) => outcome.sourceId).join(",")}`);
+    assert.equal(kr36.execution, "not_configured");
+    assert.equal(kr36.searched, false);
+    assert.equal(kr36.resultCount, 0);
+    assert.equal(result.items.length, 1);
+  });
+});
+
+test("a readable but empty feed stays searched_no_results, distinct from failure", async () => {
+  await withRelayEnv({ RSSHUB_BASE_URL: "https://relay.example.com", RSSHUB_ACCESS_KEY: "test-only-relay-key" }, async () => {
+    const reader: typeof readCustomSource = async (url) => {
+      if (url.includes("/36kr/")) return { url, status: "failed", reason: "FEED_TIMEOUT", requestCount: 1 };
+      return { url, status: "readable", reason: "read", requestCount: 1, content: "<rss><channel></channel></rss>" };
+    };
+    const result = await retrieveRegisteredFeeds({ entities: [], query: DOMESTIC_AI_QUESTION, allowed: true, reader });
+
+    const geekpark = result.outcomes.find((outcome) => outcome.sourceId === "geekpark-news");
+    assert.ok(geekpark);
+    assert.equal(geekpark.execution, "searched_no_results");
+    assert.equal(geekpark.searched, true);
+    assert.equal(geekpark.resultCount, 0);
+    // No card is invented to compensate for either source.
+    assert.equal(result.items.length, 0);
+  });
+});
