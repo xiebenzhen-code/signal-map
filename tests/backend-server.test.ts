@@ -419,3 +419,118 @@ test("preference endpoint exists and rejects unauthenticated access", async () =
   );
   assert.equal(method.status, 405);
 });
+
+// --- 0b-3: diagnostic token gate (red until the gate and injectable probe land) ---
+
+const PROBE_URL = "http://localhost/api/diagnostics/postgres-transport";
+
+type ProbeFactory = (options?: {
+  resolveAuth?: (request: Request) => Promise<{ userId: string } | null>;
+  runProbe?: () => Promise<unknown>;
+}) => (request: Request) => Promise<Response>;
+
+const STUB_OUTCOME = {
+  client: { connectSucceeded: true, selectSucceeded: true, lastPhase: "select_started", phases: [] },
+  pool: null,
+};
+
+async function loadProbeFactory(): Promise<ProbeFactory> {
+  const mod = await import("../backend/postgres-transport-probe.ts") as Record<string, unknown>;
+  const factory = mod.createPostgresTransportProbeHandler;
+  assert.equal(typeof factory, "function", "createPostgresTransportProbeHandler must be exported");
+  return factory as unknown as ProbeFactory;
+}
+
+test("postgres probe: a valid session without a token header is rejected before probing", async () => {
+  const factory = await loadProbeFactory();
+  await withSupabaseEnv({ SIGNAL_MAP_DIAGNOSTIC_TOKEN: "probe-token" }, async () => {
+    let probed = 0;
+    const handler = factory({
+      resolveAuth: async () => ({ userId: "user-1" }),
+      runProbe: async () => { probed += 1; return STUB_OUTCOME; },
+    });
+    const response = await handler(new Request(PROBE_URL, { method: "POST" }));
+    assert.equal(response.status, 401);
+    assert.equal(probed, 0);
+  });
+});
+
+test("postgres probe: a valid session with a wrong token is rejected before probing", async () => {
+  const factory = await loadProbeFactory();
+  await withSupabaseEnv({ SIGNAL_MAP_DIAGNOSTIC_TOKEN: "probe-token" }, async () => {
+    let probed = 0;
+    const handler = factory({
+      resolveAuth: async () => ({ userId: "user-1" }),
+      runProbe: async () => { probed += 1; return STUB_OUTCOME; },
+    });
+    const response = await handler(new Request(PROBE_URL, {
+      method: "POST",
+      headers: { "x-signal-map-diagnostic-token": "not-the-token" },
+    }));
+    assert.equal(response.status, 401);
+    assert.equal(probed, 0);
+  });
+});
+
+test("postgres probe: a valid session with no configured token stays default-off", async () => {
+  const factory = await loadProbeFactory();
+  await withSupabaseEnv({ SIGNAL_MAP_DIAGNOSTIC_TOKEN: undefined }, async () => {
+    let probed = 0;
+    const handler = factory({
+      resolveAuth: async () => ({ userId: "user-1" }),
+      runProbe: async () => { probed += 1; return STUB_OUTCOME; },
+    });
+    const response = await handler(new Request(PROBE_URL, { method: "POST" }));
+    assert.equal(response.status, 404);
+    assert.equal(probed, 0);
+  });
+});
+
+test("postgres probe: a valid session and the correct token reach the stub exactly once", async () => {
+  const factory = await loadProbeFactory();
+  await withSupabaseEnv({ SIGNAL_MAP_DIAGNOSTIC_TOKEN: "probe-token" }, async () => {
+    let probed = 0;
+    const handler = factory({
+      resolveAuth: async () => ({ userId: "user-1" }),
+      runProbe: async () => { probed += 1; return STUB_OUTCOME; },
+    });
+    const response = await handler(new Request(PROBE_URL, {
+      method: "POST",
+      headers: { "x-signal-map-diagnostic-token": "probe-token" },
+    }));
+    assert.equal(response.status, 200);
+    assert.equal(probed, 1);
+    const body = await response.json() as { client?: { selectSucceeded?: boolean }; requestId?: string };
+    assert.equal(body.client?.selectSucceeded, true);
+    assert.match(body.requestId || "", /\S/);
+  });
+});
+
+test("postgres probe: the token alone is never enough without a session", async () => {
+  const factory = await loadProbeFactory();
+  await withSupabaseEnv({ SIGNAL_MAP_DIAGNOSTIC_TOKEN: "probe-token" }, async () => {
+    let probed = 0;
+    const handler = factory({
+      resolveAuth: async () => null,
+      runProbe: async () => { probed += 1; return STUB_OUTCOME; },
+    });
+    const response = await handler(new Request(PROBE_URL, {
+      method: "POST",
+      headers: { "x-signal-map-diagnostic-token": "probe-token" },
+    }));
+    assert.equal(response.status, 401);
+    assert.equal(probed, 0);
+  });
+});
+
+test("diagnostic token comparison is shared by both probes and constant-time", async () => {
+  const mod = await import("../backend/diagnostic-token.ts") as Record<string, unknown>;
+  const evaluate = mod.evaluateDiagnosticToken;
+  assert.equal(typeof evaluate, "function", "evaluateDiagnosticToken must be exported");
+  const gate = evaluate as (provided: string | null | undefined, expected: string | undefined) => string;
+  assert.equal(gate(undefined, undefined), "disabled");
+  assert.equal(gate("anything", "   "), "disabled");
+  assert.equal(gate(undefined, "a-token"), "unauthorized");
+  assert.equal(gate("wrong", "a-token"), "unauthorized");
+  assert.equal(gate("a-token", "a-token"), "allowed");
+});
