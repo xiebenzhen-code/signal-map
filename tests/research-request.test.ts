@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createResearchRequest } from "../information/research-request.ts";
+import { planQuery } from "../research/query-planner.ts";
 import type { ActiveKnowledgeContext } from "../information/types.ts";
 
 const knowledge: ActiveKnowledgeContext = {
@@ -35,6 +36,33 @@ test("research request sends knowledge context in POST body, not URL query", () 
   assert.deepEqual(body.focusAreas, ["Codex", "Claude Code"]);
   assert.deepEqual(body.knownInformation, ["Codex is available"]);
   assert.deepEqual(body.customSources, ["https://developers.openai.com/codex/changelog"]);
+});
+
+test("the domestic AI media question reaches both the page request and requestedQuestion", () => {
+  const question = "过去7天，36氪快讯和极客公园报道了哪些与国内AI产品或产业有关的新进展？保留原始出处和发布日期，区分已确认信息与待核对线索。";
+  const request = createResearchRequest({
+    ...knowledge,
+    industry: "人工智能与产品工具",
+    focusAreas: ["AI 产品", "36氪快讯", "极客公园"],
+    currentQuestions: [question],
+  });
+  const body = JSON.parse(String(request.body)) as Record<string, unknown>;
+  assert.deepEqual(body.currentQuestions, [question]);
+
+  const plan = planQuery({
+    ...knowledge,
+    industry: String(body.industry),
+    focusAreas: (body.focusAreas as string[]).join("\\n"),
+    currentQuestions: (body.currentQuestions as string[]).join("\\n"),
+    knownInformation: "",
+    informationGaps: "",
+    trackedEntities: "",
+    trackedEvents: "",
+    userJudgements: "",
+    evidenceHistory: "",
+    customSources: "",
+  });
+  assert.equal(plan.requestedQuestion, question);
 });
 
 test("research request does not expose identity ownership or secrets", () => {
