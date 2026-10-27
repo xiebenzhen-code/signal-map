@@ -1,6 +1,6 @@
 import type { DetailEnrichmentInput, DetailEnrichmentResult } from "../types.ts";
 import { htmlTitle, isThinDetail, metaContent } from "./shared.ts";
-import { discardResponseBody } from "../../lib/http-response.ts";
+import { fetchHtml, DetailReadError, type DetailReadOptions } from "../detail-reader.ts";
 
 function huggingFaceRawReadmeUrl(input: DetailEnrichmentInput) {
   const canonicalId =
@@ -16,7 +16,7 @@ function huggingFaceRawReadmeUrl(input: DetailEnrichmentInput) {
   return `https://huggingface.co/${path}/raw/main/README.md`;
 }
 
-export async function enrichHuggingFaceDetail(input: DetailEnrichmentInput): Promise<DetailEnrichmentResult> {
+export async function enrichHuggingFaceDetail(input: DetailEnrichmentInput, options: DetailReadOptions = {}): Promise<DetailEnrichmentResult> {
   const canonicalUrl = input.url;
   const metadataFallback = [
     input.title ? `Hugging Face updated ${input.title.replace(/^Hugging Face\s+/i, "")}.` : "",
@@ -24,14 +24,11 @@ export async function enrichHuggingFaceDetail(input: DetailEnrichmentInput): Pro
     typeof input.metadata?.snippet === "string" ? input.metadata.snippet : "",
   ].filter(Boolean).join("\n");
   const readmeUrl = huggingFaceRawReadmeUrl(input);
+  const deadlineAt = input.deadlineAt ?? Date.now() + 10000;
   try {
     if (readmeUrl) {
-      const response = await fetch(readmeUrl, {
-        headers: { "User-Agent": "SignalMapResearch/0.4" },
-        signal: AbortSignal.timeout(10000),
-      });
-      if (response.ok) {
-        const markdown = await response.text();
+      const markdown = await fetchHtml(readmeUrl, deadlineAt - Date.now(), options);
+      if (markdown !== undefined) {
         const body = markdown
           .replace(/^---[\s\S]*?---/, " ")
           .replace(/!\[[^\]]*]\([^)]*\)/g, " ")
@@ -49,23 +46,16 @@ export async function enrichHuggingFaceDetail(input: DetailEnrichmentInput): Pro
             evidenceFrom: "Hugging Face README",
           };
         }
-      } else {
-        await discardResponseBody(response);
       }
     }
 
     if (!input.url) {
       return { status: "NO_DETAIL", discoveredBy: "Hugging Face" };
     }
-    const page = await fetch(input.url, {
-      headers: { "User-Agent": "SignalMapResearch/0.4" },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!page.ok) {
-      await discardResponseBody(page);
+    const html = await fetchHtml(input.url, deadlineAt - Date.now(), options);
+    if (html === undefined) {
       return { status: "FETCH_FAILED", canonicalUrl, discoveredBy: "Hugging Face" };
     }
-    const html = await page.text();
     const description = [
       htmlTitle(html),
       metaContent(html, "description"),
@@ -81,18 +71,20 @@ export async function enrichHuggingFaceDetail(input: DetailEnrichmentInput): Pro
       discoveredBy: "Hugging Face",
       evidenceFrom: isThinDetail(description) ? "Hugging Face API metadata" : "Hugging Face page",
     };
-  } catch {
+  } catch (error) {
+    const failureCode = error instanceof DetailReadError ? error.code : undefined;
     if (!isThinDetail(metadataFallback)) {
       return {
         status: "SUCCESS",
         canonicalUrl,
         title: input.title,
         rawContent: metadataFallback,
+        ...(failureCode ? { failureCode } : {}),
         contentType: "metadata",
         discoveredBy: "Hugging Face",
         evidenceFrom: "Hugging Face API metadata",
       };
     }
-    return { status: "FETCH_FAILED", canonicalUrl, discoveredBy: "Hugging Face" };
+    return { status: "FETCH_FAILED", canonicalUrl, discoveredBy: "Hugging Face", ...(failureCode ? { failureCode } : {}) };
   }
 }
