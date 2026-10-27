@@ -26,7 +26,7 @@ export function LocalAccountBoundary({ children }: { children: (user: LocalAccou
           resolved: true,
         }));
       }).catch(() => {
-        if (!disposed && version === generation) setState({ status: "error", user: null, resolved: false });
+        if (!disposed && version === generation) setState((previous) => ({ ...previous, status: "error" }));
       }).finally(() => {
         inFlight = false;
         if (!disposed && recheck) { recheck = false; check(); }
@@ -37,30 +37,29 @@ export function LocalAccountBoundary({ children }: { children: (user: LocalAccou
       scheduled = true;
       queueMicrotask(() => { scheduled = false; check(); });
     };
-    const onVisible = () => { if (document.visibilityState === "visible") scheduleCheck(); };
-    // Normal pageshow is already covered by the initial check. Keep focus
-    // checks for account changes in another visible window.
+    // Focus and visibility changes are not authentication events. Only a
+    // restored history document needs revalidation in addition to initial load.
     const onPageShow = (event: PageTransitionEvent) => { if (event.persisted) scheduleCheck(); };
     check();
-    window.addEventListener("focus", scheduleCheck);
     window.addEventListener("pageshow", onPageShow);
-    document.addEventListener("visibilitychange", onVisible);
     return () => {
       disposed = true;
-      window.removeEventListener("focus", scheduleCheck);
       window.removeEventListener("pageshow", onPageShow);
-      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [retry]);
   return <>
-    <div style={{ visibility: state.status === "ready" ? "visible" : "hidden" }}
+    <div style={{ visibility: state.resolved ? "visible" : "hidden" }}
       inert={state.status !== "ready"} aria-hidden={state.status !== "ready"}>
       {state.resolved && children(state.user)}
     </div>
-    {state.status !== "ready" && <main className="signal-page mx-auto max-w-[760px] p-8" role="status"
+    {state.status !== "ready" && (!state.resolved ? <main className="signal-page mx-auto max-w-[760px] p-8" role="status"
       style={{ position: "fixed", inset: 0, zIndex: 50 }}>
     <p>{state.status === "checking" ? "正在确认账户状态…" : "暂时无法确认账户，未读取本机资料。"}</p>
     {state.status === "error" && <button onClick={() => setRetry((value) => value + 1)}>重新连接</button>}
-    </main>}
+    </main> : <aside role="status" className="rounded-xl border bg-white p-4 shadow-lg"
+      style={{ position: "fixed", bottom: 20, right: 20, zIndex: 50, maxWidth: 360 }}>
+      <p>{state.status === "checking" ? "正在核对账户，页面暂时只读…" : "暂时无法确认账户。页面与草稿已保留，请重新连接。"}</p>
+      {state.status === "error" && <button onClick={() => setRetry((value) => value + 1)}>重新连接</button>}
+    </aside>)}
   </>;
 }
