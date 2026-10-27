@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { cleanContent, extractClaim } from "../content-processing/index.ts";
 import { createResearchPlan } from "../agent/query-planner.ts";
 import { toRetrievalPlan } from "../agent/retrieval-plan.ts";
-import { enrichDetail, maxDetailFetchesPerRound, shouldEnrichDetail, sourceCapability } from "../source-enrichment/index.ts";
-import { normalizeArxivResults, runResearchPipeline } from "../research/research-pipeline.ts";
+import { enrichDetail, maxDetailFetchesPerRound, shouldEnrichDetail, sourceCapability } from "./fixtures/detail-read.ts";
+import { normalizeArxivResults, runResearchPipeline } from "./fixtures/detail-read.ts";
 import type { ResearchInput } from "../research/types.ts";
 
 const baseInput = (overrides: Partial<ResearchInput> = {}): ResearchInput => ({

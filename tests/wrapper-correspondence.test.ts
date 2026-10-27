@@ -76,7 +76,7 @@ function fetchedFromHost(fetched: string[], hostname: string) {
 }
 
 test("RED: a same-domain but unrelated article must not be accepted as the original", async () => {
-  const { enrichGenericDetail } = await import("../source-enrichment/detail-enricher.ts");
+  const { enrichGenericDetail } = await import("./fixtures/detail-read.ts");
   const harness = installFetch({
     lite: [{ url: UNRELATED_ARTICLE_URL, anchor: "About Runway: Company, Careers and Press" }],
     runway: () => new Response("<html><head><title>About Runway</title></head><body><p>We are a company. Our team builds tools and hires people across many offices worldwide every day.</p></body></html>"),
@@ -98,7 +98,7 @@ test("RED: a same-domain but unrelated article must not be accepted as the origi
 });
 
 test("RED: the resolver must pick the corresponding result, not the first same-domain URL", async () => {
-  const { enrichGenericDetail } = await import("../source-enrichment/detail-enricher.ts");
+  const { enrichGenericDetail } = await import("./fixtures/detail-read.ts");
   const harness = installFetch({
     lite: [
       { url: UNRELATED_ARTICLE_URL, anchor: "About Runway: Company, Careers and Press" },
@@ -123,7 +123,7 @@ test("RED: the resolver must pick the corresponding result, not the first same-d
 });
 
 test("RED: a same-topic reworded headline must not be declared resolved", async () => {
-  const { enrichGenericDetail } = await import("../source-enrichment/detail-enricher.ts");
+  const { enrichGenericDetail } = await import("./fixtures/detail-read.ts");
   const harness = installFetch({
     lite: [{ url: REAL_ARTICLE_URL, anchor: "Choosing Between AI and Human Video Editors for Teams" }],
     runway: () => new Response("<html><head><title>Choosing Between AI and Human Video Editors for Teams</title></head><body><p>Teams compare AI tools and human editors. This comparison covers budgets, turnaround times, and creative control for production teams today.</p></body></html>"),
@@ -143,7 +143,7 @@ test("RED: a same-topic reworded headline must not be declared resolved", async 
 });
 
 test("RED: a resolved URL whose page is a different article must be rejected by the page check", async () => {
-  const { enrichGenericDetail } = await import("../source-enrichment/detail-enricher.ts");
+  const { enrichGenericDetail } = await import("./fixtures/detail-read.ts");
   const harness = installFetch({
     lite: [{ url: REAL_ARTICLE_URL, anchor: CORRECT_ANCHOR }],
     // The indexed anchor looked right, but the page serves a different article.
@@ -165,7 +165,7 @@ test("RED: a resolved URL whose page is a different article must be rejected by 
 });
 
 test("RED: the correct article passes with normal title-format differences", async () => {
-  const { enrichGenericDetail } = await import("../source-enrichment/detail-enricher.ts");
+  const { enrichGenericDetail } = await import("./fixtures/detail-read.ts");
   const harness = installFetch({
     lite: [{ url: REAL_ARTICLE_URL, anchor: "BEST SHORT FORM VIDEO EDITOR: AI OR A HUMAN EDITOR? — Runway Insights" }],
     runway: () => new Response(ARTICLE_BODY),
@@ -189,7 +189,7 @@ test("RED: the correct article passes with normal title-format differences", asy
 });
 
 test("RED: missing correspondence materials keeps the wrapper unresolved (no requests)", async () => {
-  const { enrichGenericDetail } = await import("../source-enrichment/detail-enricher.ts");
+  const { enrichGenericDetail } = await import("./fixtures/detail-read.ts");
   const harnessNoOrigin = installFetch({ lite: [{ url: REAL_ARTICLE_URL, anchor: CORRECT_ANCHOR }] });
   try {
     const result = await enrichGenericDetail({
@@ -221,7 +221,7 @@ test("RED: missing correspondence materials keeps the wrapper unresolved (no req
 });
 
 test("RED: an exhausted budget must not fire the search", async () => {
-  const { enrichGenericDetail } = await import("../source-enrichment/detail-enricher.ts");
+  const { enrichGenericDetail } = await import("./fixtures/detail-read.ts");
   const harness = installFetch({ lite: [{ url: REAL_ARTICLE_URL, anchor: CORRECT_ANCHOR }] });
   try {
     const result = await enrichGenericDetail({
@@ -240,7 +240,7 @@ test("RED: an exhausted budget must not fire the search", async () => {
 });
 
 test("RED: a search that exhausts the budget blocks the body request", async () => {
-  const { enrichGenericDetail } = await import("../source-enrichment/detail-enricher.ts");
+  const { enrichGenericDetail } = await import("./fixtures/detail-read.ts");
   const harness = installFetch({
     // The search response arrives after the deadline — the injected double
     // deliberately ignores the abort signal so the post-search guard is what
@@ -265,7 +265,7 @@ test("RED: a search that exhausts the budget blocks the body request", async () 
 });
 
 test("RED: a cancelled body request stops and never returns success", async () => {
-  const { enrichGenericDetail } = await import("../source-enrichment/detail-enricher.ts");
+  const { enrichGenericDetail } = await import("./fixtures/detail-read.ts");
   const harness = installFetch({
     lite: [{ url: REAL_ARTICLE_URL, anchor: CORRECT_ANCHOR }],
     runway: (_url, signal) =>
@@ -302,7 +302,7 @@ test("RED: a cancelled body request stops and never returns success", async () =
 });
 
 test("RED: the normal non-wrapper enrichment path does not regress", async () => {
-  const { enrichGenericDetail } = await import("../source-enrichment/detail-enricher.ts");
+  const { enrichGenericDetail } = await import("./fixtures/detail-read.ts");
   const harnessDirect = installFetch({ runway: (url) => (url === REAL_ARTICLE_URL ? new Response(ARTICLE_BODY) : new Response("", { status: 404 })) });
   try {
     const withoutDeadline = await enrichGenericDetail({

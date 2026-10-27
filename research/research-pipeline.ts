@@ -77,6 +77,9 @@ import type {
 type ProgressHandler = (progress: PipelineProgress) => void | Promise<void>;
 
 export type ResearchPipelineDebug = {
+  onDetailRead?: (result: import("../source-enrichment/types.ts").DetailEnrichmentResult) => void;
+  /** Internal-only transport dependency, never accepted by an HTTP handler. */
+  detailReadOptions?: import("../source-enrichment/detail-enricher.ts").DetailReadOptions;
   feedCache?: FeedReadCache;
   customSourceReader?: typeof readCustomSource;
   onCandidateSelectionAudit?: (audit: CandidateSelectionAudit[]) => void;
@@ -1256,6 +1259,8 @@ async function enrichDiscoveryCandidates(
   plan: QueryPlan,
   failures: string[],
   remainingBudgetMs = 12000,
+  detailReadOptions?: import("../source-enrichment/detail-enricher.ts").DetailReadOptions,
+  onDetailRead?: ResearchPipelineDebug["onDetailRead"],
 ) {
   const summary: DetailEnrichmentSummary = {
     detailAttempted: 0,
@@ -1315,7 +1320,8 @@ async function enrichDiscoveryCandidates(
         // to locate the real article behind a Google News wrapper URL.
         publisherUrl: candidate.publisherUrl,
       },
-    });
+    }, detailReadOptions);
+    onDetailRead?.(result);
     const existing = candidatesByUrl.get(candidate.url);
     if (!existing) continue;
     existing.detailEnrichment = {
@@ -1919,6 +1925,8 @@ export async function runResearchPipeline(
     plan,
     failures,
     enrichmentBudgetMs,
+    debug?.detailReadOptions,
+    debug?.onDetailRead,
   );
   markPhase("detail_fetch_finished", true, detailEnrichment.detailSucceeded, undefined, {
     detailAttempted: detailEnrichment.detailAttempted,

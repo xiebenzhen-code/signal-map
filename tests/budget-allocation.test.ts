@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { runResearchPipeline } from "../research/research-pipeline.ts";
+import { runResearchPipeline } from "./fixtures/detail-read.ts";
 import type { ResearchInput, ResearchResponse } from "../research/types.ts";
 
 const LONG_QUERY =

@@ -19,6 +19,8 @@ export type DetailEnrichmentInput = {
 
 export type DetailEnrichmentResult = {
   status: DetailEnrichmentStatus;
+  /** Internal transport diagnosis only; never rendered as UI failure prose. */
+  failureCode?: "DETAIL_PRIVATE_ADDRESS" | "DETAIL_UNSAFE_REDIRECT" | "DETAIL_REDIRECT_LIMIT" | "DETAIL_DNS_FAILED" | "DETAIL_TIMEOUT";
   canonicalUrl?: string;
   title?: string;
   publishedAt?: string;

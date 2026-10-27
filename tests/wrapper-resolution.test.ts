@@ -22,7 +22,7 @@ function ddgResults(targetUrl: string): string {
 }
 
 test("RED: a Google News wrapper candidate resolves to the publisher article and yields extractable content", async () => {
-  const { enrichGenericDetail } = await import("../source-enrichment/detail-enricher.ts");
+  const { enrichGenericDetail } = await import("./fixtures/detail-read.ts");
   const originalFetch = globalThis.fetch;
   const fetched: string[] = [];
   globalThis.fetch = (async (target: string | URL | Request) => {
@@ -72,7 +72,7 @@ test("RED: a Google News wrapper candidate resolves to the publisher article and
 });
 
 test("RED: an unresolvable wrapper stays an honest failure (no Google shell stored as content)", async () => {
-  const { enrichGenericDetail } = await import("../source-enrichment/detail-enricher.ts");
+  const { enrichGenericDetail } = await import("./fixtures/detail-read.ts");
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (target: string | URL | Request) => {
     const url = new URL(String(target));
