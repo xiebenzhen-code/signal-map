@@ -71,14 +71,16 @@ test("catalogue broadens subjects without sending unknown entities to every feed
   assert.deepEqual(selectRegisteredFeeds({entities: [], query: "数码", selectedSourceType: "OFFICIAL"}), []);
 });
 
-test("industry questions select bounded relevant feeds even without a named publisher", () => {
+test("industry questions select every relevant feed without a total cap", () => {
   const film = selectRegisteredFeeds({entities: [], query: "过去30天面向独立电影人的后期制作软件有哪些正式更新"});
   assert.ok(film.some(feed => feed.id === "kdenlive"));
   const commerce = selectRegisteredFeeds({entities: [], query: "小型独立站建站与支付工具正式更新"});
   assert.ok(commerce.some(feed => feed.id === "woocommerce"));
   const programming = selectRegisteredFeeds({entities: [], query: "程序开发工具近期发布"});
   assert.ok(programming.length > 0);
-  for (const feeds of [film, commerce, programming]) assert.ok(feeds.length <= 3);
+  // No arbitrary total cap: each question keeps every matching feed. Relevance
+  // still bounds the result, so an unmatched question selects nothing.
+  for (const feeds of [film, commerce, programming]) assert.ok(feeds.length >= 1);
   assert.equal(selectRegisteredFeeds({entities: [], query: "未归类的面包配方 documentation"}).length, 0);
 });
 
@@ -537,5 +539,58 @@ test("a readable but empty feed stays searched_no_results, distinct from failure
     assert.equal(geekpark.resultCount, 0);
     // No card is invented to compensate for either source.
     assert.equal(result.items.length, 0);
+  });
+});
+
+// --- No source-count cap: every matching publisher must be selected and read ---
+
+const MULTI_PUBLISHER_QUESTION = "Kdenlive、OBS、Krita、Node.js 和 Shopify 近期有哪些正式更新？";
+const MULTI_PUBLISHER_IDS = ["kdenlive", "nodejs", "obs", "shopify", "krita"];
+
+function feedForHost(url: string) {
+  const host = new URL(url).hostname;
+  return `<rss><channel><item><title>${host} official update</title>` +
+    `<link>https://${host}/post/release-1</link><pubDate>${publishedAt}</pubDate>` +
+    `<description>Official release announcement for this publisher.</description></item></channel></rss>`;
+}
+
+test("every matching publisher is selected, not only the first three", () => {
+  const selected = selectRegisteredFeeds({ entities: [], query: MULTI_PUBLISHER_QUESTION }).map((feed) => feed.id);
+  assert.deepEqual([...selected].sort(), [...MULTI_PUBLISHER_IDS].sort(), `selected: ${selected.join(",")}`);
+});
+
+test("the fourth and later selected feeds still execute and report their own outcome", async () => {
+  const reader: typeof readCustomSource = async (url) => ({
+    url, status: "readable", reason: "read", requestCount: 1, content: feedForHost(url),
+  });
+  const result = await retrieveRegisteredFeeds({
+    entities: [], query: MULTI_PUBLISHER_QUESTION, allowed: true, reader,
+  });
+
+  const executed = result.outcomes.map((outcome) => outcome.sourceId).filter(Boolean) as string[];
+  for (const id of MULTI_PUBLISHER_IDS) {
+    assert.ok(executed.includes(id), `missing outcome for ${id}; executed: ${executed.join(",")}`);
+    const outcome = result.outcomes.find((entry) => entry.sourceId === id);
+    assert.equal(outcome?.execution, "searched_with_results", id);
+    assert.equal(outcome?.resultCount, 1, id);
+  }
+  // One candidate per publisher: the extra feeds are not silently dropped.
+  assert.equal(result.items.length, MULTI_PUBLISHER_IDS.length);
+  const hosts = new Set(result.items.map((item) => new URL(item.url).hostname));
+  assert.equal(hosts.size, MULTI_PUBLISHER_IDS.length);
+});
+
+test("dropping the cap still keeps unrelated, excluded and unconfigured sources out", async () => {
+  assert.deepEqual(selectRegisteredFeeds({ entities: [], query: "面包配方" }).map((feed) => feed.id), []);
+
+  const excluded = selectRegisteredFeeds({
+    entities: [], query: MULTI_PUBLISHER_QUESTION, excludedEntities: ["Shopify"],
+  }).map((feed) => feed.id);
+  assert.equal(excluded.includes("shopify"), false, `selected: ${excluded.join(",")}`);
+  assert.ok(excluded.includes("kdenlive"), "an unrelated exclusion must not remove other publishers");
+
+  await withRelayEnv({ RSSHUB_BASE_URL: undefined, RSSHUB_ACCESS_KEY: undefined }, async () => {
+    const selected = selectRegisteredFeeds({ entities: [], query: "36氪快讯和极客公园的国内 AI 报道" }).map((feed) => feed.id);
+    assert.equal(selected.includes("36kr-flashes"), false, "an unconfigured relay must never be selected");
   });
 });

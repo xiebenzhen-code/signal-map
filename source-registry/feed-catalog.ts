@@ -134,6 +134,11 @@ export function selectRegisteredFeeds(input: {entities: string[]; query: string;
   const available = catalogue.filter(feed => !["OFFICIAL", "PRIMARY"].includes(input.selectedSourceType ?? "") || feed.official)
     .filter(feed => !excluded.some(entity => feed.aliases.some(alias => feedKey(alias) === entity)));
   const exact = available.filter(feed => feed.aliases.some(alias => contains(text, alias)));
-  // Named publishers outrank broad subject matches. An unknown question never selects the entire catalogue.
-  return (exact.length ? exact : available.filter(feed => feed.topics.some(topic => contains(text, topic)))).slice(0, 3);
+  // Named publishers outrank broad subject matches. An unknown question never
+  // selects the entire catalogue. Every feed that matches the question is
+  // returned: there is no total cap, because dropping the 4th+ relevant source
+  // silently hid material the question explicitly asked for. Relevance, entity
+  // precedence, exclusion, official-only mode and relay configuration still
+  // bound the result; callers own execution concurrency, not the list.
+  return exact.length ? exact : available.filter(feed => feed.topics.some(topic => contains(text, topic)));
 }
