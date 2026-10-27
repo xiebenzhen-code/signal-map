@@ -1,5 +1,60 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import ts from "typescript";
+
+const homeSource = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
+const builderSource = homeSource.slice(homeSource.indexOf("function FilterBuilder("), homeSource.indexOf("function ResearchPromptPanel("));
+const builderJs = ts.transpileModule(builderSource, { compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 } }).outputText;
+const Builder = new Function("React", "useState", "CustomSourcesEditor", `${builderJs}; return FilterBuilder;`)(
+  React, (value: unknown) => [value, () => {}], () => null,
+) as (props: Record<string, unknown>) => React.ReactElement;
+
+test("onboarding exposes logout for a signed-in account without creating a filter", () => {
+  const html = renderToStaticMarkup(Builder({ onSave() {}, loggedIn: true, onLogout() {}, logoutState: "idle" }));
+  assert.match(html, /已登录/);
+  assert.match(html, /退出登录/);
+  assert.doesNotMatch(html, /登录后可保存长期记忆/);
+});
+
+test("anonymous onboarding offers a login link instead of logout", () => {
+  const html = renderToStaticMarkup(Builder({ onSave() {}, loggedIn: false, onLogout() {}, logoutState: "idle" }));
+  assert.match(html, /href="\/control"/);
+  assert.doesNotMatch(html, /退出登录/);
+});
+
+test("onboarding keeps pending and failed logout visible", () => {
+  const pending = renderToStaticMarkup(Builder({ onSave() {}, loggedIn: true, onLogout() {}, logoutState: "pending" }));
+  assert.match(pending, /disabled=""[^>]*>退出中…/);
+  const failed = renderToStaticMarkup(Builder({ onSave() {}, loggedIn: true, onLogout() {}, logoutState: "failed", logoutMessage: "退出失败，请重试" }));
+  assert.match(failed, /退出失败，请重试/);
+  assert.match(failed, /退出登录/);
+});
+
+test("onboarding account controls use the existing logout handler, never save a research draft", () => {
+  let logouts = 0;
+  let saves = 0;
+  const tree = Builder({ onSave() { saves++; }, loggedIn: true, onLogout() { logouts++; }, logoutState: "idle" });
+  const buttons: React.ReactElement<Record<string, unknown>>[] = [];
+  function visit(node: React.ReactNode) {
+    React.Children.forEach(node, (child) => {
+      if (!React.isValidElement<Record<string, unknown>>(child)) return;
+      if (child.type === "button") buttons.push(child);
+      visit(child.props.children as React.ReactNode);
+    });
+  }
+  visit(tree);
+  const logout = buttons.find((button) => button.props.children === "退出登录");
+  assert.ok(logout, "onboarding needs an actionable logout button");
+  (logout.props.onClick as () => void)();
+  assert.equal(logouts, 1);
+  assert.equal(saves, 0);
+  const branch = homeSource.slice(homeSource.indexOf("if (!activeFilter || filterBuilderOpen)"), homeSource.indexOf("if (!activeFilter || filterBuilderOpen)") + 650);
+  assert.match(branch, /loggedIn=\{loggedIn\}/);
+  assert.match(branch, /onLogout=\{signOut\}/);
+});
 
 type SessionState = { status: "checking" | "ready" | "error"; userId: string | null };
 type SessionKind = "checking" | "anonymous" | "authenticated" | "error";

@@ -764,9 +764,17 @@ const emptyFilterDraft: OnboardingDraft = {
 function FilterBuilder({
   onSave,
   onCancel,
+  loggedIn,
+  onLogout,
+  logoutState,
+  logoutMessage,
 }: {
   onSave: (draft: OnboardingDraft) => void;
   onCancel?: () => void;
+  loggedIn: boolean;
+  onLogout: () => Promise<void>;
+  logoutState: "idle" | "pending" | "failed";
+  logoutMessage: string;
 }) {
   const [query, setQuery] = useState("");
   const [sources, setSources] = useState("");
@@ -801,8 +809,18 @@ function FilterBuilder({
               <p className="text-sm font-semibold">Signal Map</p>
             </div>
           </div>
-          {onCancel && <button onClick={onCancel} className="text-xs font-bold text-[#727b87]">取消</button>}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {loggedIn ? <>
+              <span className="text-xs text-[#596473]">已登录</span>
+              <button type="button" onClick={() => void onLogout()} disabled={logoutState === "pending"}
+                className="min-h-9 rounded-full border border-[#dfe3e7] px-3 py-2 text-xs font-bold disabled:opacity-60">
+                {logoutState === "pending" ? "退出中…" : "退出登录"}
+              </button>
+            </> : <a href="/control" className="min-h-9 rounded-full border border-[#dfe3e7] px-3 py-2 text-xs font-bold">登录 / 注册</a>}
+            {onCancel && <button onClick={onCancel} className="text-xs font-bold text-[#727b87]">取消</button>}
+          </div>
         </div>
+        {logoutState === "failed" && <p role="alert" className="mt-3 text-sm text-rose-700">{logoutMessage}</p>}
 
         <h1 className="signal-display mt-10 text-[42px] leading-[1.02] sm:text-6xl">你现在想了解什么？</h1>
         <p className="mt-4 text-sm leading-6 text-[#707986]">
@@ -851,7 +869,7 @@ function FilterBuilder({
               开始研究
             </button>
           </div>
-          <p className="text-center text-[11px] leading-5 text-[#8a929d]">不用先配置系统。登录后可保存长期记忆；未登录只保存在当前浏览器。</p>
+          <p className="text-center text-[11px] leading-5 text-[#8a929d]">{loggedIn ? "已登录，可保存长期记忆。直接填写问题即可开始。" : "不用先配置系统。登录后可保存长期记忆；未登录只保存在当前浏览器。"}</p>
         </div>
       </section>
     </main>
@@ -2096,6 +2114,10 @@ function AccountHomePage({ currentUser }: { currentUser: CurrentUser }) {
       <FilterBuilder
         onSave={createFilter}
         onCancel={activeFilter ? () => setFilterBuilderOpen(false) : undefined}
+        loggedIn={loggedIn}
+        onLogout={signOut}
+        logoutState={logoutState}
+        logoutMessage={logoutMessage}
       />
     );
   }
