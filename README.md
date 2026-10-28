@@ -43,7 +43,7 @@ Signal Map 尝试让这个过程可以被检查：先明确问题，再取得材
 | 来源读取与过滤 | 有限的真实读取、确定性测试、执行日志 | 全行业覆盖、持续可达性、答案质量 |
 | 不确定材料分流 | 展示门单测：D06 冻结 Chrome RSS 正文得到 25 条 UNCERTAIN，正式结果 0、可能相关 25；界面组件静态渲染快照（[n4-closeout](docs/verification/n4-closeout-20261026.md)） | 线上页面复验；人工标注验证折叠是否漏掉必看 |
 | 零展示原因与覆盖说明 | 每个来源的读取说明与六类零展示原因，有单测与渲染快照 | 线上页面复验 |
-| 诊断入口令牌门 | 未配置令牌返回 404，令牌或会话缺失返回 401；先红后绿的测试（`tests/backend-server.test.ts`） | 尚未部署，线上仍是旧行为 |
+| 诊断入口令牌门 | 线上 API028 未配置令牌，两个诊断入口匿名 POST 均返回 404（[发布证据](docs/verification/api028-source-deployment-report.md)） | 已上线；不等于登录或研究效果验收 |
 | 账户记录持久化 | 测试账号保存、退出重登读回、浏览器显示新记录 | 更多账号和设备的验收 |
 | 同浏览器账号切换 | `130009a` 的本机草稿隔离修补及本地反例（[记录](docs/verification/local-account-isolation-repair-20261021.md)） | 新版本部署后 A→B→A 页面复验 |
 | 长期记忆影响研究 | 账户存储与记忆选择接线存在，自动参与默认关闭 | 跨次记忆是否改善研究质量；与旧结论矛盾的新证据目前只保存为证据，不更新知识层 |
@@ -75,7 +75,7 @@ Signal Map 尝试让这个过程可以被检查：先明确问题，再取得材
 
 Web：React / vinext；API：独立 Node.js 进程；认证：Supabase Auth；账户数据：PostgreSQL。主要接口：`POST /api/signals`、`POST /api/research/plan`、`/api/research/stream`、`/api/control/knowledge`、`POST /api/sources/check`，它们是产品内部接口，不是稳定的公共 SDK。
 
-**模型使用**：规划与综合是两处可选的模型调用，具体模型通过环境变量配置（见 [.env.example](.env.example)）；规划超时会回退到确定性计划（`agent/runner.ts`）。其余检索、过滤、去重、日期与安全检查不依赖模型。按维护者截至 2026-10-28 提供的线上配置状态，当前未配置模型密钥，规划与综合走确定性路径（本次未重新查询生产配置）。
+**模型使用**：规划与综合是两处可选的模型调用，具体模型通过环境变量配置（见 [.env.example](.env.example)）；规划超时会回退到确定性计划（`agent/runner.ts`）。其余检索、过滤、去重、日期与安全检查不依赖模型。API028 未配置模型提供商及 OpenAI/DeepSeek 密钥变量，规划与综合走默认确定性路径。该结论仅限 API028；Web 配置不能据此推断（[当前基线](docs/verification/CURRENT-BASELINE-20261028.md)）。
 
 **测试隔离**：测试通过注入的请求与地址解析函数使用冻结快照，不访问真实网络，也不依赖当前时间。
 
@@ -91,7 +91,7 @@ Web：React / vinext；API：独立 Node.js 进程；认证：Supabase Auth；�
 
 2026-10-21，正式站点的 Kdenlive 维护更新问题检索 20 条、聚合 18 个信号、最终展示 0 条。读取确实执行了，但没有回答原题，答案质量未通过。[历史演示及边界](https://github.com/xiebenzhen-code/signal-map/blob/5142a6705b7cdb5f3b133d6a9567da9256019182/docs/portfolio/DEMO.md)保留了这个结果，不把它当作当前全部能力通过的证明。
 
-**版本口径**：仓库内可核验的最近一次正式发布记录为 Sites53 + API019（[api-repair-release-20261021.md](docs/verification/api-repair-release-20261021.md)）。API 027 按 [api027-release-manual-20261026.md](docs/verification/api027-release-manual-20261026.md) 发布，其线上验收记录尚未纳入仓库，因此本文不引用 027 的演示或数字。
+**版本口径**：线上 API028 对应源码 `41761804…`，Web 为 Sites58（Sites 源码 `265afcc…`）；回退 API 为027。Web 已含“可能相关”和零结果原因组件；本次目标 Web 发布尚未完成。详见[当前基线](docs/verification/CURRENT-BASELINE-20261028.md)。上方历史演示保留其原版本口径。
 
 ## 已知局限
 
@@ -105,7 +105,7 @@ Web：React / vinext；API：独立 Node.js 进程；认证：Supabase Auth；�
 - **部分渠道可达性未恢复**：Chrome / FeedBurner 超时、WooCommerce 地址预检拒绝尚无恢复证据；36氪中继的当前可用性待复验。
 - **记忆的局限**：「看到记录」不等于「影响研究」；与旧结论矛盾的新证据目前只写入证据层，不更新知识层。
 - **账号隔离线上复验未完成**：本机多账号草稿隔离已修补，正式站点复验仍待执行；共享设备勿保存敏感草稿。
-- **部分修改尚未上线**：不确定材料折叠、零展示原因、诊断入口令牌门在代码与测试中已实现，部署与页面复验待完成。
+- **上线与验收边界**：Sites58 已含不确定材料分组与零结果原因组件，API028 的诊断入口已验证为404；目标 Web 更新仍被阻断，线上冻结夹具展示尚未复验。
 - **选题用途和社媒采集留待后续**，不作为当前成果。
 - **仓库尚无 `LICENSE`**：未声明开源或商业使用授权；第三方依赖与字体各有其许可。
 
