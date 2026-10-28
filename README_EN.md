@@ -1,83 +1,146 @@
-<!-- README_SYNC: source=p2n/stability-and-diagnosis-N4-working-tree; review-draft=v2; updated=2026-10-26 -->
+<!-- README_SYNC: source=develop@e7d1b2b; updated=2026-10-28 -->
 <p align="center"><a href="./README.md">简体中文</a> · English</p>
 
 # Signal Map
 
-Start from a question, read public material, filter by date and relevance, and keep the source and the reason for each decision. Uncertain items go into "Possibly related" and are never treated as conclusions. When there is nothing to show, the app says why.
+An information-filtering and decision-support tool for independent developers and creators. Start with a specific question, read public sources, filter by date and relevance, and keep the original links and the reasons behind each filtering decision. Uncertain material goes into a "Possibly related" group, and an empty result comes with an explanation.
 
-Built for independent developers and creators who need a first-pass judgment across a lot of public information.
+[Try the app](https://signal.benzhenlab.com/) · [Report an issue](https://github.com/xiebenzhen-code/signal-map/issues)
 
-**Highlights**
+![Stage](https://img.shields.io/badge/status-limited_trial-2457ff)
+![Language](https://img.shields.io/badge/language-TypeScript-3178c6)
+![Runtime](https://img.shields.io/badge/local_checks-Node.js_24%2B-43853d)
+![Repository](https://img.shields.io/badge/repository-public-2ea44f)
 
-- **A research workflow with a budget and a deadline**: plans entities, time window and exclusions; fetching and processing run within an execution budget and deadline.
-- **Safe public-web fetching**: public-address pre-checks, DNS results pinned to the validated address, per-hop redirect validation, and relay credentials sent only in same-origin headers, never in URLs.
-- **UNCERTAIN routing, an "Unconfirmed" label and zero-result explanations**: uncertain material goes into a collapsed-by-default "Possibly related" group labeled "Unconfirmed", is excluded from formal results, and an empty display comes with a categorized reason.
+[Watch the roughly 50-second live demo](docs/portfolio/signal-map-demo.mp4) · [Recording method and outcome](docs/portfolio/DEMO.md)
 
-[Trial site](https://signal.benzhenlab.com/) · [Report an issue](https://github.com/xiebenzhen-code/signal-map/issues)
+> The recording is from 2026-10-21 and corresponds to Sites53 + API019. It shows behaviour at that time and cannot be used as evidence for later versions.
 
-**Status:** limited trial. This draft describes the local N4 candidate; whether the live site includes these changes depends on the release record. Other caveats are in [Known limitations](#known-limitations).
+![Signal Map architecture and validation boundaries](docs/portfolio/signal-map-architecture.png)
 
-## Demo
+**Status: limited trial, preparing a frozen portfolio baseline.** The repository remains public. This text describes the `develop` branch. What is live depends on the release records; the latest code on GitHub is not necessarily what is running online.
 
-The repository contains a real recorded demo video: [`signal-map-demo.mp4`](https://github.com/xiebenzhen-code/signal-map/blob/5142a6705b7cdb5f3b133d6a9567da9256019182/docs/portfolio/signal-map-demo.mp4) (1920×1080, about 50 s, no audio). Notes are in [`DEMO.md`](https://github.com/xiebenzhen-code/signal-map/blob/5142a6705b7cdb5f3b133d6a9567da9256019182/docs/portfolio/DEMO.md) (written in Chinese).
+## Why
 
-| Item | Detail |
-|---|---|
-| Recorded on / version | 2026-10-21; production domain, Sites53 + API019. Recorded before the N4 candidate, so it does **not** show the N4 "Possibly related" group or zero-result explanations |
-| Question | Kdenlive maintenance updates in the past 30 days (release date, applicable version, official link) |
-| Result | 20 items scanned, 18 signals aggregated, **0 displayed**; 5 detail fetches, 4 succeeded. Final answer quality for this question did not pass |
-| Nature of footage | Real browser footage of one research submission; no fabricated candidates or counts; waiting segments sped up 2× |
+More information has not made decisions easier. Repeated reporting, speculation and promotion arrive together, and reading more can make it harder to decide what to trust and what deserves attention.
 
-There is no new recording or GIF for the N4 candidate, and no mock-up stands in for one. The N4 UI snapshots are static test fixtures, not production screenshots.
+Signal Map tries to make that process inspectable: define the question, gather material, filter by time and relevance, and keep the original text available for checking. The goal is to reduce low-value intake and support judgment. No user study yet shows that this goal has been reached.
 
-## Evaluation and engineering verification
+## Highlights
 
-These are two different kinds of evidence and do not substitute for each other.
+- **Question-led retrieval:** turn entities, time windows and exclusions into a plan, then execute it within a budget and a deadline.
+- **Safe fetching:** public-address checks, pinned connection addresses, per-hop redirect validation and TLS verification. Relay credentials travel in same-origin headers, never in URLs.
+- **Uncertainty as a first-class state:** uncertain material goes into a "Possibly related" group that is closed by default and labelled unconfirmed. It does not count as a formal result. An empty display comes with one of six reasons.
+- **Honest execution records:** searched, not searched and failed sources are recorded separately. Failures keep bounded error codes. Publication time is never mixed with retrieval time.
+- **Evaluation in progress:** human gold labels do not exist yet, so false-zero rate and display precision are not published.
 
-### Human evaluation of effectiveness
+This is a bounded research workflow, not an autonomous agent. Deterministic code handles dates, deduplication, filtering and safety checks.
 
-**No human gold labels exist yet**, so there is no false-zero rate, miss rate, display precision or inter-annotator agreement to report. No user study shows that the tool reduces information anxiety.
+## Capabilities and evidence
 
-- One historical domestic-AI run: 30 GeekPark and 5 36Kr items, 34 after deduplication, 2 signals returned. A single run shows neither sustained reliability nor correct answers.
-- A compression ratio (items in vs. items shown) only reflects a change in count; on its own it proves neither effective filtering nor reduced anxiety.
+| Capability | Evidence | Not yet done |
+|---|---|---|
+| Source reading and filtering | Limited real reads, deterministic tests, execution logs | Cross-industry coverage, sustained availability, answer quality |
+| Uncertain-material routing | Gate unit test: a frozen D06 Chrome RSS body yields 25 UNCERTAIN items, 0 formal results and 25 possibly related; static render snapshots ([n4-closeout](docs/verification/n4-closeout-20261026.md)) | Live-page verification; human labels to check whether the folded group hides must-read items |
+| Zero-result reasons and coverage notices | Per-source read notices and six zero-result reasons, with unit tests and render snapshots | Live-page verification |
+| Diagnostic-endpoint token gate | Unconfigured returns 404; missing token or session returns 401; red-then-green tests (`tests/backend-server.test.ts`) | Not deployed; production still has the old behaviour |
+| Account record persistence | Test-account save, sign-out and sign-in read-back, new record visible in the browser | More accounts and devices |
+| Account switching in one browser | Local draft isolation repair `130009a` with local counter-examples ([record](docs/verification/local-account-isolation-repair-20261021.md)) | A→B→A page check after deployment |
+| Long-term memory affecting research | Account storage and memory-selection wiring exist; automatic use is off by default | Whether memory improves research; new evidence that contradicts an old conclusion is stored only as evidence and does not update the knowledge layer |
+| Proactive tracking and reminders | Scheduling and notification code exists | Not a verified production commitment |
 
-### Software tests (local N4 candidate)
+## Sources and scope
 
-On 2026-10-26, on Node.js 24, `npm run quality`, `npm run build` and `npm run api:build` all exited 0 for the N4/N5 candidate (commit `cf16408`). The suite had **979 tests: 973 passed, 0 failed, 6 skipped** because of database-environment conditions. These are regression results, not coverage and not a production success rate.
+The [source catalog](source-registry/feed-catalog.ts) registers **18 static feeds plus 1 configuration-gated RSSHub relay, 19 in total, 10 of them official publishers** (counted by script from the catalog). Registered, successfully read and factually reliable are three different states; the count is not the number of sources that are reliably available. Each run selects all feeds matching the entity or topic, without the former three-feed cap; exclusions, source-type restrictions and relay configuration gates still apply.
 
-- **D06 presentation-gate unit test**: a frozen Chrome RSS body yields 25 UNCERTAIN items; the other scores are controlled inputs used to exercise the two real presentation gates. Result: 0 formal results, 25 possibly related, original URLs preserved. This is not production end-to-end acceptance and does not measure filtering quality.
-- Six static render snapshots of the UI component cover the six zero-result reasons, the collapsed default and the "Unconfirmed" label.
+| Area | Example sources | Current boundary |
+|---|---|---|
+| Domestic Chinese AI products and industry | GeekPark, 36Kr flashes | Current trial focus; single real reads on record, sustained reliability not shown |
+| Film and creative software | Kdenlive, OBS, Krita | Tool releases only, not the whole film industry |
+| E-commerce and developer tools | Shopify, WooCommerce, Node.js, GitHub, Chrome | Availability differs by channel; developer notices are not business conclusions |
+| Tech, games and space news | IT Home, SSPAI, InfoQ, OSChina, Gcores, NASA and others | Registered only; no claim of effectiveness across these areas |
 
-Evidence: `docs/verification/n4-closeout-20261026.md`. This document is a rewrite only; tests and product features were not re-run for it.
+GeekPark is read from its own RSS endpoint; media claims still need evidence checks. 36Kr flashes come through an independent RSSHub server behind an authenticated HTTPS gateway and currently return only the latest 5 items, **so they do not represent the past 7 days**. The relay's current availability still needs to be re-checked. Historical cloud reads are in [other-feeds-cloud-probe-20261021.md](docs/verification/other-feeds-cloud-probe-20261021.md). New areas need suitable sources and separate acceptance.
 
-## Quick start
+## Architecture
 
-<!-- Pre-release: branch pushed (cf16408); test the commands below in a fresh clone and decide whether to pin with git switch --detach cf16408. -->
+```text
+Question, time window and exclusions
+  → Planning and budget
+  → Safe fetching / RSS and Atom parsing
+  → Dates, relevance, deduplication and aggregation
+  → Formal results / Possibly related / Observation material
+  → Original sources, acquisition status and filtering explanations
+```
 
-Running the app requires Node.js ≥ 22.13 (`package.json`); the full test suite (`npm test` / `npm run quality`) needs Node.js 24, because Node 22 does not support the `--test-isolation=none` flag the test script uses. You must supply your own authentication and database configuration. Real research runs may incur external-service charges; do not test against a production database.
+Web: React / vinext. API: a separate Node.js process. Authentication: Supabase Auth. Account data: PostgreSQL. Main endpoints: `POST /api/signals`, `POST /api/research/plan`, `/api/research/stream`, `/api/control/knowledge`, `POST /api/sources/check`. They are internal endpoints, not a stable public SDK.
 
-<details open>
-<summary>PowerShell</summary>
+**Model usage:** planning and synthesis are two optional model calls, configured through environment variables (see [.env.example](.env.example)). A planning timeout falls back to a deterministic plan (`agent/runner.ts`). Retrieval, filtering, deduplication, date handling and safety checks do not depend on a model. According to the maintainer's production configuration report as of 2026-10-28, no model keys are currently configured, so planning and synthesis follow deterministic paths (production configuration was not queried again for this update).
+
+**Test isolation:** tests use frozen snapshots through injected request and address-resolution functions. They make no real network calls and do not depend on the current time.
+
+## Verification and evidence
+
+For the file contents of `develop` commit `e7d1b2b`, `quality`, `build` and `api:build` each exited 0 on Node.js 24.21.0: **1035 tests, 1029 passed, 0 failed, 6 skipped because the database test environment is absent**. Evidence: [develop gate record](docs/verification/develop-e7d1b2b-gates-20261028.md). Lint reports no errors but still has existing warnings. Skips do not count as passes; these figures are neither coverage nor production success rates.
+
+The D06 check uses a frozen Chrome RSS body; the remaining scores are controlled so that the real display gates can be isolated. It shows the display contract, not a production end-to-end run or a quality benchmark.
+
+A historical domestic AI run retrieved 30 GeekPark and 5 36Kr items, deduplicated them to 34 and returned 2 signals. A single run establishes neither sustained reliability nor answer correctness.
+
+### A failure the demo does not hide
+
+On 2026-10-21, a Kdenlive maintenance-update question on the live site retrieved 20 items, aggregated 18 signals and displayed 0. The reads ran, but the original question was not answered, so answer quality did not pass. The [historical demonstration and limitations](https://github.com/xiebenzhen-code/signal-map/blob/5142a6705b7cdb5f3b133d6a9567da9256019182/docs/portfolio/DEMO.md) keep that result and do not claim that all current features are validated.
+
+**Version note:** the latest release record that can be checked in this repository is Sites53 + API019 ([api-repair-release-20261021.md](docs/verification/api-repair-release-20261021.md)). API 027 was released according to [api027-release-manual-20261026.md](docs/verification/api027-release-manual-20261026.md), but its live acceptance record is not in the repository, so this text cites no 027 demo or figures.
+
+## Known limitations
+
+This section collects the current boundaries so that "implemented" is not read as "verified".
+
+- **Effects are unproven.** Reduced information anxiety and better judgment are goals without user-study evidence. The tool cannot guarantee that information is true.
+- **No human gold labels yet.** False-zero rate, display precision and miss rate cannot be computed. Whether the "Possibly related" group hides must-read items can only be answered after labelling.
+- **False rejections remain a known problem.** An empty result means no displayable evidence this run, not that nothing changed.
+- **Cross-language matching is weak.** A Chinese constraint against English body text is often judged uncertain.
+- **Coverage is limited.** There is no promise of full-web coverage, an answer every time, continuous autonomous monitoring or a mature public SDK.
+- **Some channels have not recovered.** Chrome / FeedBurner timeouts and WooCommerce address-check rejections have no recovery evidence; the 36Kr relay's current availability is unverified.
+- **Memory limits.** "A record is visible" does not mean "it affected the research". New evidence that contradicts an old conclusion is stored only in the evidence layer and does not update the knowledge layer.
+- **Account isolation is not re-verified online.** The local multi-account draft isolation is repaired, but the live-site check is pending. Do not store sensitive drafts on a shared device.
+- **Some changes are not live yet.** The uncertain-material group, zero-result reasons and the diagnostic token gate exist in code and tests; deployment and page checks are pending.
+- **Editorial topic selection and broad social-media collection** are future directions, not delivered capabilities.
+- **There is no project-level `LICENSE`.** No open-source or commercial licence is granted. Third-party dependencies and fonts keep their own terms.
+
+## Local setup
+
+Node.js 24+ is recommended. The package declares a minimum of 22.13.0, but the full test suite uses Node.js 24. The production Dockerfile still uses Node.js 22 and has not been upgraded.
+
+PowerShell:
 
 ```powershell
 git clone https://github.com/xiebenzhen-code/signal-map.git
 Set-Location signal-map
-git fetch origin
-git switch --track origin/p2n/stability-and-diagnosis
 npm ci
-if (!(Test-Path -LiteralPath .env.local)) {
-  Copy-Item -LiteralPath .env.example -Destination .env.local
-}
-npm run api:build
+if (!(Test-Path .env.local)) { Copy-Item .env.example .env.local }
 ```
 
-Terminal 1 (API, default port 8080):
+bash:
 
-```powershell
+```bash
+git clone https://github.com/xiebenzhen-code/signal-map.git
+cd signal-map
+npm ci
+cp -n .env.example .env.local
+```
+
+Edit `.env.local` first. Authentication needs `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`; account persistence needs your own `DATABASE_URL` and matching tables; models and optional channels are configured as needed. Run `npm run db:migrate` only against a database dedicated to development. Real research may call external services and incur model or cloud charges. Do not test against a production database, and never commit `.env.local`, passwords, cookies or keys.
+
+Start the API in the first terminal (default port 8080):
+
+```bash
+npm run api:build
 node --env-file=.env.local dist-api/server.mjs
 ```
 
-Terminal 2 (web app):
+Start the Web app in the second terminal:
 
 ```powershell
 $env:SIGNAL_MAP_FRONTEND_RUNTIME = "node"
@@ -85,86 +148,29 @@ $env:API_UPSTREAM_URL = "http://127.0.0.1:8080"
 npm run dev -- --hostname 127.0.0.1 --port 3000
 ```
 
-</details>
-
-<details open>
-<summary>bash</summary>
-
-```bash
-git clone https://github.com/xiebenzhen-code/signal-map.git
-cd signal-map
-git fetch origin
-git switch --track origin/p2n/stability-and-diagnosis
-npm ci
-[ -e .env.local ] || cp .env.example .env.local   # keeps an existing file
-npm run api:build
-```
-
-Terminal 1 (API, default port 8080):
-
-```bash
-node --env-file=.env.local dist-api/server.mjs
-```
-
-Terminal 2 (web app):
-
 ```bash
 SIGNAL_MAP_FRONTEND_RUNTIME=node API_UPSTREAM_URL=http://127.0.0.1:8080 \
   npm run dev -- --hostname 127.0.0.1 --port 3000
 ```
 
-</details>
+Open http://127.0.0.1:3000 . A running page does not establish that authentication, the database or external sources work. Address and Origin checks stay enabled; do not turn them off to work around network problems.
 
-Open http://127.0.0.1:3000. A page that loads does not mean authentication, the database or external sources are configured correctly. Database migration is a separate command (`npm run db:migrate`); run it only once you know which database it targets. Internal endpoints are not a stable public SDK.
+## Tests
 
-## Architecture and model usage
-
-```text
-Question, time window and exclusions
-  → Planning and budget
-  → Safe fetching / RSS and Atom parsing
-  → Dates, relevance, deduplication and signal aggregation
-  → Formal results / Possibly related / Items awaiting judgment
-  → Original text, per-source fetch status and filtering explanations
+```bash
+npm run quality
+npm run build
+npm run api:build
 ```
 
-The web app uses React / vinext, a separate Node.js API handles requests, Supabase Auth handles authentication, and PostgreSQL stores account data. Deterministic code does most of the date validation, deduplication and safety checks.
+The 6 conditionally skipped tests do not count as passes. The number of tests is neither coverage nor a count of real user studies. The repository has a manually triggered [end-to-end workflow](.github/workflows/signal-map-agent-loop-e2e.yml) that needs a dedicated test environment; the file's existence is not evidence that CI passes.
 
-**Model roles (from source)**
+## Maintenance, data and feedback
 
-- **Planning**: produces a compact JSON research plan (at most 5 queries), merged with the deterministic plan and deduplicated.
-- **Synthesis**: produces evidence-bound conclusions; factual conclusions must cite existing evidence IDs and are validated; if validation finds a problem, synthesis is retried at most once.
-- **Configuration**: `MODEL_PROVIDER` (`openai` by default, or `deepseek`); planning and synthesis models are set by `OPENAI_MODEL` / `OPENAI_SYNTHESIS_MODEL` or `DEEPSEEK_MODEL` / `DEEPSEEK_SYNTHESIS_MODEL`; the per-request timeout is `MODEL_REQUEST_TIMEOUT_MS`, default 8000 ms.
-- **Failure fallback**: if no key is configured, or a call times out, errors or returns invalid output, planning keeps the deterministic plan and synthesis uses the deterministic fallback. An unrecognized `MODEL_PROVIDER` yields a configuration error, and planning is also bounded by the remaining budget. Synthesis is normally skipped when there is no reliable evidence, but it can still run when an unresolved evidence conflict exists, so the conflict state is preserved.
-- These are source defaults and configuration entry points, not the models used in production.
+The plan is to freeze a portfolio baseline after a controlled deployment and one page-level acceptance run, then keep maintaining on development branches while job hunting: record issues, verify improvements, then decide whether to update the frozen version. No release schedule is promised. Next priorities are human evaluation, source reliability, false rejections and the actual value of memory.
 
-**Long-term memory**: saving account knowledge, wiring it into selection during research, and the real cross-run effect on result quality are three separate things. The first two are implemented and tested; the third has not been validated.
+Server-side account records and local drafts are separate paths. The latest source binds a separate IndexedDB store to each account and keeps the anonymous legacy store; history without an owner is not assigned to a signed-in account automatically.
 
-**Source catalog**: 18 static feeds plus 1 RSSHub relay enabled by configuration. The count is not the number of consistently available sources, nor of independent fact-checking organizations.
+More records: [README fact check](docs/verification/readme-evidence-20261022.md) · [Editable architecture SVG](docs/portfolio/signal-map-architecture.svg) · [OBS / Kdenlive cloud reads](docs/verification/other-feeds-cloud-probe-20261021.md) · [Formal domain and demo delivery](docs/verification/formal-portfolio-delivery-20261021.md)
 
-| Focus | Example sources | Current boundary |
-|---|---|---|
-| Chinese AI products and industry | GeekPark, 36Kr flash news | Current trial focus; single real fetch records exist, long-term stability is not shown |
-| Film and creative software | Kdenlive, OBS, Krita | Covers release information for these tools only |
-| E-commerce and developer tools | Shopify, WooCommerce, Node.js, GitHub, Chrome | Validation differs per source; developer announcements are not business-relevance conclusions |
-| Tech, games and space | IT Home, SSPAI, InfoQ, OSChina, Gcores, NASA, etc. | Registered; this does not establish effectiveness in those fields |
-
-- **GeekPark**: read through its official RSS endpoint; a media report is not automatically a confirmed fact.
-- **36Kr flash news**: has a history of successful runs; reached through an independent RSSHub service behind an authenticated HTTPS gateway. **Current relay availability needs re-verification.** It returns only the latest 5 items and does not represent everything from the past 7 days.
-
-## Known limitations
-
-- **Status and release**: the local N4 candidate does not mean the live site is updated; historical deployment records do not show the version currently serving traffic, network configuration or diagnostic-endpoint state.
-- **Evaluation**: no human gold labels; false-zero rate, miss rate and display precision are unknown. D06 is a presentation-gate unit test, not production acceptance.
-- **Sources**: availability is uneven and differs per source; the 36Kr relay needs re-verification; new industries need suitable sources and separate acceptance.
-- **Behavior change**: UNCERTAIN items no longer appear in formal results, so formal counts may drop while material moves to "Possibly related". A lower count should not be read as a regression or an improvement by itself.
-- **Memory**: whether cross-run memory improves research quality has not been validated.
-- **Runtime**: the production Dockerfile still uses Node.js 22; the full test script needs Node.js 24 and cannot run on Node 22.
-- **Scope**: editorial topic selection and broad social-media collection are future directions, not delivered. Continuous autonomous operation is not promised; optional model features need separate configuration and may incur charges.
-- **Demo**: the existing video was recorded before N4 and shows a zero-result case from the older version.
-
-## Maintenance and license
-
-The plan is to freeze a portfolio baseline after a controlled release and one browser re-check, then maintain it alongside a job search: log issues, validate on development branches, then decide whether to update the frozen version. No update schedule is promised.
-
-The repository is public but has **no project-level `LICENSE`**; public source is not an open-source grant, and this draft claims neither MIT nor any other license. Third-party dependencies and assets keep their own terms. Please send sanitized versions, request IDs and expected behavior with issue reports, and never passwords, cookies or keys.
+Report issues through [Issues](https://github.com/xiebenzhen-code/signal-map/issues) with sanitized request IDs, times, versions and expected behaviour. Never include passwords, cookies or keys.
