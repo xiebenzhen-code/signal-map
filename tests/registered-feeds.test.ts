@@ -6,6 +6,34 @@ import { rsshubRelayFeeds, registeredFeeds, selectRegisteredFeeds } from "../sou
 import { parseRegisteredFeed, retrieveRegisteredFeeds, type FeedReadCache } from "../research/registered-feeds.ts";
 
 const publishedAt = new Date(Date.now() - 3600_000).toISOString();
+
+test("offline media replay keeps AI material provenance but navigation cannot become valid evidence", async () => {
+  const before = globalThis.fetch;
+  const date = new Date(Date.now() - 3600_000).toISOString();
+  const nav = "媒体品牌 企业号 企业服务 核心服务 城市之窗 政府服务 创投发布 投资人认证 投资人服务 项目推荐";
+  const xml = `<rss><channel>
+    <item><title>国内AI产品更新</title><link>https://www.geekpark.net/news/navigation-fixture</link><pubDate>${date}</pubDate><description>${nav}</description></item>
+    <item><title>阅文AI动画发布</title><link>https://www.geekpark.net/news/ai-fixture</link><pubDate>${date}</pubDate><description>阅文发布首批AI精品动画项目，将DramaBuddy漫剧助手升级为一站式平台，新增从文字到影像的制作流程。</description></item>
+    <item><title>新产品发布</title><link>https://www.geekpark.net/news/pcb-fixture</link><pubDate>${date}</pubDate><description>企业发布矢量网络分析仪新产品及PCB测试解决方案，推动测试产业发展。</description></item>
+  </channel></rss>`;
+  let detailFetches = 0;
+  globalThis.fetch = async () => { detailFetches++; return new Response(`<html><body>${nav}</body></html>`, {status: 200}); };
+  try {
+    const result = await runResearchPipeline({...input,
+      trackedEntities: "", industry: "人工智能与产品工具", focusAreas: "AI 产品",
+      currentQuestions: "过去7天，极客公园报道了哪些与国内AI产品或产业有关的新进展？", freshnessWindow: "7d",
+    }, undefined, {deadlineAt: Date.now() + 20000,
+      customSourceReader: async url => ({url, status: "readable", requestCount: 1, reason: "offline fixture", content: xml}),
+    }, {queries: ["极客公园"], allowedProviderIds: ["registered-feeds"], selectedSourceType: "INDEPENDENT_MEDIA"});
+    assert.ok(result.coverage.outcomes.some(o => o.sourceId === "geekpark-news" && o.rawResultCount === 3));
+    assert.ok(result.signals.every(s => !s.sources.some(source => /navigation-fixture|pcb-fixture/.test(source.sourceUrl))), "menus and unrelated products must never become displayed signals");
+    const ai = result.signals.find(s => s.sources.some(source => source.sourceUrl.endsWith("/ai-fixture")));
+    assert.ok(ai, "literal AI report remains in the material stream");
+    assert.equal(ai.topicRelevance?.decision, "MATCH");
+    assert.equal(ai.sources[0].publishedAt, date);
+    assert.ok(detailFetches <= 5, "existing detail budget stays bounded");
+  } finally { globalThis.fetch = before; }
+});
 const checkoutFeed = `<rss version="2.0"><channel><title>Shopify</title><item>
 <title>Shopify checkout payment API released for US merchants</title>
 <link>https://shopify.dev/changelog/checkout-payment-update</link>
@@ -43,14 +71,16 @@ test("catalogue broadens subjects without sending unknown entities to every feed
   assert.deepEqual(selectRegisteredFeeds({entities: [], query: "数码", selectedSourceType: "OFFICIAL"}), []);
 });
 
-test("industry questions select bounded relevant feeds even without a named publisher", () => {
+test("industry questions select every relevant feed without a total cap", () => {
   const film = selectRegisteredFeeds({entities: [], query: "过去30天面向独立电影人的后期制作软件有哪些正式更新"});
   assert.ok(film.some(feed => feed.id === "kdenlive"));
   const commerce = selectRegisteredFeeds({entities: [], query: "小型独立站建站与支付工具正式更新"});
   assert.ok(commerce.some(feed => feed.id === "woocommerce"));
   const programming = selectRegisteredFeeds({entities: [], query: "程序开发工具近期发布"});
   assert.ok(programming.length > 0);
-  for (const feeds of [film, commerce, programming]) assert.ok(feeds.length <= 3);
+  // No arbitrary total cap: each question keeps every matching feed. Relevance
+  // still bounds the result, so an unmatched question selects nothing.
+  for (const feeds of [film, commerce, programming]) assert.ok(feeds.length >= 1);
   assert.equal(selectRegisteredFeeds({entities: [], query: "未归类的面包配方 documentation"}).length, 0);
 });
 
@@ -419,4 +449,148 @@ test("feed failures preserve safe detailed codes through search phase diagnostic
     assert.equal(feedOutcome?.sourceId, "shopify");
     assert.ok(!JSON.stringify(diagnostic).includes("token=secret"));
   }
+});
+
+// --- STEP 3: one failing feed must not suppress another feed's readable items ---
+
+const DOMESTIC_AI_QUESTION = "过去 7 天，36氪快讯和极客公园 AI 报道了哪些国内 AI 产业新进展？";
+
+function geekparkFeed(count: number) {
+  const items = Array.from({ length: count }, (_, index) =>
+    `<item><title>国内AI产品进展 ${index + 1}</title><link>https://www.geekpark.net/news/ai-${index + 1}</link>` +
+    `<pubDate>${publishedAt}</pubDate><description>国内企业发布人工智能产品的新进展。</description></item>`).join("");
+  return `<rss><channel>${items}</channel></rss>`;
+}
+
+async function withRelayEnv<T>(env: Record<string, string | undefined>, run: () => Promise<T>): Promise<T> {
+  const keys = ["RSSHUB_BASE_URL", "RSSHUB_ACCESS_KEY"] as const;
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  try {
+    return await run();
+  } finally {
+    for (const key of keys) {
+      const value = previous[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+test("a failing 36kr relay keeps the readable geekpark feed and its items", async () => {
+  await withRelayEnv({ RSSHUB_BASE_URL: "https://relay.example.com", RSSHUB_ACCESS_KEY: "test-only-relay-key" }, async () => {
+    const reader: typeof readCustomSource = async (url) => {
+      if (url.includes("/36kr/")) return { url, status: "failed", reason: "FEED_TIMEOUT", requestCount: 1 };
+      return { url, status: "readable", reason: "read", requestCount: 1, content: geekparkFeed(2) };
+    };
+
+    const result = await retrieveRegisteredFeeds({ entities: [], query: DOMESTIC_AI_QUESTION, allowed: true, reader });
+    const geekpark = result.outcomes.find((outcome) => outcome.sourceId === "geekpark-news");
+    const kr36 = result.outcomes.find((outcome) => outcome.sourceId === "36kr-flashes");
+    assert.ok(geekpark && kr36, `outcomes: ${result.outcomes.map((outcome) => outcome.sourceId).join(",")}`);
+
+    // The healthy source keeps reading and keeps its items.
+    assert.equal(geekpark.execution, "searched_with_results");
+    assert.equal(geekpark.resultCount, 2);
+    // The failing source keeps its own failure state and is never relabelled.
+    assert.equal(kr36.execution, "failed");
+    assert.equal(kr36.failureCode, "upstream_error");
+    assert.equal(kr36.detailFailureCode, "FEED_TIMEOUT");
+    assert.equal(kr36.searched, true);
+    assert.equal(kr36.resultCount, 0);
+
+    // Items come only from the readable source; a failure never pads the count.
+    assert.equal(result.items.length, 2);
+    assert.ok(result.items.every((item) => item.source.includes("极客公园")));
+    assert.equal(result.failures.length, 1);
+    assert.match(result.failures[0], /36氪/);
+  });
+});
+
+test("an unconfigured relay is not_configured, never a fabricated success", async () => {
+  await withRelayEnv({ RSSHUB_BASE_URL: undefined, RSSHUB_ACCESS_KEY: undefined }, async () => {
+    const reader: typeof readCustomSource = async (url) => ({ url, status: "readable", reason: "read", requestCount: 1, content: geekparkFeed(1) });
+    const result = await retrieveRegisteredFeeds({ entities: [], query: DOMESTIC_AI_QUESTION, allowed: true, reader });
+
+    const kr36 = result.outcomes.find((outcome) => outcome.sourceId === "36kr-flashes");
+    assert.ok(kr36, `outcomes: ${result.outcomes.map((outcome) => outcome.sourceId).join(",")}`);
+    assert.equal(kr36.execution, "not_configured");
+    assert.equal(kr36.searched, false);
+    assert.equal(kr36.resultCount, 0);
+    assert.equal(result.items.length, 1);
+  });
+});
+
+test("a readable but empty feed stays searched_no_results, distinct from failure", async () => {
+  await withRelayEnv({ RSSHUB_BASE_URL: "https://relay.example.com", RSSHUB_ACCESS_KEY: "test-only-relay-key" }, async () => {
+    const reader: typeof readCustomSource = async (url) => {
+      if (url.includes("/36kr/")) return { url, status: "failed", reason: "FEED_TIMEOUT", requestCount: 1 };
+      return { url, status: "readable", reason: "read", requestCount: 1, content: "<rss><channel></channel></rss>" };
+    };
+    const result = await retrieveRegisteredFeeds({ entities: [], query: DOMESTIC_AI_QUESTION, allowed: true, reader });
+
+    const geekpark = result.outcomes.find((outcome) => outcome.sourceId === "geekpark-news");
+    assert.ok(geekpark);
+    assert.equal(geekpark.execution, "searched_no_results");
+    assert.equal(geekpark.searched, true);
+    assert.equal(geekpark.resultCount, 0);
+    // No card is invented to compensate for either source.
+    assert.equal(result.items.length, 0);
+  });
+});
+
+// --- No source-count cap: every matching publisher must be selected and read ---
+
+const MULTI_PUBLISHER_QUESTION = "Kdenlive、OBS、Krita、Node.js 和 Shopify 近期有哪些正式更新？";
+const MULTI_PUBLISHER_IDS = ["kdenlive", "nodejs", "obs", "shopify", "krita"];
+
+function feedForHost(url: string) {
+  const host = new URL(url).hostname;
+  return `<rss><channel><item><title>${host} official update</title>` +
+    `<link>https://${host}/post/release-1</link><pubDate>${publishedAt}</pubDate>` +
+    `<description>Official release announcement for this publisher.</description></item></channel></rss>`;
+}
+
+test("every matching publisher is selected, not only the first three", () => {
+  const selected = selectRegisteredFeeds({ entities: [], query: MULTI_PUBLISHER_QUESTION }).map((feed) => feed.id);
+  assert.deepEqual([...selected].sort(), [...MULTI_PUBLISHER_IDS].sort(), `selected: ${selected.join(",")}`);
+});
+
+test("the fourth and later selected feeds still execute and report their own outcome", async () => {
+  const reader: typeof readCustomSource = async (url) => ({
+    url, status: "readable", reason: "read", requestCount: 1, content: feedForHost(url),
+  });
+  const result = await retrieveRegisteredFeeds({
+    entities: [], query: MULTI_PUBLISHER_QUESTION, allowed: true, reader,
+  });
+
+  const executed = result.outcomes.map((outcome) => outcome.sourceId).filter(Boolean) as string[];
+  for (const id of MULTI_PUBLISHER_IDS) {
+    assert.ok(executed.includes(id), `missing outcome for ${id}; executed: ${executed.join(",")}`);
+    const outcome = result.outcomes.find((entry) => entry.sourceId === id);
+    assert.equal(outcome?.execution, "searched_with_results", id);
+    assert.equal(outcome?.resultCount, 1, id);
+  }
+  // One candidate per publisher: the extra feeds are not silently dropped.
+  assert.equal(result.items.length, MULTI_PUBLISHER_IDS.length);
+  const hosts = new Set(result.items.map((item) => new URL(item.url).hostname));
+  assert.equal(hosts.size, MULTI_PUBLISHER_IDS.length);
+});
+
+test("dropping the cap still keeps unrelated, excluded and unconfigured sources out", async () => {
+  assert.deepEqual(selectRegisteredFeeds({ entities: [], query: "面包配方" }).map((feed) => feed.id), []);
+
+  const excluded = selectRegisteredFeeds({
+    entities: [], query: MULTI_PUBLISHER_QUESTION, excludedEntities: ["Shopify"],
+  }).map((feed) => feed.id);
+  assert.equal(excluded.includes("shopify"), false, `selected: ${excluded.join(",")}`);
+  assert.ok(excluded.includes("kdenlive"), "an unrelated exclusion must not remove other publishers");
+
+  await withRelayEnv({ RSSHUB_BASE_URL: undefined, RSSHUB_ACCESS_KEY: undefined }, async () => {
+    const selected = selectRegisteredFeeds({ entities: [], query: "36氪快讯和极客公园的国内 AI 报道" }).map((feed) => feed.id);
+    assert.equal(selected.includes("36kr-flashes"), false, "an unconfigured relay must never be selected");
+  });
 });

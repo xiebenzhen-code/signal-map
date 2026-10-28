@@ -1,6 +1,6 @@
 import type { DetailEnrichmentInput, DetailEnrichmentResult } from "../types.ts";
 import { htmlTitle, isThinDetail, metaContent, stripHtmlForDetail } from "./shared.ts";
-import { discardResponseBody } from "../../lib/http-response.ts";
+import { fetchHtml, DetailReadError, type DetailReadOptions } from "../detail-reader.ts";
 
 function isProductHuntTemplate(value: string) {
   return /Launch archive|Most-loved launches|Launch Guide|The best of Product Hunt|Product Hunt, every day|Sign in|Sign up/i.test(value);
@@ -33,22 +33,11 @@ function officialWebsiteFromProductHunt(html: string, baseUrl: string) {
   )?.url;
 }
 
-async function fetchText(url: string) {
-  const response = await fetch(url, {
-    headers: { "User-Agent": "SignalMapResearch/0.4" },
-    signal: AbortSignal.timeout(10000),
-  });
-  if (!response.ok) {
-    await discardResponseBody(response);
-    return undefined;
-  }
-  return response.text();
-}
-
-export async function enrichProductHuntDetail(input: DetailEnrichmentInput): Promise<DetailEnrichmentResult> {
+export async function enrichProductHuntDetail(input: DetailEnrichmentInput, options: DetailReadOptions = {}): Promise<DetailEnrichmentResult> {
   if (!input.url) return { status: "NO_DETAIL", discoveredBy: "Product Hunt" };
+  const deadlineAt = input.deadlineAt ?? Date.now() + 10000;
   try {
-    const productHtml = await fetchText(input.url);
+    const productHtml = await fetchHtml(input.url, deadlineAt - Date.now(), options);
     if (!productHtml) {
       return { status: "FETCH_FAILED", canonicalUrl: input.url, discoveredBy: "Product Hunt" };
     }
@@ -73,7 +62,7 @@ export async function enrichProductHuntDetail(input: DetailEnrichmentInput): Pro
 
     const officialUrl = officialWebsiteFromProductHunt(productHtml, input.url);
     if (officialUrl) {
-      const officialHtml = await fetchText(officialUrl);
+      const officialHtml = await fetchHtml(officialUrl, deadlineAt - Date.now(), options);
       const officialDetail = officialHtml
         ? [
             htmlTitle(officialHtml),
@@ -106,7 +95,8 @@ export async function enrichProductHuntDetail(input: DetailEnrichmentInput): Pro
       evidenceFrom: "Product Hunt detail",
       officialUrl,
     };
-  } catch {
-    return { status: "FETCH_FAILED", canonicalUrl: input.url, discoveredBy: "Product Hunt" };
+  } catch (error) {
+    return { status: "FETCH_FAILED", canonicalUrl: input.url, discoveredBy: "Product Hunt",
+      ...(error instanceof DetailReadError ? { failureCode: error.code } : {}) };
   }
 }

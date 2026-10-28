@@ -17,7 +17,8 @@
 // - No retry, no signInWithPassword, no user creation, no database access.
 import { lookup } from "node:dns/promises";
 import { request as httpsRequest } from "node:https";
-import { timingSafeEqual } from "node:crypto";
+
+import { DIAGNOSTIC_TOKEN_HEADER, evaluateDiagnosticToken } from "./diagnostic-token.ts";
 
 type ProbeStatus = "PASS" | "FAIL" | "NOT_RUN";
 
@@ -216,26 +217,22 @@ export async function runSupabaseAuthTransportProbe(): Promise<SupabaseAuthTrans
   return report;
 }
 
-// Constant-time comparison keeps the token check free of timing side channels.
-function tokenMatches(provided: string, expected: string) {
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
-}
-
+// The token decision is shared with the postgres transport probe so both
+// endpoints behave identically for missing, wrong and unconfigured tokens.
 export const handleSupabaseAuthTransportProbe = async (request: Request) => {
   const headers = { "Cache-Control": "no-store" };
   if (request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405, headers });
   }
-  const expected = process.env.SIGNAL_MAP_DIAGNOSTIC_TOKEN?.trim();
-  if (!expected) {
+  const gate = evaluateDiagnosticToken(
+    request.headers.get(DIAGNOSTIC_TOKEN_HEADER),
+    process.env.SIGNAL_MAP_DIAGNOSTIC_TOKEN,
+  );
+  if (gate === "disabled") {
     // Default-off: the endpoint must not advertise itself in production.
     return Response.json({ error: "Not found" }, { status: 404, headers });
   }
-  const provided = request.headers.get("x-signal-map-diagnostic-token")?.trim() ?? "";
-  if (!tokenMatches(provided, expected)) {
+  if (gate === "unauthorized") {
     return Response.json({ error: "Unauthorized" }, { status: 401, headers });
   }
   try {

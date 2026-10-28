@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { runResearchPipeline } from "../research/research-pipeline.ts";
+import { readCustomSource } from "../source-enrichment/custom-source.ts";
 import type { ResearchInput } from "../research/types.ts";
 
 // 集成回放（离线，无模型、无真实外呼）：
@@ -47,10 +48,29 @@ test("集成回放：正式结果 0 条，待判断候选进入最终响应；�
     return Promise.resolve(new Response(JSON.stringify({ error: "offline replay" }), { status: 500 }));
   }) as typeof fetch);
 
-  const response = await runResearchPipeline(INPUT, undefined, { deadlineAt: Date.now() + 30000 });
+  // P2-N3a: registered feeds read through the safe reader (node:https), which no
+  // fetch mock can intercept. Inject a frozen kdenlive-shaped fixture via the
+  // reader's options.request/options.lookup — no real network, fixed dates.
+  const FROZEN_KDENLIVE_FEED = `<rss><channel><title>Kdenlive News</title><item><title>PCB 测试方案发布会</title><link>https://kdenlive.org/news/pcb-fixture</link><pubDate>Sat, 01 Aug 2026 09:00:00 GMT</pubDate><description>冻结夹具：与问题无关的硬件条目，固定日期。</description></item></channel></rss>`;
+  const frozenReader: typeof readCustomSource = (url, options) => readCustomSource(url, {
+    ...options,
+    lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+    request: async (target) => {
+      if (new URL(String(target)).hostname === "kdenlive.org") {
+        return { status: 200, headers: { "content-type": "application/xml" }, body: FROZEN_KDENLIVE_FEED };
+      }
+      throw new Error(`offline fixture: unexpected host ${new URL(String(target)).hostname}`);
+    },
+  });
+
+  const response = await runResearchPipeline(INPUT, undefined, { deadlineAt: Date.now() + 30000, customSourceReader: frozenReader });
 
   // 正式结果为 0
   assert.equal(response.signals.length, 0, "无相关候选时正式结果必须为 0");
+  // 注册源按冻结快照离线读取，并输出明确的覆盖观察（非静默 0 条）
+  const feedOutcome = (response.coverage?.outcomes ?? []).find(outcome => outcome.sourceId === "kdenlive");
+  assert.ok(feedOutcome?.coverage, "冻结注入的注册源必须携带覆盖观察");
+  assert.match(feedOutcome.coverage.notice, /最近 1 条/);
   // 待判断候选进入最终产品响应
   assert.ok(response.observation, "响应必须携带观察层");
   assert.ok(response.observation.items.length >= 1, "至少一条待判断候选可见");
@@ -67,6 +87,11 @@ test("集成回放：正式结果 0 条，待判断候选进入最终响应；�
   for (const url of calledUrls) {
     assert.equal(url.toLowerCase().includes("translate"), false, `不得外呼翻译服务：${url}`);
   }
-  // 候选不进入长期确认知识（证据/知识记录为空）
-  assert.equal(response.evidenceRecords?.length ?? 0, 0, "无证据记录持久化");
+  // 候选不进入长期确认知识（正式信号为 0）；冻结夹具候选按溯源保留证据行，
+  // 且在筛选明细中携带明确的 TOPIC_MISMATCH 原因——不是静默 0 条。
+  assert.ok((response.evidenceRecords ?? []).every(record => record.sourceUrl.includes("kdenlive.org")), "证据行只来自冻结夹具候选");
+  const fixtureRow = (response.filteringSummary?.filteringDetails ?? []).find(row => row.title.includes("PCB 测试方案"));
+  assert.ok(fixtureRow, "冻结夹具条目必须在筛选明细中留痕");
+  assert.equal(fixtureRow.decision, "filtered");
+  assert.equal(fixtureRow.topicRelevance?.decision, "TOPIC_MISMATCH", "明确原因：主题不匹配");
 });

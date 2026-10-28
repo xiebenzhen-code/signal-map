@@ -1,107 +1,146 @@
-<!-- README_SYNC: source=eb6666d5a46c1cf42647840a7601c211e2c7e12e; updated=2026-10-22 -->
+<!-- README_SYNC: source=develop@e7d1b2b; updated=2026-10-28 -->
 <p align="center"><a href="./README.md">简体中文</a> · English</p>
 
 # Signal Map
 
-An information-filtering tool for independent developers and creators: research a specific question across public sources, filter by date and relevance, and make evidence gaps visible.
+An information-filtering and decision-support tool for independent developers and creators. Start with a specific question, read public sources, filter by date and relevance, and keep the original links and the reasons behind each filtering decision. Uncertain material goes into a "Possibly related" group, and an empty result comes with an explanation.
 
-[Star to bookmark](https://github.com/xiebenzhen-code/signal-map/stargazers) · [Try the app](https://signal.benzhenlab.com/) · [Report an issue](https://github.com/xiebenzhen-code/signal-map/issues)
+[Try the app](https://signal.benzhenlab.com/) · [Report an issue](https://github.com/xiebenzhen-code/signal-map/issues)
 
 ![Stage](https://img.shields.io/badge/status-limited_trial-2457ff)
 ![Language](https://img.shields.io/badge/language-TypeScript-3178c6)
 ![Runtime](https://img.shields.io/badge/local_checks-Node.js_24%2B-43853d)
 ![Repository](https://img.shields.io/badge/repository-public-2ea44f)
 
-**Source now public (2026-10-22).** The repository is public and can be cloned for reading; the product remains a limited trial with no availability guarantees. There is still no `LICENSE` file and no open-source license is declared.
-
 [Watch the roughly 50-second live demo](docs/portfolio/signal-map-demo.mp4) · [Recording method and outcome](docs/portfolio/DEMO.md)
+
+> The recording is from 2026-10-21 and corresponds to Sites53 + API019. It shows behaviour at that time and cannot be used as evidence for later versions.
 
 ![Signal Map architecture and validation boundaries](docs/portfolio/signal-map-architecture.png)
 
-## Why this tool exists
+**Status: limited trial, preparing a frozen portfolio baseline.** The repository remains public. This text describes the `develop` branch. What is live depends on the release records; the latest code on GitHub is not necessarily what is running online.
 
-I started Signal Map because there was too much information and too little clarity about what to trust or spend time on. A constant stream of updates can make judgment harder and add to information anxiety.
+## Why
 
-The project explores a way to filter, check and revisit public information: reduce irrelevant or repeated material, retain original sources and dates, and help decide what deserves attention and what remains uncertain. Reducing information anxiety and supporting judgment are goals, not demonstrated user outcomes. The tool cannot automatically guarantee that a claim is true.
+More information has not made decisions easier. Repeated reporting, speculation and promotion arrive together, and reading more can make it harder to decide what to trust and what deserves attention.
 
-Content research is another intended use: discover leads in public updates, check their sources, dates and applicability, then decide whether they are worth covering. Existing retrieval, filtering and source records provide part of that foundation. Topic value, audience performance and continuous proactive filtering have not been validated.
+Signal Map tries to make that process inspectable: define the question, gather material, filter by time and relevance, and keep the original text available for checking. The goal is to reduce low-value intake and support judgment. No user study yet shows that this goal has been reached.
 
-Signal Map implements a bounded workflow:
+## Highlights
 
-- **Question-led retrieval:** turn entities, time windows and exclusions into a plan, then execute within budgets and deadlines.
-- **Evidence processing:** read official updates, RSS/Atom feeds and configured channels; check dates and task relevance, deduplicate and aggregate events. Publication time stays distinct from retrieval time.
-- **Execution visibility:** distinguish searched, not searched and failed sources. Later unexecuted rounds do not erase earlier history; bounded error codes retain diagnostic detail.
-- **Explicit evidence gaps:** a run may return nothing, which does not prove nothing changed. False rejection by relevance rules remains a known problem.
+- **Question-led retrieval:** turn entities, time windows and exclusions into a plan, then execute it within a budget and a deadline.
+- **Safe fetching:** public-address checks, pinned connection addresses, per-hop redirect validation and TLS verification. Relay credentials travel in same-origin headers, never in URLs.
+- **Uncertainty as a first-class state:** uncertain material goes into a "Possibly related" group that is closed by default and labelled unconfirmed. It does not count as a formal result. An empty display comes with one of six reasons.
+- **Honest execution records:** searched, not searched and failed sources are recorded separately. Failures keep bounded error codes. Publication time is never mixed with retrieval time.
+- **Evaluation in progress:** human gold labels do not exist yet, so false-zero rate and display precision are not published.
 
-Useful for following particular products, creative tools and public technical developments. It does not promise whole-web coverage, an answer every time, continuous autonomous monitoring, or a mature public SDK.
+This is a bounded research workflow, not an autonomous agent. Deterministic code handles dates, deduplication, filtering and safety checks.
 
-## Sources and domain coverage
+## Capabilities and evidence
 
-The [source catalog](source-registry/feed-catalog.ts) registers **17 feeds, including 11 official publishers**. Each run selects at most three feeds by entity or topic, alongside existing search paths. Registration, successful reading and factual credibility are separate claims.
-
-| Area | Registered sources | Scope |
+| Capability | Evidence | Not yet done |
 |---|---|---|
-| Film and creative software | Kdenlive, OBS, Krita | Software releases and tool changes, not the entire film industry |
-| E-commerce and independent stores | Shopify, WooCommerce | Developer updates do not establish merchant policy or applicability by themselves |
-| Programming and open source | Node.js, GitHub, Mozilla, Chrome | Reachability and validation differ by channel |
-| AI products | OpenAI | Not comprehensive AI-industry coverage |
-| Chinese-language media and communities | IT之家, 少数派, 机核, 阮一峰, InfoQ, 开源中国 | Articles still need original-source, date and task-relevance checks |
-| Space and astronomy | NASA | A readable feed does not make every item relevant |
+| Source reading and filtering | Limited real reads, deterministic tests, execution logs | Cross-industry coverage, sustained availability, answer quality |
+| Uncertain-material routing | Gate unit test: a frozen D06 Chrome RSS body yields 25 UNCERTAIN items, 0 formal results and 25 possibly related; static render snapshots ([n4-closeout](docs/verification/n4-closeout-20261026.md)) | Live-page verification; human labels to check whether the folded group hides must-read items |
+| Zero-result reasons and coverage notices | Per-source read notices and six zero-result reasons, with unit tests and render snapshots | Live-page verification |
+| Diagnostic-endpoint token gate | Unconfigured returns 404; missing token or session returns 401; red-then-green tests (`tests/backend-server.test.ts`) | Not deployed; production still has the old behaviour |
+| Account record persistence | Test-account save, sign-out and sign-in read-back, new record visible in the browser | More accounts and devices |
+| Account switching in one browser | Local draft isolation repair `130009a` with local counter-examples ([record](docs/verification/local-account-isolation-repair-20261021.md)) | A→B→A page check after deployment |
+| Long-term memory affecting research | Account storage and memory-selection wiring exist; automatic use is off by default | Whether memory improves research; new evidence that contradicts an old conclusion is stored only as evidence and does not update the knowledge layer |
+| Proactive tracking and reminders | Scheduling and notification code exists | Not a verified production commitment |
 
-Historical cloud read-and-parse evidence exists for seven sources: IT之家, 少数派, NASA, Shopify, Krita, OBS and Kdenlive. This is not an uptime guarantee. The latest recorded Chrome/FeedBurner timeouts and WooCommerce address-preflight rejection have no confirmed recovery. AI-plus-education lacks sufficient dedicated sources and domain acceptance evidence.
+## Sources and scope
 
-## Implementation and validation status
+The [source catalog](source-registry/feed-catalog.ts) registers **18 static feeds plus 1 configuration-gated RSSHub relay, 19 in total, 10 of them official publishers** (counted by script from the catalog). Registered, successfully read and factually reliable are three different states; the count is not the number of sources that are reliably available. Each run selects all feeds matching the entity or topic, without the former three-feed cap; exclusions, source-type restrictions and relay configuration gates still apply.
 
-Web: React / vinext. API: Node.js. Authentication: Supabase Auth. Account persistence: PostgreSQL.
+| Area | Example sources | Current boundary |
+|---|---|---|
+| Domestic Chinese AI products and industry | GeekPark, 36Kr flashes | Current trial focus; single real reads on record, sustained reliability not shown |
+| Film and creative software | Kdenlive, OBS, Krita | Tool releases only, not the whole film industry |
+| E-commerce and developer tools | Shopify, WooCommerce, Node.js, GitHub, Chrome | Availability differs by channel; developer notices are not business conclusions |
+| Tech, games and space news | IT Home, SSPAI, InfoQ, OSChina, Gcores, NASA and others | Registered only; no claim of effectiveness across these areas |
+
+GeekPark is read from its own RSS endpoint; media claims still need evidence checks. 36Kr flashes come through an independent RSSHub server behind an authenticated HTTPS gateway and currently return only the latest 5 items, **so they do not represent the past 7 days**. The relay's current availability still needs to be re-checked. Historical cloud reads are in [other-feeds-cloud-probe-20261021.md](docs/verification/other-feeds-cloud-probe-20261021.md). New areas need suitable sources and separate acceptance.
+
+## Architecture
 
 ```text
 Question, time window and exclusions
-  -> Retrieval planning / budgets / deadline
-  -> Source reading / address checks / RSS or Atom parsing
-  -> Date and task relevance / deduplication / evidence aggregation
-  -> Today, Information and Library views
+  → Planning and budget
+  → Safe fetching / RSS and Atom parsing
+  → Dates, relevance, deduplication and aggregation
+  → Formal results / Possibly related / Observation material
+  → Original sources, acquisition status and filtering explanations
 ```
 
-Endpoints include `POST /api/signals`, `POST /api/research/plan`, `/api/research/stream`, `/api/control/knowledge`, and `POST /api/sources/check`. These are internal product interfaces, not a stable public SDK. `sources/check` currently reads in page mode and does not replace Feed-mode acceptance.
+Web: React / vinext. API: a separate Node.js process. Authentication: Supabase Auth. Account data: PostgreSQL. Main endpoints: `POST /api/signals`, `POST /api/research/plan`, `/api/research/stream`, `/api/control/knowledge`, `POST /api/sources/check`. They are internal endpoints, not a stable public SDK.
 
-| Capability | Existing evidence | Still outstanding |
-|---|---|---|
-| Source reading and filtering | Selected real-source probes, deterministic tests and execution logs | Broad domain coverage, sustained reachability and answer quality |
-| Account persistence | Test-account API save, sign-out/sign-in read-back and browser rendering of the new record | Wider account, device and scope acceptance |
-| Same-browser account switching | Local-draft isolation fix `130009a` and local counterexamples | Post-deployment A→B→A browser verification |
-| Login navigation | Committed code and tests send authenticated `/control` visits home | Verification on the updated formal site |
-| Memory influencing research | Storage and selection wiring exists; automatic participation is off by default | End-to-end cross-run influence validation |
-| Proactive tracking and reminders | Scheduler and notification code exists | Not claimed as an accepted production capability |
+**Model usage:** planning and synthesis are two optional model calls, configured through environment variables (see [.env.example](.env.example)). A planning timeout falls back to a deterministic plan (`agent/runner.ts`). Retrieval, filtering, deduplication, date handling and safety checks do not depend on a model. According to the maintainer's production configuration report as of 2026-10-28, no model keys are currently configured, so planning and synthesis follow deterministic paths (production configuration was not queried again for this update).
 
-At this documentation checkpoint, the last recorded formal deployment is **Sites53 + API019**. The update containing `130009a` and fixture-clock correction `eb6666d` remains recorded as blocked. **The newest GitHub code is not necessarily running online.**
+**Test isolation:** tests use frozen snapshots through injected request and address-resolution functions. They make no real network calls and do not depend on the current time.
 
-### A demo that keeps the failure visible
+## Verification and evidence
 
-On 2026-10-21, a real Kdenlive maintenance-update query scanned 20 items, aggregated 18 signals and displayed zero. Reading executed, but the question did not receive its requested answer: answer-quality acceptance failed. The recording preserves that outcome. It uses actual browser-frame capture, waiting sections at 2× speed and no audio; it is not native high-frame-rate continuous screen recording.
+For the file contents of `develop` commit `e7d1b2b`, `quality`, `build` and `api:build` each exited 0 on Node.js 24.21.0: **1035 tests, 1029 passed, 0 failed, 6 skipped because the database test environment is absent**. Evidence: [develop gate record](docs/verification/develop-e7d1b2b-gates-20261028.md). Lint reports no errors but still has existing warnings. Skips do not count as passes; these figures are neither coverage nor production success rates.
 
-## Run locally
+The D06 check uses a frozen Chrome RSS body; the remaining scores are controlled so that the real display gates can be isolated. It shows the display contract, not a production end-to-end run or a quality benchmark.
 
-Use **Node.js 24+** for the documented checks. The package minimum is 22.13.0, but the full test command needs a newer runtime; the recorded gate used Node.js 24. Commands use PowerShell. Repository access is required.
+A historical domestic AI run retrieved 30 GeekPark and 5 36Kr items, deduplicated them to 34 and returned 2 signals. A single run establishes neither sustained reliability nor answer correctness.
+
+### A failure the demo does not hide
+
+On 2026-10-21, a Kdenlive maintenance-update question on the live site retrieved 20 items, aggregated 18 signals and displayed 0. The reads ran, but the original question was not answered, so answer quality did not pass. The [historical demonstration and limitations](https://github.com/xiebenzhen-code/signal-map/blob/5142a6705b7cdb5f3b133d6a9567da9256019182/docs/portfolio/DEMO.md) keep that result and do not claim that all current features are validated.
+
+**Version note:** the latest release record that can be checked in this repository is Sites53 + API019 ([api-repair-release-20261021.md](docs/verification/api-repair-release-20261021.md)). API 027 was released according to [api027-release-manual-20261026.md](docs/verification/api027-release-manual-20261026.md), but its live acceptance record is not in the repository, so this text cites no 027 demo or figures.
+
+## Known limitations
+
+This section collects the current boundaries so that "implemented" is not read as "verified".
+
+- **Effects are unproven.** Reduced information anxiety and better judgment are goals without user-study evidence. The tool cannot guarantee that information is true.
+- **No human gold labels yet.** False-zero rate, display precision and miss rate cannot be computed. Whether the "Possibly related" group hides must-read items can only be answered after labelling.
+- **False rejections remain a known problem.** An empty result means no displayable evidence this run, not that nothing changed.
+- **Cross-language matching is weak.** A Chinese constraint against English body text is often judged uncertain.
+- **Coverage is limited.** There is no promise of full-web coverage, an answer every time, continuous autonomous monitoring or a mature public SDK.
+- **Some channels have not recovered.** Chrome / FeedBurner timeouts and WooCommerce address-check rejections have no recovery evidence; the 36Kr relay's current availability is unverified.
+- **Memory limits.** "A record is visible" does not mean "it affected the research". New evidence that contradicts an old conclusion is stored only in the evidence layer and does not update the knowledge layer.
+- **Account isolation is not re-verified online.** The local multi-account draft isolation is repaired, but the live-site check is pending. Do not store sensitive drafts on a shared device.
+- **Some changes are not live yet.** The uncertain-material group, zero-result reasons and the diagnostic token gate exist in code and tests; deployment and page checks are pending.
+- **Editorial topic selection and broad social-media collection** are future directions, not delivered capabilities.
+- **There is no project-level `LICENSE`.** No open-source or commercial licence is granted. Third-party dependencies and fonts keep their own terms.
+
+## Local setup
+
+Node.js 24+ is recommended. The package declares a minimum of 22.13.0, but the full test suite uses Node.js 24. The production Dockerfile still uses Node.js 22 and has not been upgraded.
+
+PowerShell:
 
 ```powershell
-git clone --branch fix/stability-closeout-20261019 https://github.com/xiebenzhen-code/signal-map.git
+git clone https://github.com/xiebenzhen-code/signal-map.git
 Set-Location signal-map
 npm ci
 if (!(Test-Path .env.local)) { Copy-Item .env.example .env.local }
 ```
 
-Edit your local copy of [.env.example](.env.example) first. Authentication needs `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`; account persistence needs your own `DATABASE_URL` and matching database tables. Configure models and optional channels as needed. `npm run db:migrate` is the migration entry point; use only a dedicated development database you control.
+bash:
 
-Real research can contact external services and incur model or cloud charges. Do not test against a production database or commit `.env.local`, passwords, cookies or keys. Opening a local page does not validate authentication, database access or external sources.
+```bash
+git clone https://github.com/xiebenzhen-code/signal-map.git
+cd signal-map
+npm ci
+cp -n .env.example .env.local
+```
 
-Start the API in the first terminal; the default port is 8080:
+Edit `.env.local` first. Authentication needs `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`; account persistence needs your own `DATABASE_URL` and matching tables; models and optional channels are configured as needed. Run `npm run db:migrate` only against a database dedicated to development. Real research may call external services and incur model or cloud charges. Do not test against a production database, and never commit `.env.local`, passwords, cookies or keys.
 
-```powershell
+Start the API in the first terminal (default port 8080):
+
+```bash
 npm run api:build
 node --env-file=.env.local dist-api/server.mjs
 ```
 
-Start the Web app in a second terminal. Native Node mode avoids requiring a hosted-platform identity:
+Start the Web app in the second terminal:
 
 ```powershell
 $env:SIGNAL_MAP_FRONTEND_RUNTIME = "node"
@@ -109,31 +148,29 @@ $env:API_UPSTREAM_URL = "http://127.0.0.1:8080"
 npm run dev -- --hostname 127.0.0.1 --port 3000
 ```
 
-Open the [local app](http://127.0.0.1:3000). Requests proxy to the local API; account services still require valid configuration. Production proxying and source readers retain address and Origin checks; do not disable protections to work around connectivity problems.
+```bash
+SIGNAL_MAP_FRONTEND_RUNTIME=node API_UPSTREAM_URL=http://127.0.0.1:8080 \
+  npm run dev -- --hostname 127.0.0.1 --port 3000
+```
 
-## Tests and engineering records
+Open http://127.0.0.1:3000 . A running page does not establish that authentication, the database or external sources work. Address and Origin checks stay enabled; do not turn them off to work around network problems.
 
-```powershell
+## Tests
+
+```bash
 npm run quality
 npm run build
 npm run api:build
 ```
 
-The latest recorded gate corresponds to `eb6666d`: **912 tests, 906 passed, zero failed, six skipped because the database test environment was absent**. Quality/build exited 0. The gate includes typecheck, lint, knip and dependency checks; lint retains 28 existing warnings. These are historical execution records, not checks rerun for this README edit. Test counts are not coverage percentages or real-user research counts.
+The 6 conditionally skipped tests do not count as passes. The number of tests is neither coverage nor a count of real user studies. The repository has a manually triggered [end-to-end workflow](.github/workflows/signal-map-agent-loop-e2e.yml) that needs a dedicated test environment; the file's existence is not evidence that CI passes.
 
-The manually triggered [end-to-end workflow](.github/workflows/signal-map-agent-loop-e2e.yml) requires a dedicated test environment. Its existence is not evidence of a passing CI run.
+## Maintenance, data and feedback
 
-- [README evidence record](docs/verification/readme-evidence-20261022.md)
-- [Editable architecture SVG](docs/portfolio/signal-map-architecture.svg): status annotations reflect its recording date.
-- [API019 release and diagnostics](docs/verification/api-repair-release-20261021.md)
-- [OBS / Kdenlive cloud reads](docs/verification/other-feeds-cloud-probe-20261021.md)
-- [Formal-domain and demo delivery](docs/verification/formal-portfolio-delivery-20261021.md)
-- [Local-account isolation repair record](docs/verification/local-account-isolation-repair-20261021.md)
+The plan is to freeze a portfolio baseline after a controlled deployment and one page-level acceptance run, then keep maintaining on development branches while job hunting: record issues, verify improvements, then decide whether to update the frozen version. No release schedule is promised. Next priorities are human evaluation, source reliability, false rejections and the actual value of memory.
 
-## Data, license and feedback
+Server-side account records and local drafts are separate paths. The latest source binds a separate IndexedDB store to each account and keeps the anonymous legacy store; history without an owner is not assigned to a signed-in account automatically.
 
-Server account records and browser drafts are separate paths. The latest source binds each account to distinct IndexedDB storage and preserves the anonymous legacy store. Unowned historical data is not automatically assigned to a signed-in account. Online acceptance is still outstanding; do not keep sensitive drafts on shared devices. Seeing a saved record does not prove it influenced research.
+More records: [README fact check](docs/verification/readme-evidence-20261022.md) · [Editable architecture SVG](docs/portfolio/signal-map-architecture.svg) · [OBS / Kdenlive cloud reads](docs/verification/other-feeds-cloud-probe-20261021.md) · [Formal domain and demo delivery](docs/verification/formal-portfolio-delivery-20261021.md)
 
-There is no project-level `LICENSE`. No MIT, open-source or commercial-use license is claimed here. Third-party dependencies and fonts have their own licenses.
-
-For a reproducible [Issue](https://github.com/xiebenzhen-code/signal-map/issues), share a redacted request ID, timestamp, version and expected behavior, never credentials. If the project is useful as a reference, [Star to bookmark](https://github.com/xiebenzhen-code/signal-map/stargazers). Repository access remains unchanged.
+Report issues through [Issues](https://github.com/xiebenzhen-code/signal-map/issues) with sanitized request IDs, times, versions and expected behaviour. Never include passwords, cookies or keys.

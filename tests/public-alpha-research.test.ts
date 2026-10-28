@@ -4,9 +4,32 @@ import test from "node:test";
 import { resolveResearchIdentity } from "../auth/request-identity.ts";
 import { handleBackendRequest } from "../backend/node-server.ts";
 import { runResearchPipeline } from "../research/research-pipeline.ts";
+import { readCustomSource } from "../source-enrichment/custom-source.ts";
 import { executeResearch, summarizeAgentFailure } from "../research/research-service.ts";
 import { InMemorySignalRepository } from "../information/repositories/in-memory.ts";
 import type { ResearchInput } from "../research/types.ts";
+
+// P2-N3a: registered feeds read through the safe reader (node:https), which no
+// fetch mock can intercept. These frozen feeds are served via the reader's
+// options.request/options.lookup injection — no real network, fixed dates.
+const FROZEN_FEED_BODIES: Record<string, string> = {
+  "openai.com": `<rss><channel><title>OpenAI News</title><item><title>Frozen roadmap entry</title><link>https://openai.com/index/frozen-entry</link><pubDate>Wed, 02 Sep 2026 10:00:00 GMT</pubDate><description>Frozen offline fixture entry with a fixed date.</description></item></channel></rss>`,
+  "github.blog": `<rss><channel><title>GitHub Blog</title><item><title>Frozen changelog digest</title><link>https://github.blog/frozen-digest</link><pubDate>Wed, 02 Sep 2026 10:00:00 GMT</pubDate><description>Frozen offline fixture entry with a fixed date.</description></item></channel></rss>`,
+};
+
+function frozenRelayReader(): NonNullable<Parameters<typeof runResearchPipeline>[2]>["customSourceReader"] {
+  return (url, options) => readCustomSource(url, {
+    ...options,
+    lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+    request: async (target) => {
+      const host = new URL(String(target)).hostname;
+      if (host === "openai.com") {
+        return { status: 200, headers: { "content-type": "application/xml" }, body: FROZEN_FEED_BODIES[host] };
+      }
+      throw new Error(`offline fixture: unexpected host ${host}`);
+    },
+  });
+}
 
 const input: ResearchInput = {
   identity: "AI product builder", industry: "AI developer tools", focusAreas: "Codex",
@@ -45,7 +68,12 @@ test("24h is an upstream retrieval constraint rather than a front-end-only filte
     if (url.includes("news.google.com")) newsUrls.push(url);
     return emptyNetworkResponse(target);
   });
-  const result = await runResearchPipeline(input);
+  // The openai registered feed is served from the frozen fixture via reader
+  // injection; its fixed 2026-09-02 date sits outside the 24h window on purpose.
+  const result = await runResearchPipeline(input, undefined, {
+    deadlineAt: Date.now() + 20000,
+    customSourceReader: frozenRelayReader(),
+  });
   assert.equal(result.queryPlan.requestedFreshnessWindow, "24h");
   assert.ok(newsUrls.length > 0);
   assert.ok(newsUrls.every((url) => decodeURIComponent(url).includes("when:1d")));
@@ -54,12 +82,18 @@ test("24h is an upstream retrieval constraint rather than a front-end-only filte
 });
 
 test("anonymous signals use the real pipeline and never substitute demo records", async (t) => {
+  // P2-N3a: 用不命中任何注册出版方的本地输入，保证 handler 路径零真实网络。
+  const offlineInput: ResearchInput = {
+    identity: "hardware tinkerer", industry: "music hardware", focusAreas: "vintage synthesizers",
+    currentQuestions: "What changed in vintage synthesizer hardware?", knownInformation: "", informationGaps: "recent releases",
+    trackedEntities: "Vintage Synthesizer", trackedEvents: "", userJudgements: "", evidenceHistory: "", freshnessWindow: "24h",
+  };
   const prior = process.env.SIGNAL_MAP_GUEST_SECRET;
   process.env.SIGNAL_MAP_GUEST_SECRET = "test-only-guest-signing-secret";
   t.after(() => { if (prior === undefined) delete process.env.SIGNAL_MAP_GUEST_SECRET; else process.env.SIGNAL_MAP_GUEST_SECRET = prior; });
   t.mock.method(globalThis, "fetch", async (target: string | URL | Request) => emptyNetworkResponse(target));
   const response = await handleBackendRequest(new Request("https://signal.benzhenlab.com/api/signals", {
-    method: "POST", headers: { "Content-Type": "application/json", Origin: "https://signal.benzhenlab.com" }, body: JSON.stringify(input),
+    method: "POST", headers: { "Content-Type": "application/json", Origin: "https://signal.benzhenlab.com" }, body: JSON.stringify(offlineInput),
   }));
   assert.equal(response.status, 200);
   const body = await response.json() as { dataMode: string; signals: unknown[] };
@@ -175,7 +209,7 @@ test("background evidence outside a 24h window cannot become must read", async (
     }
     return emptyNetworkResponse(target);
   });
-  const result = await runResearchPipeline(input);
+  const result = await runResearchPipeline(input, undefined, { customSourceReader: frozenRelayReader() });
   const background = result.signals.find((signal) => signal.eventStatus === "BACKGROUND");
   assert.ok(background);
   assert.notEqual(background.attentionDecision, "MUST_READ");
@@ -211,6 +245,7 @@ test("authenticated main research enters the existing persistent Agent loop", as
     input,
     context,
     repository,
+    debug: { customSourceReader: frozenRelayReader() },
   });
   assert.equal(result.dataMode, "live");
   assert.ok((await repository.listPersonalKnowledge(context)).length > 0);
@@ -258,6 +293,7 @@ test("knowledge persistence failure reaches service diagnostics with its real sa
   const result = await executeResearch({
     identity: { id: "account-write-failure", mode: "authenticated" }, input,
     context: { authenticatedUserId: "account-write-failure", filterId: "filter-write-failure" }, repository,
+    debug: { customSourceReader: frozenRelayReader() },
     onPhase: (event) => { phases.push(event); },
   });
   assert.equal(result.status, "failed");

@@ -1,4 +1,5 @@
 import type { QueryPlan, TopicProfile, TopicRelevance, TopicRelevanceDecision, TopicRelevanceReason } from "./types.ts";
+import { registeredPublisherNames } from "../source-registry/feed-catalog.ts";
 
 export const GENERIC_TERMS = new Set([
   "a",
@@ -576,11 +577,40 @@ export function assessTopicRelevance(text: string, plan: QueryPlan): TopicReleva
   const { terms: taskConstraints, hasNonEntityEntry, openBrowsing } = taskConstraintTerms(plan);
   const matchedTaskConstraints = taskConstraints.filter((constraint) => constraintConceptMatches(normalizedText, constraint));
   const conceptBridgeable = taskConstraints.some((constraint) => conceptGroupOf(constraint).length > 0);
+  // In broad AI-product research the only extracted task can be "产品".
+  // That word cannot prove AI relevance, while literal AI news need not repeat
+  // it. Keep this fallback out of named-entity and concrete-task questions.
+  const aiMention = /(?:^|[^a-z0-9])ai(?=$|[^a-z0-9])|artificial intelligence|人工智能|大模型/iu;
+  // Only a fully recognized broad question may use this fallback. Unknown
+  // clauses (subtitles, diagnosis, etc.) stay on the existing task gate.
+  const question = (plan.requestedQuestion || "")
+    .replace(/保留原始出处和发布日期[，,。]?/g, "")
+    .replace(/区分已确认信息与待核对线索[。]?/g, "").trim();
+  const withoutTime = question.replace(/^过去\s*\d+\s*天[，,\s]*/u, "");
+  const publisherClause = withoutTime.match(/^([^，,？?。；;]+)报道了哪些与/u);
+  const publisherOnly = !publisherClause || publisherClause[1].split(/和|、/u)
+    .every(name => registeredPublisherNames.some(known => normalize(name) === normalize(known)));
+  const subjectQuestion = publisherClause ? withoutTime.slice(publisherClause[0].length) : withoutTime;
+  const broadQuestion = publisherOnly && /^(?:国内|中国)?\s*(?:AI|人工智能)\s*(?:产品|产业|工具)(?:或(?:产品|产业|工具))?(?:有关的)?(?:有哪些|有什么)?(?:新进展|新变化|变化|更新)[？?。]?$/iu.test(subjectQuestion);
+  const broadAiScope = entities.length === 0 && taskConstraints.length > 0 &&
+    taskConstraints.every(term => /^(?:产品|产业|人工智能|人工|智能|国内|中国|新进展)$/.test(term)) &&
+    plan.coreKeywords.some(term => aiMention.test(term));
+  const broadAiProduct = broadQuestion && broadAiScope;
+  const aiSubjectMatch = aiMention.test(text);
+  const foreignOnly = /国内|中国/u.test(question) &&
+    /美国|英国|德国|柏林|海外|境外|\b(?:Germany|Berlin|United States|United Kingdom|overseas)\b/iu.test(text) &&
+    !/国内|中国|中文|\b(?:China|Chinese|domestic)\b/iu.test(text);
   const subjectSatisfied = !entities.length || hasEntityMatch;
   const topicSatisfied = !hasTopicTerms || legacyMatchedTerms.length > 0;
   let decision: TopicRelevanceDecision;
   if (excludedOnlyMatch) {
     decision = "TOPIC_MISMATCH";
+  } else if (broadAiProduct) {
+    decision = aiSubjectMatch && !foreignOnly ? "MATCH" : "TOPIC_MISMATCH";
+  } else if (broadAiScope && plan.requestedQuestion) {
+    // Unparsed extra requirements are not permission to fall back to a bare
+    // "product" hit. Keep the material uncertain rather than confirming it.
+    decision = "UNCERTAIN";
   } else if (!subjectSatisfied || !topicSatisfied) {
     decision = "TOPIC_MISMATCH";
   } else if (taskConstraints.length === 0) {
@@ -599,7 +629,7 @@ export function assessTopicRelevance(text: string, plan: QueryPlan): TopicReleva
   }
   return {
     decision,
-    reason: excludedOnlyMatch
+    reason: broadAiProduct ? (decision === "MATCH" ? "LEGACY_QUERY_TERM_MATCH" : "NO_TASK_CONSTRAINT_MATCH") : excludedOnlyMatch
       ? "EXCLUDED_ENTITY"
       : decision === "TOPIC_MISMATCH" && taskConstraints.length > 0
         ? "NO_TASK_CONSTRAINT_MATCH"
@@ -610,7 +640,7 @@ export function assessTopicRelevance(text: string, plan: QueryPlan): TopicReleva
             : legacyMatchedTerms.length
               ? "LEGACY_QUERY_TERM_MATCH"
               : "NO_QUERY_TERM_MATCH",
-    matchedTerms: legacyMatchedTerms,
+    matchedTerms: broadAiProduct && aiSubjectMatch ? [...new Set([...legacyMatchedTerms, "ai"])] : legacyMatchedTerms,
     matchedDomainAnchors,
     matchedTaskAnchors,
     matchedGenericTerms,
@@ -618,6 +648,6 @@ export function assessTopicRelevance(text: string, plan: QueryPlan): TopicReleva
     matchedTaskConstraints,
     relevanceGateApplied: false,
     relevanceGatePassed: decision === "MATCH",
-    score: !hasTopicTerms ? 50 : legacyMatchedTerms.length ? Math.min(100, 60 + legacyMatchedTerms.length * 15) : 0,
+    score: broadAiProduct ? (decision === "MATCH" ? 70 : 0) : !hasTopicTerms ? 50 : legacyMatchedTerms.length ? Math.min(100, 60 + legacyMatchedTerms.length * 15) : 0,
   };
 }

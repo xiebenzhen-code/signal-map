@@ -556,6 +556,7 @@ export function planQuery(input: ResearchInput): QueryPlan {
 
   return {
     originalNeed,
+    requestedQuestion: input.currentQuestions,
     coreKeywords: coreKeywords.filter((keyword) => !sameExcludedEntity(keyword, excludedEntities)),
     topicAnchors,
     topicKeywords,

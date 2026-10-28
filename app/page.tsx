@@ -34,6 +34,7 @@ import {
 } from "@/information/run-information";
 import { createResearchRequest } from "@/information/research-request";
 import { createBrowserResearchObservation } from "@/information/browser-observation";
+import { performLogout } from "@/lib/session-controls";
 import {
   inferNaturalResearchDraft,
   type NaturalResearchOptions,
@@ -59,6 +60,7 @@ import type { ObservationLayer } from "@/information/observation";
 import { createAlphaStorage } from "@/lib/alpha-storage";
 import { LocalAccountBoundary } from "./components/local-account-boundary";
 import { CustomSourcesEditor } from "./components/custom-sources-editor";
+import { ResearchDiagnostics } from "./components/research-diagnostics";
 import { parseCustomSources } from "@/lib/custom-sources";
 import { signalTypeLabel, userFacingReason } from "@/lib/user-facing-labels";
 
@@ -762,9 +764,17 @@ const emptyFilterDraft: OnboardingDraft = {
 function FilterBuilder({
   onSave,
   onCancel,
+  loggedIn,
+  onLogout,
+  logoutState,
+  logoutMessage,
 }: {
   onSave: (draft: OnboardingDraft) => void;
   onCancel?: () => void;
+  loggedIn: boolean;
+  onLogout: () => Promise<void>;
+  logoutState: "idle" | "pending" | "failed";
+  logoutMessage: string;
 }) {
   const [query, setQuery] = useState("");
   const [sources, setSources] = useState("");
@@ -799,8 +809,18 @@ function FilterBuilder({
               <p className="text-sm font-semibold">Signal Map</p>
             </div>
           </div>
-          {onCancel && <button onClick={onCancel} className="text-xs font-bold text-[#727b87]">取消</button>}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {loggedIn ? <>
+              <span className="text-xs text-[#596473]">已登录</span>
+              <button type="button" onClick={() => void onLogout()} disabled={logoutState === "pending"}
+                className="min-h-9 rounded-full border border-[#dfe3e7] px-3 py-2 text-xs font-bold disabled:opacity-60">
+                {logoutState === "pending" ? "退出中…" : "退出登录"}
+              </button>
+            </> : <a href="/control" className="min-h-9 rounded-full border border-[#dfe3e7] px-3 py-2 text-xs font-bold">登录 / 注册</a>}
+            {onCancel && <button onClick={onCancel} className="text-xs font-bold text-[#727b87]">取消</button>}
+          </div>
         </div>
+        {logoutState === "failed" && <p role="alert" className="mt-3 text-sm text-rose-700">{logoutMessage}</p>}
 
         <h1 className="signal-display mt-10 text-[42px] leading-[1.02] sm:text-6xl">你现在想了解什么？</h1>
         <p className="mt-4 text-sm leading-6 text-[#707986]">
@@ -849,7 +869,7 @@ function FilterBuilder({
               开始研究
             </button>
           </div>
-          <p className="text-center text-[11px] leading-5 text-[#8a929d]">不用先配置系统。登录后可保存长期记忆；未登录只保存在当前浏览器。</p>
+          <p className="text-center text-[11px] leading-5 text-[#8a929d]">{loggedIn ? "已登录，可保存长期记忆。直接填写问题即可开始。" : "不用先配置系统。登录后可保存长期记忆；未登录只保存在当前浏览器。"}</p>
         </div>
       </section>
     </main>
@@ -1009,6 +1029,23 @@ function AccountHomePage({ currentUser }: { currentUser: CurrentUser }) {
   const [newJudgement, setNewJudgement] = useState("");
   const [knowledgeDrafts, setKnowledgeDrafts] = useState<Record<string, string>>({});
   const loggedIn = Boolean(currentUser);
+  const [logoutState, setLogoutState] = useState<"idle" | "pending" | "failed">("idle");
+  const [logoutMessage, setLogoutMessage] = useState("");
+  const signOut = useCallback(async () => {
+    if (logoutState === "pending") return;
+    setLogoutState("pending");
+    setLogoutMessage("");
+    const result = await performLogout();
+    if (result.status !== "signed_out") {
+      // The server still owns a live session; keep the signed-in view and say so.
+      setLogoutState("failed");
+      setLogoutMessage(result.message);
+      return;
+    }
+    // A full navigation replaces the document, so the account partition, its
+    // in-flight research and every rendered card are discarded together.
+    window.location.replace("/");
+  }, [logoutState]);
   const accountKnowledgeForCurrentUser = currentUser && accountKnowledgeUserId === currentUser.id
     ? accountKnowledge
     : [];
@@ -1678,6 +1715,7 @@ function AccountHomePage({ currentUser }: { currentUser: CurrentUser }) {
         </section>
       )}
       {!loading && !error && response && <FilteringSummaryCard summary={response.filteringSummary} />}
+      {!loading && !error && response && <ResearchDiagnostics summary={response.filteringSummary} outcomes={response.coverage.outcomes} />}
       {!loading && !error && response && (
         <ObservationSection observation={response.observation} formalCount={response.signals.length} />
       )}
@@ -2076,6 +2114,10 @@ function AccountHomePage({ currentUser }: { currentUser: CurrentUser }) {
       <FilterBuilder
         onSave={createFilter}
         onCancel={activeFilter ? () => setFilterBuilderOpen(false) : undefined}
+        loggedIn={loggedIn}
+        onLogout={signOut}
+        logoutState={logoutState}
+        logoutMessage={logoutMessage}
       />
     );
   }
@@ -2097,15 +2139,25 @@ function AccountHomePage({ currentUser }: { currentUser: CurrentUser }) {
             ))}
           </nav>
           {loggedIn ? (
-            <button
-              onClick={() => {
-                setLibraryView("knowledge");
-                navigate("library");
-              }}
-              className="rounded-full border border-[#dfe3e7] px-3 py-2 text-[10px] font-black text-[#596473]"
-            >
-              长期记忆
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setLibraryView("knowledge");
+                  navigate("library");
+                }}
+                className="rounded-full border border-[#dfe3e7] px-3 py-2 text-[10px] font-black text-[#596473]"
+              >
+                长期记忆
+              </button>
+              <button
+                onClick={() => void signOut()}
+                disabled={logoutState === "pending"}
+                className="min-h-9 rounded-full border border-[#dfe3e7] px-3 py-2 text-[10px] font-black text-[#596473] disabled:opacity-60"
+              >
+                {logoutState === "pending" ? "退出中…" : "退出登录"}
+              </button>
+              {logoutState === "failed" && <span className="max-w-40 text-[10px] font-bold text-rose-700">{logoutMessage}</span>}
+            </div>
           ) : (
             <a href="/control" className="rounded-full border border-[#dfe3e7] px-3 py-2 text-[10px] font-black text-[#596473]">登录 / 注册</a>
           )}

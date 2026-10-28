@@ -1,9 +1,10 @@
+import { fetchHtml, DetailReadError, type DetailReadOptions } from "./detail-reader.ts";
+export { fetchHtml, DetailReadError, type DetailReadOptions } from "./detail-reader.ts";
 import { cleanContent, extractClaim } from "../content-processing/index.ts";
 import type { DetailEnrichmentInput, DetailEnrichmentResult, SourceCapabilityRole } from "./types.ts";
 import { enrichHuggingFaceDetail } from "./resolvers/hugging-face.ts";
 import { enrichProductHuntDetail } from "./resolvers/product-hunt.ts";
 import { htmlTitle, isThinDetail, metaContent, stripHtmlForDetail } from "./resolvers/shared.ts";
-import { discardResponseBody } from "../lib/http-response.ts";
 import { isSafeDetailUrl } from "./safe-url.ts";
 import { resolveWrapperViaPublisherOrigin } from "./google-news-resolver.ts";
 import { titlesCorrespond } from "./title-correspondence.ts";
@@ -47,20 +48,6 @@ export function shouldEnrichDetail(input: {
   return Boolean(input.isRelevant && input.url && isSafeDetailUrl(input.url));
 }
 
-async function fetchHtml(url: string, timeoutMs = 10000) {
-  // The abort signal governs the whole transfer including body reading, so an
-  // exhausted budget cancels the real request instead of abandoning it.
-  const response = await fetch(url, {
-    headers: { "User-Agent": "SignalMapResearch/0.4" },
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  if (!response.ok) {
-    await discardResponseBody(response);
-    return undefined;
-  }
-  return response.text();
-}
-
 // Google News RSS wraps every article in a news.google.com URL whose page is a
 // JS shell. The wrapper is resolved via the google-news-resolver module (one
 // lite.duckduckgo.com search, anchor-verified against the candidate title),
@@ -73,7 +60,7 @@ function isGoogleNewsWrapper(url: string): boolean {
   return GOOGLE_NEWS_WRAPPER.test(url);
 }
 
-export async function enrichGenericDetail(input: DetailEnrichmentInput): Promise<DetailEnrichmentResult> {
+export async function enrichGenericDetail(input: DetailEnrichmentInput, options: DetailReadOptions = {}): Promise<DetailEnrichmentResult> {
   if (!input.url) return { status: "NO_DETAIL", discoveredBy: input.providerId || "detail" };
   // Counted across the whole candidate: one wrapper search and/or one body
   // fetch — deliberately distinct from candidate-level counts upstream.
@@ -127,7 +114,7 @@ export async function enrichGenericDetail(input: DetailEnrichmentInput): Promise
     }
     // Counted at initiation: a call cancelled mid-transfer still happened.
     fetchCalls += 1;
-    const html = await fetchHtml(targetUrl, remainingMs() ?? 10000);
+    const html = await fetchHtml(targetUrl, remainingMs() ?? 10000, options);
     if (!html) return { status: "FETCH_FAILED", canonicalUrl: targetUrl, discoveredBy: input.providerId || "detail", fetchCalls };
     // A resolved wrapper is only accepted when the page behind the URL
     // corresponds to the original candidate (title tag / og:title / h1).
@@ -188,18 +175,18 @@ export async function enrichGenericDetail(input: DetailEnrichmentInput): Promise
       evidenceFrom: wrapperResolved ? "Publisher article (resolved from Google News wrapper)" : "Detail page",
       fetchCalls,
     };
-  } catch {
-    return { status: "FETCH_FAILED", canonicalUrl: input.url, discoveredBy: input.providerId || "detail", fetchCalls };
+  } catch (error) {
+    return { status: "FETCH_FAILED", canonicalUrl: input.url, discoveredBy: input.providerId || "detail", fetchCalls, ...(error instanceof DetailReadError ? { failureCode: error.code } : {}) };
   }
 }
 
-export async function enrichDetail(input: DetailEnrichmentInput): Promise<DetailEnrichmentResult> {
-  if (input.providerId === "product-hunt") return enrichProductHuntDetail(input);
-  if (input.providerId === "huggingface") return enrichHuggingFaceDetail(input);
+export async function enrichDetail(input: DetailEnrichmentInput, options: DetailReadOptions = {}): Promise<DetailEnrichmentResult> {
+  if (input.providerId === "product-hunt") return enrichProductHuntDetail(input, options);
+  if (input.providerId === "huggingface") return enrichHuggingFaceDetail(input, options);
   // Generic detail completion for relevant candidates (with or without a
   // providerId — searchQueries candidates carry sourceType only) with a safe
   // canonicalUrl.
-  if (input.url && isSafeDetailUrl(input.url)) return enrichGenericDetail(input);
+  if (input.url && isSafeDetailUrl(input.url)) return enrichGenericDetail(input, options);
   return {
     status: "UNSUPPORTED",
     canonicalUrl: input.url,

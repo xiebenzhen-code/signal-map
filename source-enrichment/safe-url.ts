@@ -1,7 +1,7 @@
 // SSRF-safe URL validation shared by detail enrichment and the Google News
 // wrapper resolver. Only public http(s) URLs are allowed, never loopback /
-// private / link-local literals. DNS rebinding to a private address is out of
-// scope for this minimal safety surface.
+// private / link-local literals. Detail transport additionally validates DNS
+// answers and pins the validated address on every hop.
 
 const LOOPBACK_HOSTS = new Set(["localhost", "localtest.me", "loopback", "0.0.0.0", "::", "::1"]);
 
@@ -31,6 +31,8 @@ export function isSafeDetailUrl(value: string): boolean {
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
   const host = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (parsed.username || parsed.password) return false;
+  if (host.replace(/\.$/, "") === "localhost" || host.replace(/\.$/, "").endsWith(".localhost")) return false;
   if (LOOPBACK_HOSTS.has(host)) return false;
   if (ipLiteralPrivate(host)) return false;
   return true;

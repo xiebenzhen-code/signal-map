@@ -8,7 +8,7 @@ import test from "node:test";
 // providerId=undefined) permanently un-enriched while directory pages consumed
 // the budget. Contract: enrichment eligibility must not depend on providerId
 // when a safe canonical URL exists and the candidate is relevant.
-import { shouldEnrichDetail } from "../source-enrichment/detail-enricher.ts";
+import { shouldEnrichDetail } from "./fixtures/detail-read.ts";
 
 const relevantNewsCandidate = {
   providerId: undefined, // searchQueries path: no providerId, sourceType only
@@ -37,7 +37,7 @@ test("RED: the guard stays closed for unsafe URLs and irrelevant candidates", ()
 });
 
 test("RED: enrichGenericDetail extracts article/main content instead of navigation skeleton", async () => {
-  const { enrichGenericDetail } = await import("../source-enrichment/detail-enricher.ts");
+  const { enrichGenericDetail } = await import("./fixtures/detail-read.ts");
   const originalFetch = globalThis.fetch;
   // Realistic news-article structure: nav + header chrome, then a real <article>.
   const navAndChrome = [
@@ -83,7 +83,7 @@ test("RED: enrichGenericDetail extracts article/main content instead of navigati
 });
 
 test("RED: navigation-skeleton-only pages are still rejected (no fabricated content)", async () => {
-  const { enrichGenericDetail } = await import("../source-enrichment/detail-enricher.ts");
+  const { enrichGenericDetail } = await import("./fixtures/detail-read.ts");
   const originalFetch = globalThis.fetch;
   const skeletonHtml = `<!doctype html><html><head><title>AutoKut</title></head><body>
     <nav><a href='/'>Home</a> <a href='/features'>Features</a></nav>

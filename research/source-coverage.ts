@@ -53,6 +53,21 @@ export type SourceExecutionOutcome = {
   detailFailureCode?: string;
   engine?: string;
   fallbackAttempted?: boolean;
+  /**
+   * Per-source observation window (P2-N). Counts are deduplicated: returnedCount
+   * counts unique entry URLs (never summed across attempts), requestCount stays
+   * the raw request count. Dates describe observed entries only — an earliest
+   * date later than the requested window start means the route returned just the
+   * most recent slice, never "full window coverage".
+   */
+  coverage?: {
+    returnedCount: number;
+    routeLimit?: number;
+    undatedCount: number;
+    observedEarliest?: string;
+    observedLatest?: string;
+    notice: string;
+  };
 };
 
 export type SourceCoverage = {
@@ -90,4 +105,54 @@ export function buildSourceCoverage(outcomes: SourceExecutionOutcome[]): SourceC
     failedProviders: names("failed"),
     outcomes,
   };
+}
+
+export type CoverageObservationInput = {
+  execution: SourceExecutionOutcome["execution"];
+  searched?: boolean;
+  requestCount?: number;
+  resultCount?: number;
+  failureCode?: ProviderSearchFailureCode;
+  detailFailureCode?: string;
+  blockedBy?: SourceNotSearchedReason;
+  observedEarliest?: string;
+  observedLatest?: string;
+  undatedCount?: number;
+  routeLimit?: number;
+};
+
+/**
+ * Builds the honest per-source coverage notice (P2-N). Counts are already
+ * deduplicated upstream: returnedCount = unique entry URLs, requestCount = raw
+ * requests. Four distinct shapes: read failure, empty result, entries without
+ * dates, and a dated slice. The text never claims "coverage" — a slice that
+ * reaches before the window start is still only the most recent N entries the
+ * route returned.
+ */
+export function formatCoverageNotice(input: CoverageObservationInput, windowStart?: string): string {
+  if (input.execution === "failed" || input.execution === "unavailable") {
+    const code = input.detailFailureCode || input.failureCode || "未知原因";
+    return `本次读取失败（${code}），未取得该来源条目。`;
+  }
+  if (input.execution === "not_configured") return "本次未搜索该来源（未配置）。";
+  if (input.searched === false || input.execution === "not_searched") {
+    return input.blockedBy
+      ? `本次未搜索该来源（原因：${input.blockedBy}）。`
+      : "本次未搜索该来源。";
+  }
+  const count = input.resultCount ?? 0;
+  if (count === 0) {
+    return "本次读取成功，但该来源没有返回条目。";
+  }
+  const dates = [input.observedEarliest, input.observedLatest].filter(Boolean) as string[];
+  if (dates.length < 2) {
+    return `本次取得该来源最近 ${count} 条，条目无有效发布日期，无法判断时间范围。`;
+  }
+  const base = `本次取得该来源最近 ${count} 条，发布时间 ${dates.sort()[0]} 至 ${dates.sort().at(-1)}。`;
+  if (input.routeLimit !== undefined && count >= input.routeLimit) {
+    return base + (windowStart && input.observedEarliest && Date.parse(input.observedEarliest) > Date.parse(windowStart)
+      ? "本次仅取得最近一段时间的条目，早于该时间的条目本次未取得。"
+      : "该路由按数量截断，不代表该来源窗口内全部内容。");
+  }
+  return base;
 }

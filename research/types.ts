@@ -99,6 +99,8 @@ export type Claim = {
 
 export type QueryPlan = {
   originalNeed: string;
+  /** User's question alone, without inferred industry or memory context. */
+  requestedQuestion?: string;
   coreKeywords: string[];
   topicAnchors?: string[];
   topicKeywords?: string[];
@@ -316,6 +318,9 @@ export type FilteringSummary = {
     topicMismatch?: number;
   };
   detailEnrichment?: DetailEnrichmentSummary;
+  /** P2-N: signals whose verdict is UNCERTAIN — collapsed as 可能相关, never confirmed. */
+  uncertainCount?: number;
+  possibleRelated?: Array<{ id: string; title: string; url?: string; reason?: string }>;
   strongestHiddenSignal?: {
     signalType: SignalClassification;
     reason: FilteringReason;

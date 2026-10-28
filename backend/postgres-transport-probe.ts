@@ -1,5 +1,6 @@
 import pg from "pg";
 
+import { DIAGNOSTIC_TOKEN_HEADER, evaluateDiagnosticToken } from "./diagnostic-token.ts";
 import { readDatabaseConfig, resolveDriverSsl } from "./postgres.ts";
 import { resolveAuthContext, withSession } from "../auth/session.ts";
 
@@ -14,6 +15,28 @@ type ProbePhase = {
     code: string | null;
     message: string;
   };
+};
+
+export type PostgresProbeOutcome = {
+  client: {
+    connectSucceeded: boolean;
+    selectSucceeded: boolean;
+    lastPhase: string;
+    phases: ProbePhase[];
+  };
+  pool: {
+    connectSucceeded: boolean;
+    selectSucceeded: boolean;
+    lastPhase: string;
+    phases: ProbePhase[];
+  } | null;
+};
+
+export type PostgresProbeRunner = () => Promise<PostgresProbeOutcome>;
+
+export type PostgresProbeDependencies = {
+  resolveAuth?: (request: Request) => Promise<unknown | null>;
+  runProbe?: PostgresProbeRunner;
 };
 
 function nowMs() {
@@ -84,12 +107,7 @@ async function runPoolProbe(phases: ProbePhase[]) {
   }
 }
 
-export const handlePostgresTransportProbe = withSession(async (request: Request) => {
-  if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
-  const auth = await resolveAuthContext(request);
-  if (!auth) return Response.json({ error: "Unauthorized" }, { status: 401 });
-
-  const requestId = globalThis.crypto?.randomUUID?.() || `postgres-probe-${Date.now()}`;
+async function runDefaultProbe(): Promise<PostgresProbeOutcome> {
   const clientPhases: ProbePhase[] = [];
   const poolPhases: ProbePhase[] = [];
   let clientResult = { connectSucceeded: false, selectSucceeded: false };
@@ -112,13 +130,10 @@ export const handlePostgresTransportProbe = withSession(async (request: Request)
     }
   }
 
-  const lastClientPhase = clientPhases.at(-1) ?? null;
-  return Response.json({
-    requestId,
+  return {
     client: {
-      connectSucceeded: clientResult.connectSucceeded,
-      selectSucceeded: clientResult.selectSucceeded,
-      lastPhase: lastClientPhase?.phase ?? "not_started",
+      ...clientResult,
+      lastPhase: clientPhases.at(-1)?.phase ?? "not_started",
       phases: clientPhases,
     },
     pool: poolResult ? {
@@ -126,5 +141,36 @@ export const handlePostgresTransportProbe = withSession(async (request: Request)
       lastPhase: poolPhases.at(-1)?.phase ?? "not_started",
       phases: poolPhases,
     } : null,
-  }, { headers: { "Cache-Control": "no-store" } });
-});
+  };
+}
+
+// Injectable so tests can prove the gate ordering without a database: the
+// runner is only reachable after both the token gate and the session check.
+export function createPostgresTransportProbeHandler(dependencies: PostgresProbeDependencies = {}) {
+  const resolveAuth = dependencies.resolveAuth ?? resolveAuthContext;
+  const runProbe = dependencies.runProbe ?? runDefaultProbe;
+
+  return withSession(async (request: Request) => {
+    if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
+
+    const gate = evaluateDiagnosticToken(
+      request.headers.get(DIAGNOSTIC_TOKEN_HEADER),
+      process.env.SIGNAL_MAP_DIAGNOSTIC_TOKEN,
+    );
+    if (gate === "disabled") {
+      // Default-off: never advertise the endpoint when no operator token exists.
+      return Response.json({ error: "Not found" }, { status: 404 });
+    }
+    if (gate === "unauthorized") {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const auth = await resolveAuth(request);
+    if (!auth) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+    const requestId = globalThis.crypto?.randomUUID?.() || `postgres-probe-${Date.now()}`;
+    return Response.json({ requestId, ...await runProbe() }, { headers: { "Cache-Control": "no-store" } });
+  });
+}
+
+export const handlePostgresTransportProbe = createPostgresTransportProbeHandler();

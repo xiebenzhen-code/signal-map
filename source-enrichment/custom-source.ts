@@ -5,7 +5,7 @@ import { isIP } from "node:net";
 import { isPublicSourceAddress, publicSourceUrl, type CustomSourceCheck } from "../lib/custom-sources.ts";
 import { getSourceDoHResolver } from "./doh-resolver.ts";
 
-type Address = { address: string; family: number };
+export type Address = { address: string; family: number };
 type PageResponse = { status: number; headers: Record<string, string | undefined>; body: string };
 export type CustomSourceResult = CustomSourceCheck & { content?: string };
 type RelayAuth = {
@@ -48,7 +48,7 @@ const FEED_READ_BUDGET_MS = 12000;
 const FEED_MIN_USEFUL_MS = 2000;
 
 /** Pin the validated address at socket creation, retaining the original Host/SNI. */
-function pinnedRequest(url: URL, address: Address, signal: AbortSignal, feed = false, extraHeaders?: Record<string, string>): Promise<PageResponse> {
+export function pinnedRequest(url: URL, address: Address, signal: AbortSignal, feed = false, extraHeaders?: Record<string, string>, truncateAt?: number): Promise<PageResponse> {
   return new Promise((resolve, reject) => {
     const request = (url.protocol === "https:" ? httpsRequest : httpRequest)(url, {
       signal, agent: false,
@@ -65,6 +65,16 @@ function pinnedRequest(url: URL, address: Address, signal: AbortSignal, feed = f
       let size = 0;
       const chunks: Buffer[] = [];
       response.on("data", (chunk: Buffer) => {
+        if (truncateAt !== undefined) {
+          const remaining = truncateAt - size;
+          chunks.push(chunk.subarray(0, remaining));
+          size += Math.min(chunk.length, remaining);
+          if (size >= truncateAt) {
+            resolve({ status, headers, body: Buffer.concat(chunks).toString("utf8") });
+            response.destroy();
+          }
+          return;
+        }
         size += chunk.length;
         if (size > (feed ? 2 * 1024 * 1024 : MAX_BYTES)) { response.destroy(new Error("PAGE_TOO_LARGE")); return; }
         chunks.push(chunk);

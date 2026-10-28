@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { isSafeDetailUrl } from "../source-enrichment/safe-url.ts";
-import { shouldEnrichDetail } from "../source-enrichment/detail-enricher.ts";
-import { runResearchPipeline } from "../research/research-pipeline.ts";
+import { shouldEnrichDetail } from "./fixtures/detail-read.ts";
+import { runResearchPipeline } from "./fixtures/detail-read.ts";
 import type { ResearchInput } from "../research/types.ts";
 
 const LONG_QUERY =

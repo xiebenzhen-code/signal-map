@@ -41,6 +41,24 @@ function removeTemplateLines(value: string) {
   return normalized
     .split(/\n|(?<=[。.!?])\s+/)
     .map((line) => line.replace(/\s+/g, " ").trim())
+    .map((line) => {
+      // RSS can flatten navigation and prose onto one line. Strip only the
+      // menu prefix, preserving a following article sentence and punctuation.
+      const labels = [...line.matchAll(/媒体品牌|企业号|企业服务|核心服务|城市之窗|政府服务|创投发布|投资人认证|投资人服务|项目推荐|登录|注册|隐私政策|联系我们/g)];
+      if (new Set(labels.map(match => match[0])).size < 4) return line;
+      const prefix = line.slice(0, labels[0].index);
+      if (/发布|新增|更新|推出|上线|支持|集成/.test(prefix)) return line;
+      let end = 0;
+      for (let index = 1; index < labels.length; index++) {
+        const previous = labels[index - 1];
+        const gap = line.slice(previous.index! + previous[0].length, labels[index].index);
+        if (/发布|新增|更新|推出|上线|支持|集成/.test(gap)) break;
+        end = index;
+      }
+      if (new Set(labels.slice(0, end + 1).map(match => match[0])).size < 4) return line;
+      const last = labels[end];
+      return line.slice(last.index! + last[0].length).replace(/^[\s|，。！？；:：.!?;·/]+/, "");
+    })
     .filter(Boolean)
     .filter((line) => {
       const lower = line.toLowerCase();

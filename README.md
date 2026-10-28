@@ -1,107 +1,146 @@
-<!-- README_SYNC: source=eb6666d5a46c1cf42647840a7601c211e2c7e12e; updated=2026-10-22 -->
+<!-- README_SYNC: source=develop@e7d1b2b; updated=2026-10-28 -->
 <p align="center">简体中文 · <a href="./README_EN.md">English</a></p>
 
 # Signal Map
 
-面向独立开发者和创作者的信息筛选工具：围绕具体问题读取公开来源，按日期、相关性和证据筛选，并说明没有得出结论的原因。
+面向独立开发者和创作者的信息过滤与辅助判断工具：围绕一个具体问题读取公开材料，按日期和相关性筛选，保留出处与筛选理由；拿不准的放进「可能相关」，没有结论时说明原因。
 
-[Star 收藏](https://github.com/xiebenzhen-code/signal-map/stargazers) · [试用入口](https://signal.benzhenlab.com/) · [问题反馈](https://github.com/xiebenzhen-code/signal-map/issues)
+[试用入口](https://signal.benzhenlab.com/) · [问题反馈](https://github.com/xiebenzhen-code/signal-map/issues)
 
 ![Stage](https://img.shields.io/badge/status-limited_trial-2457ff)
 ![Language](https://img.shields.io/badge/language-TypeScript-3178c6)
 ![Runtime](https://img.shields.io/badge/local_checks-Node.js_24%2B-43853d)
 ![Repository](https://img.shields.io/badge/repository-public-2ea44f)
 
-**源码已公开（2026-10-22）。** 仓库现为公开状态，可克隆查阅；产品仍为受限试用，不承诺可用性。项目尚无 `LICENSE` 文件，未声明开源授权。
+[约 50 秒真实操作视频](docs/portfolio/signal-map-demo.mp4) · [录制方法与结果](docs/portfolio/DEMO.md)
 
-[约50秒真实操作视频](docs/portfolio/signal-map-demo.mp4) · [录制方法与结果](docs/portfolio/DEMO.md)
+> 演示录制于 2026-10-21，对应 Sites53 + API019。它展示的是当时的行为，不能用来证明之后版本的效果。
 
 ![Signal Map 系统框架与验收边界](docs/portfolio/signal-map-architecture.png)
 
-## 为什么做这个工具
+**状态：受限试用，准备冻结一个求职展示版本。** 仓库保持公开。本稿对应 `develop` 分支；线上是否包含其中的修改，以发布记录为准，GitHub 上的最新代码不等于已经在线上运行。
 
-我做 Signal Map，最初是因为信息太多，却很难分辨哪些可信、哪些值得花时间。不断刷到新消息，并不意味着更容易判断，反而可能增加信息焦虑。
+## 为什么做
 
-因此，我想尝试把公开信息变成一个可以筛选、核对和回看的过程：减少重复与无关内容，保留原始出处和时间，帮助自己决定什么值得继续了解、什么还不能下结论。减少信息焦虑、辅助判断是项目目标，目前没有用户研究证明这些效果已经实现；工具也不能自动保证信息真实。
+信息越来越多，判断却没有变得更容易。同一件事反复传播，新闻、推测和营销混在一起，看得越多，有时越难决定该相信什么、该关注什么。
 
-自媒体选题是我希望继续探索的用途：从公开动态发现线索，核对出处、时间和适用范围，再决定是否值得写。当前已有的读取、筛选和来源记录可以提供部分基础，但尚未完成选题价值、传播表现或持续主动筛选的验收。
+Signal Map 尝试让这个过程可以被检查：先明确问题，再取得材料，按时间和相关性筛选，保留原文供人核对。目标是减少无效信息的摄入、辅助判断；目前没有用户研究证明这些效果已经实现。
 
-Signal Map 将这条工作流做成有边界的工具：
+## 亮点
 
-- **围绕问题检索**：把主体、时间窗口和排除条件转成计划，按预算及截止时间执行。
-- **从材料走向证据**：读取官方更新、RSS/Atom和已配置渠道，再做日期、任务相关性、去重与事件聚合；发布时间不与抓取时间混用。
-- **记录实际执行**：来源已搜索、未搜索和失败分别记录；多轮历史不会被末轮“未搜索”覆盖，读取失败保留安全的细分错误码。
-- **允许证据不足**：没有足够材料时可返回零结果，但零结果不代表没有变化。相关性误拒仍是已知问题。
+- **围绕问题检索**：把主体、时间窗口和排除条件转成计划，在预算和截止时间内执行。
+- **安全读取**：公网地址预检、解析后固定连接地址、逐跳校验跳转、TLS 校验；中继凭据只走同源请求头，不进入 URL。
+- **把「不确定」当作一等公民**：不确定的材料进入默认折叠、标注「未确认」的「可能相关」，不计入正式结果；零展示时给出六类原因之一。
+- **如实记录执行**：来源已搜索、未搜索、失败分别记录；读取失败保留安全的细分错误码；发布时间与抓取时间不混用。
+- **评测正在建立**：人工金标尚未完成，所以误零率和展示精度暂不公布。
 
-适合关注特定产品、创作工具和公开技术动态；不承诺全网覆盖、每次必有答案、持续自主监控或成熟公共 SDK。
+项目是有预算和截止时间的研究工作流，不是自主运行的 agent。日期、去重、过滤和安全检查由确定性代码承担。
 
-## 信源与行业范围
-
-[来源目录](source-registry/feed-catalog.ts)登记 **17路订阅源，其中11路为官方发布方**。每次按实体或主题最多选3路订阅，另有既有检索路径。登记、成功读取和事实可信是不同状态。
-
-| 方向 | 已登记来源 | 边界 |
-|---|---|---|
-| 影视与创作软件 | Kdenlive、OBS、Krita | 软件发布和工具变化，不覆盖整个影视产业 |
-| 电商与独立站 | Shopify、WooCommerce | 开发者更新不自动等于商家政策或适用性结论 |
-| 编程与开源 | Node.js、GitHub、Mozilla、Chrome | 各渠道可达性和验证程度不同 |
-| AI 产品 | OpenAI | 不构成完整 AI 行业覆盖 |
-| 中文资讯与社区 | IT之家、少数派、机核、阮一峰、InfoQ、开源中国 | 文章仍需核对原始来源、日期和任务相关性 |
-| 航天与天文 | NASA | 读取成功不代表每条材料都与问题相关 |
-
-开发记录中，IT之家、少数派、NASA、Shopify、Krita、OBS、Kdenlive共7路具有历史云端读取与解析成功证据，不代表持续稳定。最近记录的 Chrome/FeedBurner 超时、WooCommerce 地址预检拒绝尚无恢复证据。AI＋教育等方向尚缺专用来源和行业验收。
-
-## 实现与验收状态
-
-Web：React / vinext；API：Node.js；认证：Supabase Auth；账户持久化：PostgreSQL。
-
-```text
-问题、时间窗口与排除条件
-  → 检索规划 / 预算 / 截止时间
-  → 来源读取 / 安全检查 / RSS 或 Atom 解析
-  → 日期与任务相关性 / 去重 / 证据聚合
-  → 今日、信息与资料库
-```
-
-主要接口包括 `POST /api/signals`、`POST /api/research/plan`、`/api/research/stream`、`/api/control/knowledge`、`POST /api/sources/check`。这些是产品内部接口，不是稳定公共 SDK；`sources/check` 当前是网页模式，不能代替 Feed 模式验收。
+## 当前能力与证据
 
 | 能力 | 已有证据 | 尚未完成 |
 |---|---|---|
-| 来源读取与过滤 | 有限真实读取、确定性测试和执行日志 | 全行业覆盖、持续可达性及答案质量 |
-| 账户记录持久化 | 测试账号接口保存、退出重登读回、浏览器显示新记录 | 更多账号、设备和范围验收 |
-| 同浏览器账号切换 | `130009a` 本机草稿隔离修补及本地反例 | 新版本部署后 A→B→A 页面复验 |
-| 登录后体验 | 已登录 `/control` 直回首页的代码与测试 | 新版本正式站点复验 |
-| 长期记忆影响研究 | 存储和选择接线存在，自动参与默认关闭 | 跨次记忆作用的完整闭环 |
-| 主动跟踪与提醒 | 有调度和通知相关实现 | 不作为当前已验收生产承诺 |
+| 来源读取与过滤 | 有限的真实读取、确定性测试、执行日志 | 全行业覆盖、持续可达性、答案质量 |
+| 不确定材料分流 | 展示门单测：D06 冻结 Chrome RSS 正文得到 25 条 UNCERTAIN，正式结果 0、可能相关 25；界面组件静态渲染快照（[n4-closeout](docs/verification/n4-closeout-20261026.md)） | 线上页面复验；人工标注验证折叠是否漏掉必看 |
+| 零展示原因与覆盖说明 | 每个来源的读取说明与六类零展示原因，有单测与渲染快照 | 线上页面复验 |
+| 诊断入口令牌门 | 未配置令牌返回 404，令牌或会话缺失返回 401；先红后绿的测试（`tests/backend-server.test.ts`） | 尚未部署，线上仍是旧行为 |
+| 账户记录持久化 | 测试账号保存、退出重登读回、浏览器显示新记录 | 更多账号和设备的验收 |
+| 同浏览器账号切换 | `130009a` 的本机草稿隔离修补及本地反例（[记录](docs/verification/local-account-isolation-repair-20261021.md)） | 新版本部署后 A→B→A 页面复验 |
+| 长期记忆影响研究 | 账户存储与记忆选择接线存在，自动参与默认关闭 | 跨次记忆是否改善研究质量；与旧结论矛盾的新证据目前只保存为证据，不更新知识层 |
+| 主动跟踪与提醒 | 有调度和通知相关实现 | 不作为当前已验收的生产承诺 |
 
-截至本次文档核对，最后记录的正式版本为 **Sites53 + API019**；包含 `130009a` 和测试时钟修正 `eb6666d` 的站点更新仍记录为阻断。**GitHub 最新代码不等于已经在线上运行。**
+## 来源与适用范围
+
+[来源目录](source-registry/feed-catalog.ts)登记 **18 路静态订阅源，外加 1 路按配置启用的 RSSHub 中继，共 19 路，其中 10 路为官方发布方**（数量由脚本从目录统计）。登记、成功读取、事实可信是三种不同状态，目录数量不等于持续可用来源数。每次按实体或主题选择全部匹配的订阅源，不再限制为 3 路；仍保留排除条件、来源类型限制和中继配置门控。
+
+| 使用方向 | 来源示例 | 当前边界 |
+|---|---|---|
+| 国内 AI 产品与产业动态 | 极客公园、36氪快讯 | 近期试用重点；有单次真实读取与结果记录，未证明长期稳定 |
+| 影视与创作软件 | Kdenlive、OBS、Krita | 关注工具发布，不能代表整个影视行业 |
+| 电商与开发工具 | Shopify、WooCommerce、Node.js、GitHub、Chrome | 各渠道可达性不同，开发公告不能直接当作业务适用结论 |
+| 科技、游戏与航天资讯 | IT之家、少数派、InfoQ、开源中国、机核、NASA 等 | 已登记，不能据此宣称各行业均有效 |
+
+极客公园走官方 RSS，媒体报道仍需核对证据。36氪快讯经独立 RSSHub 服务和 HTTPS 鉴权网关接入，目前只取最新 5 条，**不代表过去 7 天的全部新闻**；当前中继的可用性待复验。历史云端读取记录见 [other-feeds-cloud-probe-20261021.md](docs/verification/other-feeds-cloud-probe-20261021.md)。新增行业需要合适的来源和单独验收。
+
+## 工程结构
+
+```text
+用户问题、时间窗口与排除条件
+  → 规划与预算
+  → 来源读取 / 安全检查 / RSS 与 Atom 解析
+  → 日期、相关性、去重与信号聚合
+  → 正式结果 / 可能相关 / 待判断材料
+  → 原文、来源读取状态与筛选说明
+```
+
+Web：React / vinext；API：独立 Node.js 进程；认证：Supabase Auth；账户数据：PostgreSQL。主要接口：`POST /api/signals`、`POST /api/research/plan`、`/api/research/stream`、`/api/control/knowledge`、`POST /api/sources/check`，它们是产品内部接口，不是稳定的公共 SDK。
+
+**模型使用**：规划与综合是两处可选的模型调用，具体模型通过环境变量配置（见 [.env.example](.env.example)）；规划超时会回退到确定性计划（`agent/runner.ts`）。其余检索、过滤、去重、日期与安全检查不依赖模型。按维护者截至 2026-10-28 提供的线上配置状态，当前未配置模型密钥，规划与综合走确定性路径（本次未重新查询生产配置）。
+
+**测试隔离**：测试通过注入的请求与地址解析函数使用冻结快照，不访问真实网络，也不依赖当前时间。
+
+## 验证与证据
+
+在 `develop` 提交 `e7d1b2b` 的文件内容上，Node.js 24.21.0 下 `quality`、`build`、`api:build` 退出码均为 0：**1035 项测试，1029 通过、0 失败、6 项因数据库测试环境缺失跳过**。证据见 [develop 门禁记录](docs/verification/develop-e7d1b2b-gates-20261028.md)。lint 无错误，仍有既有警告。跳过项不计通过；这些数字不是覆盖率，也不是线上成功率。
+
+专项 D06 使用冻结的 Chrome RSS 正文，其余评分受控，用来隔离展示门。它证明展示契约，不是生产端到端研究，也不是过滤质量评测。
+
+历史国内 AI 研究曾取得极客公园 30 条、36氪 5 条，去重后 34 条，返回 2 条信号。单次记录不能证明持续稳定或答案正确。
 
 ### 演示没有掩盖的失败
 
-2026-10-21，正式站点的 Kdenlive 维护更新问题检索20条、聚合18个信号、最终展示0条。读取确实执行了，但没有回答原题，答案质量未通过。视频保留真实结果，采用实际浏览器逐帧采集、等待段2倍速、无音轨，不冒充原生高帧率连续录屏。
+2026-10-21，正式站点的 Kdenlive 维护更新问题检索 20 条、聚合 18 个信号、最终展示 0 条。读取确实执行了，但没有回答原题，答案质量未通过。[历史演示及边界](https://github.com/xiebenzhen-code/signal-map/blob/5142a6705b7cdb5f3b133d6a9567da9256019182/docs/portfolio/DEMO.md)保留了这个结果，不把它当作当前全部能力通过的证明。
+
+**版本口径**：仓库内可核验的最近一次正式发布记录为 Sites53 + API019（[api-repair-release-20261021.md](docs/verification/api-repair-release-20261021.md)）。API 027 按 [api027-release-manual-20261026.md](docs/verification/api027-release-manual-20261026.md) 发布，其线上验收记录尚未纳入仓库，因此本文不引用 027 的演示或数字。
+
+## 已知局限
+
+以下集中说明当前能力边界，避免把「已实现」误读为「已验证」。
+
+- **效果未经验证**：减少信息焦虑、辅助判断是目标，没有用户研究支持；工具不能自动保证信息真实。
+- **没有人工金标**：误零率、展示精度、漏检率暂不可计算。折叠的「可能相关」是否漏掉必看，需要标注后才能回答。
+- **相关性误拒仍是已知问题**：零结果只表示本轮没有可展示的证据，不代表没有变化。
+- **跨语言匹配较弱**：中文约束遇到英文正文时容易被判为不确定。
+- **覆盖有限**：不承诺全网覆盖、每次必有答案、持续自主监控或成熟的公共 SDK。
+- **部分渠道可达性未恢复**：Chrome / FeedBurner 超时、WooCommerce 地址预检拒绝尚无恢复证据；36氪中继的当前可用性待复验。
+- **记忆的局限**：「看到记录」不等于「影响研究」；与旧结论矛盾的新证据目前只写入证据层，不更新知识层。
+- **账号隔离线上复验未完成**：本机多账号草稿隔离已修补，正式站点复验仍待执行；共享设备勿保存敏感草稿。
+- **部分修改尚未上线**：不确定材料折叠、零展示原因、诊断入口令牌门在代码与测试中已实现，部署与页面复验待完成。
+- **选题用途和社媒采集留待后续**，不作为当前成果。
+- **仓库尚无 `LICENSE`**：未声明开源或商业使用授权；第三方依赖与字体各有其许可。
 
 ## 本地运行
 
-建议 **Node.js 24+**。包声明最低22.13.0，但完整测试参数需要更高版本，记录中的全量门禁使用 Node.js 24。以下为 PowerShell 命令，克隆需要仓库访问权限。
+建议使用 Node.js 24+。包声明最低 22.13.0，但完整测试使用 Node.js 24；生产 Dockerfile 当前仍是 Node.js 22，尚未升级。
+
+PowerShell：
 
 ```powershell
-git clone --branch fix/stability-closeout-20261019 https://github.com/xiebenzhen-code/signal-map.git
+git clone https://github.com/xiebenzhen-code/signal-map.git
 Set-Location signal-map
 npm ci
 if (!(Test-Path .env.local)) { Copy-Item .env.example .env.local }
 ```
 
-先编辑 [.env.example](.env.example) 的本机副本。认证需要 `NEXT_PUBLIC_SUPABASE_URL` 和 `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`；账户持久化需要自己的 `DATABASE_URL` 及对应数据库表。模型和可选渠道按需配置；数据库迁移入口 `npm run db:migrate` 只对自己专用的开发库执行。
+bash：
 
-真实研究可能访问外部服务并产生模型或云费用。不要用生产数据库测试，不提交 `.env.local`、密码、Cookie或密钥。打开本地页面不代表认证、数据库或外部信源已经可用。
+```bash
+git clone https://github.com/xiebenzhen-code/signal-map.git
+cd signal-map
+npm ci
+cp -n .env.example .env.local
+```
 
-第一个终端启动 API，默认端口8080：
+先编辑 `.env.local`：认证需要 `NEXT_PUBLIC_SUPABASE_URL` 和 `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`；账户持久化需要你自己的 `DATABASE_URL` 和对应数据库表；模型和可选渠道按需配置。`npm run db:migrate` 只对自己专用的开发库执行。真实研究可能访问外部服务并产生模型或云费用；不要用生产数据库测试，不要提交 `.env.local`、密码、Cookie 或密钥。
 
-```powershell
+第一个终端启动 API（默认端口 8080）：
+
+```bash
 npm run api:build
 node --env-file=.env.local dist-api/server.mjs
 ```
 
-第二个终端启动 Web。原生 Node 模式无需托管平台身份：
+第二个终端启动 Web：
 
 ```powershell
 $env:SIGNAL_MAP_FRONTEND_RUNTIME = "node"
@@ -109,31 +148,29 @@ $env:API_UPSTREAM_URL = "http://127.0.0.1:8080"
 npm run dev -- --hostname 127.0.0.1 --port 3000
 ```
 
-打开[本地页面](http://127.0.0.1:3000)。前端代理到本机 API，账户服务仍依赖正确配置。生产代理与信源读取保留地址和 Origin 检查，不应为联网问题关闭保护。
+```bash
+SIGNAL_MAP_FRONTEND_RUNTIME=node API_UPSTREAM_URL=http://127.0.0.1:8080 \
+  npm run dev -- --hostname 127.0.0.1 --port 3000
+```
 
-## 测试与工程记录
+访问 http://127.0.0.1:3000 。页面能打开不代表认证、数据库和外部来源已经配置成功。生产代理与来源读取保留地址和 Origin 检查，不应为了联网问题关闭保护。
 
-```powershell
+## 测试
+
+```bash
 npm run quality
 npm run build
 npm run api:build
 ```
 
-最近已记录门禁对应 `eb6666d`：**912项，906通过、0失败、6项因数据库测试环境缺失跳过**，quality/build退出0；包含 typecheck、lint、knip和依赖检查，lint仍有28个既有警告。这是历史执行记录，不是本次 README 编辑重新运行的结果；测试数量不是覆盖率或真实用户研究次数。
+条件跳过的 6 项不计作通过；测试数量不是覆盖率，也不是真实用户研究次数。仓库有手动触发的[端到端工作流](.github/workflows/signal-map-agent-loop-e2e.yml)，需要专用测试环境，不以文件存在代替 CI 实际通过。
 
-仓库有手动触发的[端到端工作流](.github/workflows/signal-map-agent-loop-e2e.yml)，需要专用测试环境，不以文件存在代替 CI 实际通过。
+## 维护、数据与反馈
 
-- [README 事实核对记录](docs/verification/readme-evidence-20261022.md)
-- [可编辑架构 SVG](docs/portfolio/signal-map-architecture.svg)：图中状态反映当时记录。
-- [API019 发布与诊断](docs/verification/api-repair-release-20261021.md)
-- [OBS / Kdenlive 云端读取](docs/verification/other-feeds-cloud-probe-20261021.md)
-- [正式域名与演示交付](docs/verification/formal-portfolio-delivery-20261021.md)
-- [本机账号隔离修补记录](docs/verification/local-account-isolation-repair-20261021.md)
+计划在受控发布和一次页面复验后冻结展示基线，之后在开发分支上边求职边维护：记录问题、验证改进，再决定是否更新冻结版本，不承诺更新频率。下一步重点是人工评测、来源持续可达性、相关性误拒和记忆对判断的实际帮助。
 
-## 数据、许可与反馈
+服务端账户记录与本机草稿是两条路径。最新源码为每个账号绑定独立的 IndexedDB 存储，并保留匿名旧库；无归属的历史数据不自动分配给登录账号。
 
-服务端账户记录与本机草稿是两条路径。最新源码为每个账号绑定独立 IndexedDB 存储，并保留匿名旧库；无归属历史数据不自动分配给登录账号。该修补线上复验尚未完成，共享设备勿保存敏感草稿。页面看到了知识，不等于知识已经影响研究。
+更多记录：[README 事实核对](docs/verification/readme-evidence-20261022.md) · [可编辑架构 SVG](docs/portfolio/signal-map-architecture.svg) · [OBS / Kdenlive 云端读取](docs/verification/other-feeds-cloud-probe-20261021.md) · [正式域名与演示交付](docs/verification/formal-portfolio-delivery-20261021.md)
 
-仓库尚无项目级 `LICENSE`，不在这里声明 MIT、开源或商业使用许可。第三方依赖和字体有各自许可。
-
-请通过[Issue](https://github.com/xiebenzhen-code/signal-map/issues)提供脱敏请求编号、时间、版本与预期行为，不提供凭据。项目对你有参考价值时，可以[Star 收藏](https://github.com/xiebenzhen-code/signal-map/stargazers)。仓库访问范围保持不变。
+请通过 [Issue](https://github.com/xiebenzhen-code/signal-map/issues) 反馈，附上脱敏的请求编号、时间、版本和预期行为，不要提供密码、Cookie 或密钥。

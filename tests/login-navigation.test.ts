@@ -12,21 +12,18 @@ const javascript = ts.transpileModule(handler, { compilerOptions: { target: ts.S
 async function authenticate(result: unknown, search = "", action = "login", failure?: Error) {
   const destinations: string[] = [];
   const statuses: string[] = [];
-  let dashboardLoads = 0;
-  const run = new Function("readJson", "setStatus", "setState", "setPassword", "emptyState", "loginName", "password", "load", "window", `${javascript}; return authenticate;`)(
+  const run = new Function("readJson", "setStatus", "setState", "setPassword", "emptyState", "loginName", "password", "window", `${javascript}; return authenticate;`)(
     async () => { if (failure) throw failure; return result; },
     (status: string) => statuses.push(status), () => {}, () => {}, {}, "test@example.com", "fixture",
-    async () => { dashboardLoads++; throw new Error("dashboard unavailable"); },
     { location: { search, replace: (url: string) => destinations.push(url), assign: (url: string) => destinations.push(url) } },
   );
   await run(action);
-  return { destinations, statuses, dashboardLoads };
+  return { destinations, statuses };
 }
 
-test("successful login goes home even when account dashboard is unavailable", async () => {
+test("successful login goes home", async () => {
   const result = await authenticate({ user: { id: "fixture", mode: "authenticated" } });
   assert.deepEqual(result.destinations, ["/"]);
-  assert.equal(result.dashboardLoads, 0);
 });
 
 test("successful login preserves observation mode without forwarding arbitrary URLs", async () => {

@@ -26,7 +26,7 @@ import {
 import { resolveCompanySources } from "../source-registry/resolver.ts";
 import { classifySource } from "./source-classifier.ts";
 import { describesRecentChange } from "./recent-signal.ts";
-import { buildFilteringSummary } from "./filtering-summary.ts";
+import { buildFilteringSummary, partitionByVerdictCertainty } from "./filtering-summary.ts";
 import { cleanContent, extractClaim, mapSignalPresentation } from "../content-processing/index.ts";
 import {
   assessNoveltyAttribution,
@@ -77,6 +77,9 @@ import type {
 type ProgressHandler = (progress: PipelineProgress) => void | Promise<void>;
 
 export type ResearchPipelineDebug = {
+  onDetailRead?: (result: import("../source-enrichment/types.ts").DetailEnrichmentResult) => void;
+  /** Internal-only transport dependency, never accepted by an HTTP handler. */
+  detailReadOptions?: import("../source-enrichment/detail-enricher.ts").DetailReadOptions;
   feedCache?: FeedReadCache;
   customSourceReader?: typeof readCustomSource;
   onCandidateSelectionAudit?: (audit: CandidateSelectionAudit[]) => void;
@@ -178,6 +181,7 @@ export function resolvePipelinePlan(input: ResearchInput, upstream?: RetrievalPl
       agentGeneratedQueries: cleanQueries,
       plan: {
         originalNeed: input.currentQuestions?.trim() || input.industry,
+        requestedQuestion: input.currentQuestions,
         coreKeywords: deterministicTerms([input.focusAreas, input.trackedEntities, input.currentQuestions, ...cleanQueries])
           .filter((term) => !isExcludedTerm(term)),
         topicAnchors: upstream.topicAnchors ?? derivedPlan.topicAnchors,
@@ -1255,6 +1259,8 @@ async function enrichDiscoveryCandidates(
   plan: QueryPlan,
   failures: string[],
   remainingBudgetMs = 12000,
+  detailReadOptions?: import("../source-enrichment/detail-enricher.ts").DetailReadOptions,
+  onDetailRead?: ResearchPipelineDebug["onDetailRead"],
 ) {
   const summary: DetailEnrichmentSummary = {
     detailAttempted: 0,
@@ -1314,7 +1320,8 @@ async function enrichDiscoveryCandidates(
         // to locate the real article behind a Google News wrapper URL.
         publisherUrl: candidate.publisherUrl,
       },
-    });
+    }, detailReadOptions);
+    onDetailRead?.(result);
     const existing = candidatesByUrl.get(candidate.url);
     if (!existing) continue;
     existing.detailEnrichment = {
@@ -1918,6 +1925,8 @@ export async function runResearchPipeline(
     plan,
     failures,
     enrichmentBudgetMs,
+    debug?.detailReadOptions,
+    debug?.onDetailRead,
   );
   markPhase("detail_fetch_finished", true, detailEnrichment.detailSucceeded, undefined, {
     detailAttempted: detailEnrichment.detailAttempted,
@@ -2521,6 +2530,7 @@ export async function runResearchPipeline(
     const passesGates =
       signal.reliabilityScore >= 70 &&
       signal.topicRelevance?.decision !== "TOPIC_MISMATCH" &&
+      signal.topicRelevance?.decision !== "UNCERTAIN" &&
       signal.relevanceScore >= 75 &&
       signal.noveltyScore >= 60 &&
       signal.judgementImpactScore >= 48 &&
@@ -2554,6 +2564,7 @@ export async function runResearchPipeline(
       signal.attentionDecision !== "MUST_READ" &&
       signal.actionabilityStatus !== "BACKGROUND" &&
       signal.topicRelevance?.decision !== "TOPIC_MISMATCH" &&
+      signal.topicRelevance?.decision !== "UNCERTAIN" &&
       signal.contentQuality !== "INSUFFICIENT_CONTENT" &&
       signal.eventStatus === "SIGNAL" &&
       signal.timestampStatus === "valid" &&
@@ -2573,8 +2584,10 @@ export async function runResearchPipeline(
       worthWatchingCount += 1;
     }
   }
-  const signals = allSignals
-    .filter((signal) => signal.attentionDecision !== "IGNORE" && signal.contentQuality !== "INSUFFICIENT_CONTENT");
+  // UNCERTAIN remains in allSignals for possibleRelated and trace summaries,
+  // but cannot enter formal results through LIBRARY_ONLY either.
+  const signals = partitionByVerdictCertainty(allSignals
+    .filter((signal) => signal.attentionDecision !== "IGNORE" && signal.contentQuality !== "INSUFFICIENT_CONTENT")).confirmed;
   markPhase("evidence_finished", true, allSignals.length);
   detailEnrichment.stillInsufficient = allSignals.reduce(
     (total, signal) =>
