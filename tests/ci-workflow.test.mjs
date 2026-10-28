@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 
 test('CI checks master/develop pushes and PRs with Node 24 and no secrets', () => {
@@ -11,4 +11,8 @@ test('CI checks master/develop pushes and PRs with Node 24 and no secrets', () =
   assert.doesNotMatch(yaml, /secrets\.|pull_request_target|continue-on-error/);
   const commands = [...yaml.matchAll(/- run: (.+)/g)].map(match => match[1]);
   assert.deepEqual(commands, ['npm ci', 'npm run quality', 'npm run build', 'npm run api:build']);
+});
+
+test('obsolete manual API image build workflow is retired', () => {
+  assert.equal(existsSync(new URL('../.github/workflows/build-api-image.yml', import.meta.url)), false);
 });
