@@ -10,7 +10,7 @@ import {
   resolveFreshness,
   validateTimestamp,
 } from "../information/freshness.ts";
-import { planQuery } from "./query-planner.ts";
+import { normalizeFreshnessWindow, planQuery } from "./query-planner.ts";
 import {
   selectBoundedCandidates,
   type CandidateEligibilityAudit,
@@ -144,15 +144,7 @@ function validRetrievalQueries(plan?: RetrievalPlan | LegacySourceSelection) {
 }
 
 export function normalizeRetrievalFreshness(value?: string): QueryPlan["requestedFreshnessWindow"] {
-  const raw = value?.trim().toLowerCase() || "7d";
-  if (/90d|90\s*(?:天|days?)|3\s*个月/.test(raw)) return "90d";
-  // Order matters: the 30d/month window must be tested before the single-digit
-  // "3" branch, otherwise "30d" is truncated to 3d and a one-month question
-  // silently searches only the last three days.
-  if (raw.includes("30") || raw.includes("month") || raw.includes("月")) return "30d";
-  if (raw.includes("24") || raw.includes("day") || raw.includes("today") || raw.includes("小时")) return "24h";
-  if (raw.includes("3")) return "3d";
-  return "7d";
+  return normalizeFreshnessWindow(value ?? "7d").appliedWindow;
 }
 
 export function resolvePipelinePlan(input: ResearchInput, upstream?: RetrievalPlan | LegacySourceSelection): PipelinePlanResolution {
@@ -174,7 +166,8 @@ export function resolvePipelinePlan(input: ResearchInput, upstream?: RetrievalPl
     const entities = resolvedEntities.map((entity) => entity.canonicalEntity).filter(Boolean)
       .filter((entity) => !isExcludedTerm(entity));
     const aliasesConsidered = [...new Set(resolvedEntities.flatMap((entity) => entity.aliasesConsidered ?? []))];
-    const requestedFreshnessWindow = normalizeRetrievalFreshness(upstream.freshnessWindow ?? input.freshnessWindow);
+    const freshnessResolution = normalizeFreshnessWindow(upstream.freshnessWindow ?? input.freshnessWindow);
+    const requestedFreshnessWindow = freshnessResolution.appliedWindow;
     return {
       fallbackUsed: false,
       retrievalPlanSource: "upstream_agent_plan",
@@ -196,6 +189,7 @@ export function resolvePipelinePlan(input: ResearchInput, upstream?: RetrievalPl
         searchCombinations: cleanQueries,
         retrievalWindows: upstream.retrievalWindows ?? [requestedFreshnessWindow],
         requestedFreshnessWindow,
+        freshnessResolution,
         selectedSourceType: upstream.selectedSourceType,
         fallbackSourceTypes: upstream.fallbackSourceTypes,
         allowedProviderIds: upstream.allowedProviderIds,
@@ -1427,6 +1421,8 @@ export async function runResearchPipeline(
 
   const planResolution = resolvePipelinePlan(input, retrievalPlanOrSourceSelection);
   const plan = planResolution.plan;
+  // Retrieval and eligibility use the same disclosed canonical window.
+  input = { ...input, freshnessWindow: plan.requestedFreshnessWindow };
   const windowDays = freshnessDays(plan.requestedFreshnessWindow);
   const allowedProviderIds = plan.allowedProviderIds?.length
     ? plan.allowedProviderIds
@@ -2698,6 +2694,9 @@ export async function runResearchPipeline(
     displayedSignals: signals,
     detailEnrichment,
   });
+  if (plan.freshnessResolution?.notice) {
+    filteringSummary.summaryText += ` ${plan.freshnessResolution.notice}`;
+  }
   const evidenceRecords = uniqueEvidenceRecords(
     allSignals.flatMap((signal) => recordsFromSignal(signal).evidence),
   );

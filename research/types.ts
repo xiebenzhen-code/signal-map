@@ -97,6 +97,14 @@ export type Claim = {
   independentEvidenceCount: number;
 };
 
+export type FreshnessResolution = {
+  input: string;
+  status: "EXACT" | "MAPPED" | "UNRECOGNIZED";
+  appliedWindow: "24h" | "3d" | "7d" | "30d" | "90d";
+  requestedHours?: number;
+  notice?: string;
+};
+
 export type QueryPlan = {
   originalNeed: string;
   /** User's question alone, without inferred industry or memory context. */
@@ -114,6 +122,7 @@ export type QueryPlan = {
   searchCombinations: string[];
   retrievalWindows: Array<"24h" | "3d" | "7d" | "30d" | "90d">;
   requestedFreshnessWindow: "24h" | "3d" | "7d" | "30d" | "90d";
+  freshnessResolution?: FreshnessResolution;
   selectedSourceType?: string;
   fallbackSourceTypes?: string[];
   allowedProviderIds?: string[];

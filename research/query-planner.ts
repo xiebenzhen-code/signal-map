@@ -408,12 +408,35 @@ const changeKeywords = [
   "this week",
 ];
 
-function normalizeFreshnessWindow(value: string): QueryPlan["requestedFreshnessWindow"] {
-  if (/90d|90\s*(?:天|days?)|3\s*个月/i.test(value)) return "90d";
-  if (/24h|1d|24\s*小时/i.test(value)) return "24h";
-  if (/3d|3\s*天/i.test(value)) return "3d";
-  if (/30d|30\s*天|1\s*月/i.test(value)) return "30d";
-  return "7d";
+export function normalizeFreshnessWindow(value: string): import("./types.ts").FreshnessResolution {
+  const raw = value.trim().toLowerCase();
+  const text = raw.replace(/^(?:过去|最近|近|past\s+|last\s+)\s*/i, "");
+  const match = /^(\d+(?:\.\d+)?|[一二两三四五六七八九十]+)\s*(h|hours?|小时|d|days?|天|w|weeks?|周|星期|months?|个月|月)$/i.exec(text);
+  const digits: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+  const chineseNumber = (token: string): number => {
+    if (digits[token]) return digits[token];
+    const tens = /^([一二三四五六七八九]?)十([一二三四五六七八九]?)$/.exec(token);
+    return tens ? (tens[1] ? digits[tens[1]] : 1) * 10 + (tens[2] ? digits[tens[2]] : 0) : NaN;
+  };
+  const amount = match ? (/^\d/.test(match[1]) ? Number(match[1]) : chineseNumber(match[1])) : NaN;
+  const unit = match?.[2] ?? "";
+  const hours = /^(?:h|hours?|小时)$/.test(unit) ? 1
+    : /^(?:w|weeks?|周|星期)$/.test(unit) ? 168
+    : /^(?:months?|个月|月)$/.test(unit) ? 720 : 24;
+  const requestedHours = amount * hours;
+  const tiers = [[24, "24h"], [72, "3d"], [168, "7d"], [720, "30d"], [2160, "90d"]] as const;
+  const tier = Number.isFinite(requestedHours) && requestedHours > 0
+    ? tiers.find(([limit]) => requestedHours <= limit) : undefined;
+  if (!tier) return {
+    input: value, status: "UNRECOGNIZED", appliedWindow: "7d",
+    notice: `未识别时间窗口“${value}”（仅支持至90天）；实际使用 7d。`,
+  };
+  const [limit, appliedWindow] = tier;
+  const status = requestedHours === limit ? "EXACT" : "MAPPED";
+  return {
+    input: value, status, appliedWindow, requestedHours,
+    ...(status === "MAPPED" ? { notice: `请求时间窗口“${value}”映射到可包含它的最小档位；实际使用 ${appliedWindow}。` } : {}),
+  };
 }
 
 function knownEntitySubjects(value: string, entities: string[]) {
@@ -569,7 +592,8 @@ export function planQuery(input: ResearchInput): QueryPlan {
     knowledgeAwareQueries,
     searchCombinations,
     retrievalWindows: ["24h", "3d", "7d", "30d"],
-    requestedFreshnessWindow: normalizeFreshnessWindow(input.freshnessWindow),
+    requestedFreshnessWindow: normalizeFreshnessWindow(input.freshnessWindow).appliedWindow,
+    freshnessResolution: normalizeFreshnessWindow(input.freshnessWindow),
     resolvedEntities,
     aliasesConsidered,
     excludedEntities,
