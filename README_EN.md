@@ -43,7 +43,7 @@ This is a bounded research workflow, not an autonomous agent. Deterministic code
 | Source reading and filtering | Limited real reads, deterministic tests, execution logs | Cross-industry coverage, sustained availability, answer quality |
 | Uncertain-material routing | Gate unit test: a frozen D06 Chrome RSS body yields 25 UNCERTAIN items, 0 formal results and 25 possibly related; static render snapshots ([n4-closeout](docs/verification/n4-closeout-20261026.md)) | Live-page verification; human labels to check whether the folded group hides must-read items |
 | Zero-result reasons and coverage notices | Per-source read notices and six zero-result reasons, with unit tests and render snapshots | Live-page verification |
-| Diagnostic-endpoint token gate | Unconfigured returns 404; missing token or session returns 401; red-then-green tests (`tests/backend-server.test.ts`) | Not deployed; production still has the old behaviour |
+| Diagnostic-endpoint token gate | Live API028 has no diagnostic token; anonymous POST to both endpoints returns 404 ([release evidence](docs/verification/api028-source-deployment-report.md)) | Live; this does not validate login or research quality |
 | Account record persistence | Test-account save, sign-out and sign-in read-back, new record visible in the browser | More accounts and devices |
 | Account switching in one browser | Local draft isolation repair `130009a` with local counter-examples ([record](docs/verification/local-account-isolation-repair-20261021.md)) | A→B→A page check after deployment |
 | Long-term memory affecting research | Account storage and memory-selection wiring exist; automatic use is off by default | Whether memory improves research; new evidence that contradicts an old conclusion is stored only as evidence and does not update the knowledge layer |
@@ -75,7 +75,7 @@ Question, time window and exclusions
 
 Web: React / vinext. API: a separate Node.js process. Authentication: Supabase Auth. Account data: PostgreSQL. Main endpoints: `POST /api/signals`, `POST /api/research/plan`, `/api/research/stream`, `/api/control/knowledge`, `POST /api/sources/check`. They are internal endpoints, not a stable public SDK.
 
-**Model usage:** planning and synthesis are two optional model calls, configured through environment variables (see [.env.example](.env.example)). A planning timeout falls back to a deterministic plan (`agent/runner.ts`). Retrieval, filtering, deduplication, date handling and safety checks do not depend on a model. According to the maintainer's production configuration report as of 2026-10-28, no model keys are currently configured, so planning and synthesis follow deterministic paths (production configuration was not queried again for this update).
+**Model usage:** planning and synthesis are two optional model calls, configured through environment variables (see [.env.example](.env.example)). A planning timeout falls back to a deterministic plan (`agent/runner.ts`). Retrieval, filtering, deduplication, date handling and safety checks do not depend on a model. API028 has no model-provider or OpenAI/DeepSeek key variables, so planning and synthesis use the default deterministic paths. This statement applies only to API028, not the Web configuration ([current baseline](docs/verification/CURRENT-BASELINE-20261028.md)).
 
 **Test isolation:** tests use frozen snapshots through injected request and address-resolution functions. They make no real network calls and do not depend on the current time.
 
@@ -91,7 +91,7 @@ A historical domestic AI run retrieved 30 GeekPark and 5 36Kr items, deduplicate
 
 On 2026-10-21, a Kdenlive maintenance-update question on the live site retrieved 20 items, aggregated 18 signals and displayed 0. The reads ran, but the original question was not answered, so answer quality did not pass. The [historical demonstration and limitations](https://github.com/xiebenzhen-code/signal-map/blob/5142a6705b7cdb5f3b133d6a9567da9256019182/docs/portfolio/DEMO.md) keep that result and do not claim that all current features are validated.
 
-**Version note:** the latest release record that can be checked in this repository is Sites53 + API019 ([api-repair-release-20261021.md](docs/verification/api-repair-release-20261021.md)). API 027 was released according to [api027-release-manual-20261026.md](docs/verification/api027-release-manual-20261026.md), but its live acceptance record is not in the repository, so this text cites no 027 demo or figures.
+**Version note:** live API028 uses source `41761804…`; the Web is Sites58 (Sites source `265afcc…`), with API027 retained for rollback. Sites58 already includes the possible-related group and zero-result reason component; the planned Web release has not completed. See the [current baseline](docs/verification/CURRENT-BASELINE-20261028.md). The historical demo keeps its original version attribution.
 
 ## Known limitations
 
@@ -105,7 +105,7 @@ This section collects the current boundaries so that "implemented" is not read a
 - **Some channels have not recovered.** Chrome / FeedBurner timeouts and WooCommerce address-check rejections have no recovery evidence; the 36Kr relay's current availability is unverified.
 - **Memory limits.** "A record is visible" does not mean "it affected the research". New evidence that contradicts an old conclusion is stored only in the evidence layer and does not update the knowledge layer.
 - **Account isolation is not re-verified online.** The local multi-account draft isolation is repaired, but the live-site check is pending. Do not store sensitive drafts on a shared device.
-- **Some changes are not live yet.** The uncertain-material group, zero-result reasons and the diagnostic token gate exist in code and tests; deployment and page checks are pending.
+- **Release and acceptance boundaries.** Sites58 includes the uncertain-material group and zero-result reason component; API028 diagnostic endpoints were verified as 404. The planned Web update remains blocked, and its live frozen-fixture display check has not run.
 - **Editorial topic selection and broad social-media collection** are future directions, not delivered capabilities.
 - **There is no project-level `LICENSE`.** No open-source or commercial licence is granted. Third-party dependencies and fonts keep their own terms.
 
