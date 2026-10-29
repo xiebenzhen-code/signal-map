@@ -1,3 +1,4 @@
+import { compareAttentionPriority } from "../research/actionability.ts";
 import type { ResearchSignal } from "../research/types.ts";
 import { freshnessWindowHours } from "./freshness.ts";
 
@@ -61,6 +62,7 @@ function sourceRank(event: ResearchSignal) {
 
 function byUsableUpdatePriority(left: ResearchSignal, right: ResearchSignal) {
   return (
+    Number(right.actionabilityStatus === "TEST_NOW") - Number(left.actionabilityStatus === "TEST_NOW") ||
     sourceRank(right) - sourceRank(left) ||
     right.freshnessScore - left.freshnessScore ||
     right.reliabilityScore - left.reliabilityScore ||
@@ -77,10 +79,10 @@ export function selectTodayPresentation(
   const mustRead = uniqueEvents(
     events.filter((event) =>
       event.attentionDecision === "MUST_READ" && event.eventStatus !== "BACKGROUND"),
-  ).slice(0, 5);
+  ).sort(compareAttentionPriority).slice(0, 5);
   const worthWatching = uniqueEvents(
     events.filter((event) => event.attentionDecision === "WORTH_WATCHING"),
-  ).slice(0, 3);
+  ).sort(compareAttentionPriority).slice(0, 3);
   const usableUpdates = uniqueEvents(events)
     .filter((event) => isUsableUpdateCandidate(event, windowDays))
     .sort(byUsableUpdatePriority)

@@ -277,6 +277,9 @@ export type ResearchSignal = {
     | "WORTH_WATCHING"
     | "LIBRARY_ONLY"
     | "IGNORE";
+  /** Independently qualified same-entity messages; not additional main cards. */
+  relatedUpdates?: ResearchSignal[];
+  attentionReasonCode?: "EARLY_SIGNAL_WITHIN_24H";
   presentation?: SignalPresentation;
   contentQuality?: ContentQuality;
   contentFailureReason?: string;

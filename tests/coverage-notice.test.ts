@@ -5,6 +5,7 @@ import test from "node:test";
 import ts from "typescript";
 import { parseRegisteredFeed } from "../research/registered-feeds.ts";
 import { assessTopicRelevance } from "../research/topic-relevance.ts";
+import { assignReadingAttention, compareAttentionPriority } from "../research/actionability.ts";
 import { describesRecentChange } from "../research/recent-signal.ts";
 import { buildFilteringSummary, partitionByVerdictCertainty, explainZeroDisplay } from "../research/filtering-summary.ts";
 import { formatCoverageNotice } from "../research/source-coverage.ts";
@@ -41,13 +42,13 @@ function signal(index: number, eventStatus: "NEW" | "SIGNAL"): ResearchSignal {
 // predicates. Existing UI tests use the same TS-transpile pattern for TSX.
 function runPresentationGates(allSignals: ResearchSignal[]): ResearchSignal[] {
   const source = readFileSync(new URL("../research/research-pipeline.ts", import.meta.url), "utf8");
-  const start = source.indexOf("  const selectedEntities = new Set<string>();");
+  const start = source.indexOf("  const windowEligibleIds = new Set(candidateSelection.selected");
   const end = source.indexOf('  markPhase("evidence_finished"', start);
   assert.ok(start > 0 && end > start);
-  const js = ts.transpileModule(`function present(allSignals: any[], trackedEntityTerms: string[]) {${source.slice(start, end)}; return signals;}`, {
+  const js = ts.transpileModule(`function present(allSignals: any[], trackedEntityTerms: string[]) {const candidateSelection = { selected: allSignals.map(signal => ({id: signal.id, freshnessEligible: true})) }; ${source.slice(start, end)}; return signals;}`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
   }).outputText;
-  const present = new Function("describesRecentChange", "partitionByVerdictCertainty", `${js}; return present;`)(describesRecentChange, partitionByVerdictCertainty);
+  const present = new Function("describesRecentChange", "partitionByVerdictCertainty", "assignReadingAttention", "compareAttentionPriority", `${js}; return present;`)(describesRecentChange, partitionByVerdictCertainty, assignReadingAttention, compareAttentionPriority);
   return present(allSignals, []);
 }
 

@@ -80,7 +80,9 @@ const start = now - freshnessWindowHours(result.queryPlan.requestedFreshnessWind
 const returnedCards = result.signals;
 const formalItems = returnedCards.filter(item => ['MUST_READ', 'WORTH_WATCHING'].includes(item.attentionDecision));
 const libraryItems = returnedCards.filter(item => item.attentionDecision === 'LIBRARY_ONLY');
-const outsideWindowItems = returnedCards.filter(item => {
+const relatedUpdates = returnedCards.flatMap(item => item.relatedUpdates ?? []);
+const mustReadItems = returnedCards.filter(item => item.attentionDecision === 'MUST_READ');
+const outsideWindowItems = [...returnedCards, ...relatedUpdates].filter(item => {
   const timestamp = Date.parse(item.publishedAt ?? '');
   return !Number.isFinite(timestamp) || timestamp < start || timestamp > now;
 });
@@ -93,6 +95,10 @@ const row = {
     .reduce((total, item) => total + (item.rawResultCount ?? item.resultCount), 0),
   retrievedCount: summary.retrievedCount, deduplicatedCount: result.overview.deduplicated,
   returnedCardCount: returnedCards.length, formalAttentionCount: formalItems.length, libraryCount: libraryItems.length, possibleRelatedCount: (summary.possibleRelated ?? []).length,
+  mustReadMainCount: mustReadItems.length, relatedUpdateCount: relatedUpdates.length,
+  worthWatchingCount: formalItems.length - mustReadItems.length,
+  compressionRatio: mustReadItems.length ? result.coverage.outcomes.filter(item => item.searched)
+    .reduce((total, item) => total + (item.rawResultCount ?? item.resultCount), 0) / mustReadItems.length : null,
   outsideWindowReturnedCardCount: outsideWindowItems.length,
   outsideWindowReturnedCardIds: outsideWindowItems.map(item => item.id),
   zeroDisplayReason: formalItems.length ? null : explainZeroDisplay({
@@ -105,6 +111,7 @@ const row = {
     const timestamp = Date.parse(entry.publishedAt ?? '');
     const destination = !trace ? 'NOT_RETAINED_BEFORE_CLUSTER'
       : (summary.possibleRelated ?? []).some(item => item.id === trace.id) ? 'POSSIBLE_RELATED'
+      : relatedUpdates.some(item => item.id === trace.id) ? 'RELATED_UPDATE'
       : formalItems.some(item => item.id === trace.id) ? 'FORMAL_ATTENTION'
       : libraryItems.some(item => item.id === trace.id) ? 'LIBRARY_ONLY' : 'FILTERED';
     return { entryId: `${fixture.id}-${String(index + 1).padStart(2, '0')}`, ...entry,

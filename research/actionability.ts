@@ -1,3 +1,4 @@
+import { describesRecentChange } from "./recent-signal.ts";
 import type { ResearchSignal } from "./types.ts";
 
 export type ActionabilityStatus =
@@ -239,4 +240,51 @@ export function assessSignalActionability(input: ActionabilityInput): Actionabil
       ? "存在潜在执行入口，但仍需先核对证据质量或适用范围"
       : "证据相关但没有明确的公开执行入口",
   };
+}
+
+/** TEST_NOW is a capability badge, not a prerequisite for reading priority. */
+export function compareAttentionPriority(left: ResearchSignal, right: ResearchSignal) {
+  return Number(right.actionabilityStatus === "TEST_NOW") - Number(left.actionabilityStatus === "TEST_NOW") ||
+    right.overallScore - left.overallScore || right.freshnessScore - left.freshnessScore ||
+    Date.parse(right.publishedAt || "") - Date.parse(left.publishedAt || "") || left.id.localeCompare(right.id);
+}
+
+export function assignReadingAttention(signals: ResearchSignal[], options: {
+  hasTrackedEntities: boolean;
+  withinWindow: (signal: ResearchSignal) => boolean;
+}) {
+  const mainByEntity = new Map<string, ResearchSignal>();
+  const attachedIds = new Set<string>();
+  let mainCount = 0;
+  const qualified = signals.filter(signal =>
+    options.withinWindow(signal) &&
+    signal.reliabilityScore >= 70 && signal.topicRelevance?.decision === "MATCH" &&
+    signal.relevanceScore >= 75 && signal.noveltyScore >= 60 && signal.judgementImpactScore >= 48 &&
+    signal.informationGainStatus !== "NO_INFORMATION_GAIN" && signal.contentQuality !== "INSUFFICIENT_CONTENT" &&
+    signal.knowledgeStatus !== "KNOWN" && signal.verificationStatus !== "unverified" &&
+    signal.verificationStatus !== "conflicting" && signal.eventStatus !== "SIGNAL" &&
+    signal.eventStatus !== "BACKGROUND" && signal.timestampStatus === "valid" &&
+    describesRecentChange(signal.originalTitle || signal.title, signal.originalSummary || signal.summary) &&
+    (!options.hasTrackedEntities || signal.entityMatches.length > 0 ||
+      (signal.gapMatchScore >= 80 && signal.judgementImpactScore >= 80))
+  ).sort(compareAttentionPriority);
+  for (const signal of qualified) {
+    const parent = signal.entityMatches.map(entity => mainByEntity.get(entity)).find(Boolean);
+    if (parent) {
+      signal.attentionDecision = "MUST_READ";
+      signal.section = "must_know";
+      (parent.relatedUpdates ??= []).push(signal);
+      attachedIds.add(signal.id);
+    } else if (mainCount < 5) {
+      signal.attentionDecision = "MUST_READ";
+      signal.section = "must_know";
+      signal.entityMatches.forEach(entity => mainByEntity.set(entity, signal));
+      mainCount++;
+    }
+  }
+  for (const main of new Set(mainByEntity.values())) {
+    main.relatedUpdates?.sort((left, right) =>
+      Date.parse(right.publishedAt || "") - Date.parse(left.publishedAt || "") || left.id.localeCompare(right.id));
+  }
+  return {mainCount, attachedIds};
 }

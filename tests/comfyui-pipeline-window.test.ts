@@ -102,7 +102,7 @@ test("a 30d ComfyUI releases question keeps multiple versions as separate dated 
       allowedProviderIds: ["company-registry", "official-update-pages", "github-releases", "primary-web-search", "trusted-media", "industry-media", "public-web", "product-hunt", "hacker-news", "huggingface", "arxiv", "reddit", "reverse-primary", "social-access"],
       reason: "acceptance test",
     });
-    const versionSignals = result.signals.filter((s) => /\/releases\/tag\/v\d/.test(s.sourceUrl));
+    const versionSignals = result.signals.flatMap(signal => [signal, ...(signal.relatedUpdates ?? [])]).filter((s) => /\/releases\/tag\/v\d/.test(s.sourceUrl));
     const tags = versionSignals.map((s) => (/v\d+(?:\.\d+)*$/.test(s.sourceUrl) ? s.sourceUrl.split("/tag/")[1] : ""));
     assert.ok(versionSignals.length >= 2, `at least two version events must survive, got ${versionSignals.length}; signals: ${result.signals.map((s) => s.sourceUrl).join(" , ")}`);
     assert.deepEqual([...new Set(tags)].sort(), ["v0.35.0", "v0.36.0", "v0.37.0"], "each release must keep its own tag");

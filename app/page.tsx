@@ -1,5 +1,7 @@
 "use client";
 
+import { ReadingAttention } from "./components/reading-attention";
+
 import {
   Check,
   ChevronRight,
@@ -380,6 +382,8 @@ function EventCard({
         <span className="font-black text-[#172033]">{reliabilityLabel(event.reliabilityScore)}</span>
         <span>{event.sourceCount} 个来源</span>
       </div>
+
+      <ReadingAttention event={event} />
 
       {!compact && (
         <button

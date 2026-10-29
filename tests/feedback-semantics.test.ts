@@ -148,8 +148,8 @@ async function pipelineRun(userJudgements: string) {
 test("RED: pipeline consumption — not_useful penalizes only the matching signal", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-01T12:00:00Z") });
   const withJudgement = await pipelineRun("Not useful: qwen KV cache location logic");
-  const judged = withJudgement.signals.find((s) => s.sourceUrl.includes("v0.39.0"));
-  const other = withJudgement.signals.find((s) => s.sourceUrl.includes("v0.38.5"));
+  const judged = withJudgement.signals.flatMap(signal => [signal, ...(signal.relatedUpdates ?? [])]).find((s) => s.sourceUrl.includes("v0.39.0"));
+  const other = withJudgement.signals.flatMap(signal => [signal, ...(signal.relatedUpdates ?? [])]).find((s) => s.sourceUrl.includes("v0.38.5"));
   assert.ok(judged, "the matching signal must exist");
   assert.ok(other, "the other signal must exist");
   assert.ok(
@@ -161,9 +161,9 @@ test("RED: pipeline consumption — not_useful penalizes only the matching signa
 test("pipeline consumption — changed_view does not add a useless penalty", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-01T12:00:00Z") });
   const withChanged = await pipelineRun("Changed after evidence: qwen KV cache location logic");
-  const judged = withChanged.signals.find((s) => s.sourceUrl.includes("v0.39.0"));
+  const judged = withChanged.signals.flatMap(signal => [signal, ...(signal.relatedUpdates ?? [])]).find((s) => s.sourceUrl.includes("v0.39.0"));
   const baseline = await pipelineRun("");
-  const baseJudged = baseline.signals.find((s) => s.sourceUrl.includes("v0.39.0"));
+  const baseJudged = baseline.signals.flatMap(signal => [signal, ...(signal.relatedUpdates ?? [])]).find((s) => s.sourceUrl.includes("v0.39.0"));
   assert.equal(
     judged?.noveltyScore, baseJudged?.noveltyScore,
     `changed_view must not change the novelty score: changed=${judged?.noveltyScore} baseline=${baseJudged?.noveltyScore}`,

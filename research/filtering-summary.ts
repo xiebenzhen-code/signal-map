@@ -115,7 +115,7 @@ export function buildFilteringSummary(input: {
   displayedSignals: ResearchSignal[];
   detailEnrichment?: FilteringSummary["detailEnrichment"];
 }): FilteringSummary {
-  const displayedIds = new Set(input.displayedSignals.map((signal) => signal.id));
+  const displayedIds = new Set(input.displayedSignals.flatMap(signal => [signal.id, ...(signal.relatedUpdates ?? []).map(item => item.id)]));
   const hidden = input.allSignals.filter((signal) => !displayedIds.has(signal.id));
   const filteredReasons = emptyReasons();
   for (const signal of hidden) {

@@ -60,7 +60,7 @@ const RETRIEVAL_RESERVATION_MS = DETAIL_FETCH_RESERVE_MS + POST_PROCESSING_RESER
 import { recordsFromSignal, type EvidenceRecord } from "../information/rag-records.ts";
 import { assessTopicRelevance } from "./topic-relevance.ts";
 import { isGenericQuestionTerm } from "./topic-relevance.ts";
-import { assessSignalActionability } from "./actionability.ts";
+import { assessSignalActionability, assignReadingAttention, compareAttentionPriority } from "./actionability.ts";
 import type {
   PipelineCounts,
   PipelineProgress,
@@ -1365,7 +1365,7 @@ async function enrichDiscoveryCandidates(
   return { candidates, summary, eligibleByProvider };
 }
 
-function buildSourceDiagnostics(
+export function buildSourceDiagnostics(
   sourceOutcomes: SourceExecutionOutcome[],
   candidates: ResearchCandidate[],
   displayedSignals: ResearchSignal[],
@@ -1400,7 +1400,7 @@ function buildSourceDiagnostics(
       detailSucceeded,
       detailFailed,
       pipelineRetrievedCount: providerCandidates.length,
-      displayedCount: displayedSignals.filter((signal) =>
+      displayedCount: displayedSignals.flatMap(signal => [signal, ...(signal.relatedUpdates ?? [])]).filter((signal) =>
         providerCandidates.some((candidate) => candidate.url === signal.sourceUrl),
       ).length,
       ...(providerId === "product-hunt" && providerCandidates.length === 0
@@ -2544,42 +2544,15 @@ export async function runResearchPipeline(
   debug?.onCandidateSelectionAudit?.(candidateSelection.audit);
   const allSignals = candidateSelection.selected.map((candidate) => candidate.value);
 
-  const selectedEntities = new Set<string>();
-  let selectedCount = 0;
-  for (const signal of allSignals) {
-    const passesGates =
-      signal.reliabilityScore >= 70 &&
-      signal.topicRelevance?.decision !== "TOPIC_MISMATCH" &&
-      signal.topicRelevance?.decision !== "UNCERTAIN" &&
-      signal.relevanceScore >= 75 &&
-      signal.noveltyScore >= 60 &&
-      signal.judgementImpactScore >= 48 &&
-      signal.actionabilityStatus === "TEST_NOW" &&
-      signal.informationGainStatus !== "NO_INFORMATION_GAIN" &&
-      signal.contentQuality !== "INSUFFICIENT_CONTENT" &&
-      signal.knowledgeStatus !== "KNOWN" &&
-      signal.verificationStatus !== "unverified" &&
-      signal.verificationStatus !== "conflicting" &&
-      signal.eventStatus !== "SIGNAL" &&
-      signal.eventStatus !== "BACKGROUND" &&
-      signal.timestampStatus === "valid" &&
-      describesRecentChange(signal.originalTitle || signal.title, signal.originalSummary || signal.summary) &&
-      (trackedEntityTerms.length === 0 ||
-        signal.entityMatches.length > 0 ||
-        (signal.gapMatchScore >= 80 && signal.judgementImpactScore >= 80));
-    const repeatsEntity = signal.entityMatches.some((entity) =>
-      selectedEntities.has(entity),
-    );
-    if (passesGates && selectedCount < 5 && !repeatsEntity) {
-      signal.attentionDecision = "MUST_READ";
-      signal.section = "must_know";
-      signal.entityMatches.forEach((entity) => selectedEntities.add(entity));
-      selectedCount += 1;
-    }
-  }
+  const windowEligibleIds = new Set(candidateSelection.selected
+    .filter(candidate => candidate.freshnessEligible).map(candidate => candidate.id));
+  const {mainCount: selectedCount, attachedIds} = assignReadingAttention(allSignals, {
+    hasTrackedEntities: trackedEntityTerms.length > 0,
+    withinWindow: signal => windowEligibleIds.has(signal.id),
+  });
   const watchedEntities = new Set<string>();
   let worthWatchingCount = 0;
-  for (const signal of allSignals) {
+  for (const signal of [...allSignals].sort(compareAttentionPriority)) {
     const canWatch =
       signal.attentionDecision !== "MUST_READ" &&
       signal.actionabilityStatus !== "BACKGROUND" &&
@@ -2599,6 +2572,7 @@ export async function runResearchPipeline(
     const repeatsEntity = signal.entityMatches.some((entity) => watchedEntities.has(entity));
     if (canWatch && worthWatchingCount < 3 && !repeatsEntity) {
       signal.attentionDecision = "WORTH_WATCHING";
+      signal.attentionReasonCode = "EARLY_SIGNAL_WITHIN_24H";
       signal.section = "emerging";
       signal.entityMatches.forEach((entity) => watchedEntities.add(entity));
       worthWatchingCount += 1;
@@ -2607,7 +2581,11 @@ export async function runResearchPipeline(
   // UNCERTAIN remains in allSignals for possibleRelated and trace summaries,
   // but cannot enter formal results through LIBRARY_ONLY either.
   const signals = partitionByVerdictCertainty(allSignals
-    .filter((signal) => signal.attentionDecision !== "IGNORE" && signal.contentQuality !== "INSUFFICIENT_CONTENT")).confirmed;
+    .filter((signal) => !attachedIds.has(signal.id) && signal.attentionDecision !== "IGNORE" && signal.contentQuality !== "INSUFFICIENT_CONTENT")).confirmed;
+  signals.sort((left, right) => {
+    const rank = {MUST_READ: 0, WORTH_WATCHING: 1, LIBRARY_ONLY: 2, IGNORE: 3};
+    return rank[left.attentionDecision] - rank[right.attentionDecision] || compareAttentionPriority(left, right);
+  });
   markPhase("evidence_finished", true, allSignals.length);
   detailEnrichment.stillInsufficient = allSignals.reduce(
     (total, signal) =>
@@ -2725,7 +2703,8 @@ export async function runResearchPipeline(
     allSignals.flatMap((signal) => recordsFromSignal(signal).evidence),
   );
   const acceptedEvidenceRecords = uniqueEvidenceRecords(
-    signals.flatMap((signal) => recordsFromSignal(signal).evidence),
+    signals.flatMap(signal => [signal, ...(signal.relatedUpdates ?? [])])
+      .flatMap((signal) => recordsFromSignal(signal).evidence),
   );
   const producedEvidenceCount = evidenceRecords.length;
   const acceptedEvidenceCount = acceptedEvidenceRecords.length;
@@ -2759,7 +2738,7 @@ export async function runResearchPipeline(
         (audit) => !audit.eligibility.preliminaryEligible,
       ).length,
       candidatePool: candidateSelection.selected.length,
-      mustRead: allSignals.filter((signal) => signal.attentionDecision === "MUST_READ").length,
+      mustRead: selectedCount,
       worthWatching: allSignals.filter(
         (signal) => signal.attentionDecision === "WORTH_WATCHING").length,
       libraryOnly: allSignals.filter((signal) => signal.attentionDecision === "LIBRARY_ONLY").length,

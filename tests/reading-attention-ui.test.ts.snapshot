@@ -1,0 +1,7 @@
+exports[`early-signal copy is explicit and no-entry reading is not labeled testable 1`] = `
+"<p class=\\"mt-3 text-xs text-[#68727f]\\">24 小时内的早期线索</p>"
+`;
+
+exports[`reading attention snapshot: default-closed messages retain title source date and original link 1`] = `
+"<p class=\\"mt-3 text-xs font-bold text-[#2359ff]\\">可立即试用</p><details class=\\"mt-4 rounded-xl border p-3\\"><summary class=\\"cursor-pointer text-sm font-bold\\">同一对象的其他新消息 · 1 条</summary><ul class=\\"mt-3 grid gap-3 text-sm\\"><li><a href=\\"https://official.example/release\\" target=\\"_blank\\" rel=\\"noreferrer\\" class=\\"text-[#2359ff] hover:underline\\">Security update</a><p class=\\"mt-1 text-xs text-[#68727f]\\">Official · <time dateTime=\\"2026-10-19T08:00:00Z\\">2026-10-19T08:00:00Z</time></p></li></ul></details>"
+`;
