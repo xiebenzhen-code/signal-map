@@ -1271,6 +1271,25 @@ function stableEventId(title: string) {
   return `event-${Math.abs(hash).toString(36)}`;
 }
 
+function stableCandidateId(item: Pick<ResearchCandidate, "url" | "source" | "title" | "publishedAt">) {
+  let identity: string;
+  try {
+    const url = new URL(item.url);
+    url.hash = "";
+    identity = `url:${url.href}`;
+  } catch {
+    identity = JSON.stringify([item.source ?? "", item.title, item.publishedAt ?? ""]);
+  }
+  // Preserve URL path/query case and punctuation; recurring headlines are not
+  // identities. This deterministic 64-bit fingerprint is not a security hash.
+  let hash = BigInt("14695981039346656037");
+  const prime = BigInt("1099511628211");
+  for (let index = 0; index < identity.length; index += 1) {
+    hash = BigInt.asUintN(64, (hash ^ BigInt(identity.charCodeAt(index))) * prime);
+  }
+  return `event-${hash.toString(36)}`;
+}
+
 async function enrichDiscoveryCandidates(
   candidates: ResearchCandidate[],
   plan: QueryPlan,
@@ -2368,7 +2387,7 @@ export async function runResearchPipeline(
       const primaryPresentation =
         processedCandidates.find((entry) => entry.presentation.contentQuality === "VALID")?.presentation ||
         processedCandidates[0]?.presentation;
-      const id = stableEventId(item.title);
+      const id = stableCandidateId(item);
       const knowledgeStatus = alreadyKnown
         ? "KNOWN"
         : knownMatches.length
