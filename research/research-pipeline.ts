@@ -951,10 +951,17 @@ function providerQueries(plan: QueryPlan, providerId: string, queries: string[],
 function unique(items: ResearchCandidate[]) {
   const seen = new Set<string>();
   return items.filter((item) => {
-    const key = item.title
-      .toLowerCase()
-      .replace(/[\p{P}\p{S}\s]/gu, "")
-      .slice(0, 64);
+    // A recurring release headline is not an event identity. Normalize the URL
+    // (host/default port/fragment) while retaining meaningful path and query.
+    let key: string;
+    try {
+      const url = new URL(item.url);
+      url.hash = "";
+      key = `url:${url.href}`;
+    } catch {
+      const title = item.title.toLowerCase().replace(/[\p{P}\p{S}\s]/gu, "");
+      key = title ? `title-date:${title}:${item.publishedAt ?? ""}` : "";
+    }
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
