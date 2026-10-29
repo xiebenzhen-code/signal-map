@@ -6,6 +6,7 @@
 // Generic words like 发布/更新/版本 alone stay neutral.
 import assert from "node:assert/strict";
 import test from "node:test";
+// Freeze the historical fixture clock; never reinterpret its dates using wall time.
 
 import { runResearchPipeline } from "../research/research-pipeline.ts";
 import type { ResearchInput, ResearchResponse } from "../research/types.ts";
@@ -145,7 +146,8 @@ test("an announcement without an execution entry yields a signal advised to chec
   }
 });
 
-test("explicit software-release question keeps change content and software-specific unknowns", async () => {
+test("explicit software-release question keeps change content and software-specific unknowns", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-09-22T12:00:00Z") });
   const result = await runWithQuestion("ComfyUI 最近一个月在 GitHub 发布了哪些版本？有哪些值得升级的改动？");
   const signals = versionSignals(result);
   assert.ok(signals.length >= 1, `the software question must still yield version signals, got ${signals.length}`);
@@ -158,7 +160,8 @@ test("explicit software-release question keeps change content and software-speci
   }
 });
 
-test("RED: a rules question containing 发布 must stay neutral on the same materials", async () => {
+test("RED: a rules question containing 发布 must stay neutral on the same materials", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-09-22T12:00:00Z") });
   const result = await runWithQuestion("ComfyUI 最近发布了哪些平台规则？");
   const signals = versionSignals(result);
   assert.ok(signals.length >= 1, `the question must still yield the same materials, got ${signals.length}`);
@@ -173,7 +176,8 @@ test("RED: a rules question containing 发布 must stay neutral on the same mate
   }
 });
 
-test("RED: a schedule question containing 更新 must stay neutral on the same materials", async () => {
+test("RED: a schedule question containing 更新 must stay neutral on the same materials", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-09-22T12:00:00Z") });
   const result = await runWithQuestion("ComfyUI 本周例会安排有哪些更新？");
   const signals = versionSignals(result);
   assert.ok(signals.length >= 1, `the question must still yield the same materials, got ${signals.length}`);
@@ -185,7 +189,8 @@ test("RED: a schedule question containing 更新 must stay neutral on the same m
   }
 });
 
-test("ambiguous questions default to neutral copy", async () => {
+test("ambiguous questions default to neutral copy", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-09-22T12:00:00Z") });
   const result = await runWithQuestion("ComfyUI 最近有什么新动态？");
   const signals = versionSignals(result);
   assert.ok(signals.length >= 1, `the question must still yield the same materials, got ${signals.length}`);
@@ -195,7 +200,8 @@ test("ambiguous questions default to neutral copy", async () => {
   }
 });
 
-test("signals without an execution entry never get run instructions", async () => {
+test("signals without an execution entry never get run instructions", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-09-22T12:00:00Z") });
   for (const question of [
     "ComfyUI 最近一个月在 GitHub 发布了哪些版本？有哪些值得升级的改动？",
     "ComfyUI 最近发布了哪些平台规则？",

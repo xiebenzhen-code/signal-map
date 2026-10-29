@@ -13,6 +13,8 @@ import type { QueryPlan, ResearchSignal } from "../research/types.ts";
 // Real D06 capture, frozen by the A-stage diagnostic. Only the non-relevance
 // scores below are controlled to isolate both production presentation gates.
 // This is not an end-to-end replay or a claim about production date eligibility.
+// Force UNCERTAIN here to isolate presentation gates: current classifier decisions
+// are tested separately by d06-security-constraints and the full-plan replay.
 const xml = readFileSync(new URL("./fixtures/d06-chrome.xml", import.meta.url), "utf8");
 const { plan } = JSON.parse(readFileSync(new URL("./fixtures/d06-plan.json", import.meta.url), "utf8")) as { plan: QueryPlan };
 const entries = parseRegisteredFeed(xml, {
@@ -27,7 +29,7 @@ function signal(index: number, eventStatus: "NEW" | "SIGNAL"): ResearchSignal {
     time: "frozen", truth: 90, baseUseful: 90, lead: 90, tags: [], action: "review", why: "gate test", official: [], social: [],
     sourceType: "primary", sourceTier: "S", sourceUrl: entry.url, publisher: "Chrome Releases", publishedAt: entry.publishedAt,
     firstSeenAt: entry.publishedAt!, retrievedAt: "2026-10-20T23:59:59Z", timestampStatus: "valid", dataOrigin: "live",
-    confidence: 90, verificationStatus: "verified", topicRelevance: assessTopicRelevance(`${entry.title} ${entry.snippet}`.toLocaleLowerCase(), plan),
+    confidence: 90, verificationStatus: "verified", topicRelevance: { ...assessTopicRelevance(`${entry.title} ${entry.snippet}`.toLocaleLowerCase(), plan), decision: "UNCERTAIN" },
     relevanceScore: 95, reliabilityScore: 95, freshnessScore: 95, noveltyScore: 95, judgementImpactScore: 95, gapMatchScore: 95, overallScore: 95,
     sourceCount: 1, independentEvidenceCount: 1, propagationCount: 1, claims: [], sources: [], section: "all",
     gapMatches: [], questionMatches: [], entityMatches: [], whyItMatters: "gate test", eventStatus, informationType: "FACT",

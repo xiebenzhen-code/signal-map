@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+// Freeze the historical fixture clock; never reinterpret its dates using wall time.
 
 import { runResearchPipeline } from "./fixtures/detail-read.ts";
 import type { ResearchInput, ResearchResponse } from "../research/types.ts";
@@ -37,7 +38,8 @@ function installFetch(overrides: Record<string, () => Response>) {
   return () => { globalThis.fetch = original; };
 }
 
-test("Reliability TRUE POSITIVE: an independent primary corroboration raises a discovery out of LOW_RELIABILITY", async () => {
+test("Reliability TRUE POSITIVE: an independent primary corroboration raises a discovery out of LOW_RELIABILITY", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-09-22T12:00:00Z") });
   const restore = installFetch({
     // Social discovery (HN), fresh, topically relevant, carrying a canonical product page.
     "hn.algolia.com": () =>

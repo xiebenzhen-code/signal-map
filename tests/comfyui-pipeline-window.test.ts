@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+// Freeze the historical fixture clock; never reinterpret its dates using wall time.
 
 import { runResearchPipeline } from "../research/research-pipeline.ts";
 import type { ResearchInput } from "../research/types.ts";
@@ -90,7 +91,8 @@ function stubFetch(target: string | URL | Request): Promise<Response> {
   return Promise.resolve(new Response("", { status: 404 }));
 }
 
-test("a 30d ComfyUI releases question keeps multiple versions as separate dated events", async () => {
+test("a 30d ComfyUI releases question keeps multiple versions as separate dated events", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-09-22T12:00:00Z") });
   const original = globalThis.fetch;
   globalThis.fetch = stubFetch as typeof fetch;
   try {

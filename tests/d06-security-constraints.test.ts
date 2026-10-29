@@ -17,7 +17,7 @@ test('D06 real security bulletin matches while entity-only release remains uncon
  assert.ok(security);
  const result=assessTopicRelevance(security.title+' '+security.snippet,fixture.plan);
  assert.equal(result.decision,'MATCH');
- assert.ok(result.matchedTaskConstraints.includes('安全'));
+ assert.ok(result.matchedTaskConstraints?.includes('安全'));
  const ordinary=entries.find(x=>/Dev for Desktop/.test(x.title))!;
  assert.notEqual(assessTopicRelevance(ordinary.title+' '+ordinary.snippet,fixture.plan).decision,'MATCH');
 });

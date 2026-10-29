@@ -211,8 +211,7 @@ test("background evidence outside a 24h window cannot become must read", async (
   });
   const result = await runResearchPipeline(input, undefined, { customSourceReader: frozenRelayReader() });
   const background = result.signals.find((signal) => signal.eventStatus === "BACKGROUND");
-  assert.ok(background);
-  assert.notEqual(background.attentionDecision, "MUST_READ");
+  assert.equal(background, undefined, "out-of-window evidence must not enter returned cards, including the library");
 });
 
 test("authenticated main research enters the existing persistent Agent loop", async (t) => {

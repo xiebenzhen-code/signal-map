@@ -5,6 +5,7 @@
 // (runResearchPipeline with injected fetchers, no model, no real DB).
 import assert from "node:assert/strict";
 import test from "node:test";
+// Freeze the historical fixture clock; never reinterpret its dates using wall time.
 
 import { runAgent } from "../agent/runner.ts";
 import { InMemorySignalRepository } from "../information/repositories/in-memory.ts";
@@ -43,7 +44,8 @@ function response(signals: ResearchSignal[]): ResearchResponse {
 }
 
 // ---- 1. 纯函数：负向判定词只来自 Not useful 行（changed_view/手写不产生无用扣分） ----
-test("RED: real runner assembly keeps KNOWN_INFORMATION in knownInformation and excludes JUDGEMENT", async () => {
+test("RED: real runner assembly keeps KNOWN_INFORMATION in knownInformation and excludes JUDGEMENT", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-01T12:00:00Z") });
   const repository = new InMemorySignalRepository();
   const ctx = { authenticatedUserId: "sem-user-a", filterId: "account-sem-user-a" };
   await repository.upsertPersonalKnowledge(ctx, { type: "KNOWN_INFORMATION", text: "已知事实 Codex 2.0 已发布" }, new Date().toISOString());
@@ -70,7 +72,8 @@ test("RED: real runner assembly keeps KNOWN_INFORMATION in knownInformation and 
 });
 
 // ---- 3. 真实 runner：账号隔离（A 的记录不进入 B 的组装） ----
-test("RED: runner assembly is scoped by account (A's records never enter B's research input)", async () => {
+test("RED: runner assembly is scoped by account (A's records never enter B's research input)", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-01T12:00:00Z") });
   const repository = new InMemorySignalRepository();
   await repository.upsertPersonalKnowledge(
     { authenticatedUserId: "sem-user-b", filterId: "account-sem-user-b" },
@@ -142,7 +145,8 @@ async function pipelineRun(userJudgements: string) {
   }
 }
 
-test("RED: pipeline consumption — not_useful penalizes only the matching signal", async () => {
+test("RED: pipeline consumption — not_useful penalizes only the matching signal", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-01T12:00:00Z") });
   const withJudgement = await pipelineRun("Not useful: qwen KV cache location logic");
   const judged = withJudgement.signals.find((s) => s.sourceUrl.includes("v0.39.0"));
   const other = withJudgement.signals.find((s) => s.sourceUrl.includes("v0.38.5"));
@@ -154,7 +158,8 @@ test("RED: pipeline consumption — not_useful penalizes only the matching signa
   );
 });
 
-test("pipeline consumption — changed_view does not add a useless penalty", async () => {
+test("pipeline consumption — changed_view does not add a useless penalty", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-01T12:00:00Z") });
   const withChanged = await pipelineRun("Changed after evidence: qwen KV cache location logic");
   const judged = withChanged.signals.find((s) => s.sourceUrl.includes("v0.39.0"));
   const baseline = await pipelineRun("");
