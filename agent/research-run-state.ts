@@ -236,6 +236,8 @@ function mergeResearchResponses(previous: ResearchResponse | undefined, next: Re
   }
   return mergeResponseSourceOutcomes(previous, {
     ...next,
+    background: [...new Map([...(previous.background ?? []), ...(next.background ?? [])]
+      .map(item => [item.url, item])).values()],
     signals: mergedSignals,
     coverage,
     evidenceRecords: mergedEvidenceRecords,

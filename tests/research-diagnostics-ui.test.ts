@@ -7,21 +7,21 @@ import test from "node:test";
 import ts from "typescript";
 import * as filtering from "../research/filtering-summary.ts";
 import * as coverage from "../research/source-coverage.ts";
-import type { FilteringSummary } from "../research/types.ts";
+import type { BackgroundMaterial, FilteringSummary } from "../research/types.ts";
 import type { SourceExecutionOutcome } from "../research/source-coverage.ts";
 
 const require = createRequire(import.meta.url);
-function render(summary: FilteringSummary, outcomes: SourceExecutionOutcome[]) {
+function render(summary: FilteringSummary, outcomes: SourceExecutionOutcome[], background: BackgroundMaterial[] = []) {
   const file = new URL("../app/components/research-diagnostics.tsx", import.meta.url);
   assert.ok(existsSync(file), "research diagnostic component must exist");
   const js = ts.transpileModule(readFileSync(file, "utf8"), {compilerOptions: {target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX}}).outputText;
-  const compiled = { exports: {} as { ResearchDiagnostics: ComponentType<{summary: FilteringSummary; outcomes: SourceExecutionOutcome[]}> } };
+  const compiled = { exports: {} as { ResearchDiagnostics: ComponentType<{summary: FilteringSummary; outcomes: SourceExecutionOutcome[]; background?: BackgroundMaterial[]}> } };
   new Function("require", "module", "exports", js)((id: string) => {
     if (id.endsWith("filtering-summary.ts")) return filtering;
     if (id.endsWith("source-coverage.ts")) return coverage;
     return require(id);
   }, compiled, compiled.exports);
-  return renderToStaticMarkup(createElement(compiled.exports.ResearchDiagnostics, { summary, outcomes }));
+  return renderToStaticMarkup(createElement(compiled.exports.ResearchDiagnostics, { summary, outcomes, background }));
 }
 const base = filtering.buildFilteringSummary({retrievedCount: 0, clusteredCount: 0, allSignals: [], displayedSignals: []});
 const searched: SourceExecutionOutcome = {source: "Chrome Releases", sourceId: "chrome", searched: true, resultCount: 25, execution: "searched_with_results",
@@ -57,4 +57,16 @@ test("nonzero display renders source notices without a zero-result explanation",
   assert.match(html, /Chrome Releases/);
   assert.match(html, /本次取得该来源最近 25 条/);
   for (const item of cases) assert.ok(!html.includes(item.text));
+});
+
+
+test("outside-window background is collapsed, dated and explicitly reference-only", t => {
+  const html = render(base, [], [{title:"Frozen old announcement",source:"Chrome Releases",url:"https://chromereleases.googleblog.com/old",publishedAt:"2026-10-01T12:00:00.000Z"}]);
+  assert.match(html,/背景.*1 条/);
+  assert.match(html,/窗口外，仅供参考/);
+  assert.match(html,/Chrome Releases/);
+  assert.match(html,/dateTime="2026-10-01T12:00:00.000Z"/i);
+  assert.match(html,/href="https:\/\/chromereleases.googleblog.com\/old"/);
+  assert.doesNotMatch(html,/<details[^>]*\sopen(?:[\s=>])/);
+  t.assert.snapshot(html);
 });

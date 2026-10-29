@@ -1,3 +1,4 @@
+import { partitionBackground } from "./background.ts";
 import { hasOppositeClaims } from "../signal-fusion/claim-conflict.ts";
 import { parseCustomSources, type CustomSourceCheck } from "../lib/custom-sources.ts";
 import { readCustomSource } from "../source-enrichment/custom-source.ts";
@@ -1938,8 +1939,9 @@ export async function runResearchPipeline(
       remainingMs() > 0 ? 3000 : 0,
     ),
   );
-  const { candidates, summary: detailEnrichment, eligibleByProvider } = await enrichDiscoveryCandidates(
-    discoveredCandidates,
+  const discoveryPartition = partitionBackground(discoveredCandidates, input.freshnessWindow);
+  const { candidates: enrichedCandidates, summary: detailEnrichment, eligibleByProvider } = await enrichDiscoveryCandidates(
+    discoveryPartition.current,
     plan,
     failures,
     enrichmentBudgetMs,
@@ -1953,13 +1955,20 @@ export async function runResearchPipeline(
     stillInsufficient: detailEnrichment.stillInsufficient,
     detailFetchCalls: detailEnrichment.detailFetchCalls ?? 0,
   });
+  // Keep retrieval accounting intact, but historical metadata never reaches judgement.
+  const historicalUrls = new Set(discoveryPartition.background.map(item => item.url));
+  const candidates = [...enrichedCandidates, ...discoveredCandidates.filter(item => historicalUrls.has(item.url))];
+  const enrichedPartition = partitionBackground(enrichedCandidates, input.freshnessWindow);
+  const background = [...new Map([...discoveryPartition.background, ...enrichedPartition.background]
+    .map(item => [item.url, item])).values()];
+  const inWindowPrimary = partitionBackground(allPrimary, input.freshnessWindow).current;
   markPhase("aggregation_started");
   await emit({
     stage: "deduplication",
     label: `去重完成 · ${scanned} 条扫描结果收敛为 ${candidates.length} 条来源`,
     counts,
   });
-  const eventClusters = clusterEvents(candidates);
+  const eventClusters = clusterEvents(enrichedPartition.current);
   markPhase("aggregation_finished", true, eventClusters.length, undefined, {
     inputCount: candidates.length,
     clusteredCount: eventClusters.length,
@@ -2018,7 +2027,7 @@ export async function runResearchPipeline(
         .join(" ")
         .toLowerCase();
       const checks = ordered.map((candidate) =>
-        verification(candidate, allPrimary, plan),
+        verification(candidate, inWindowPrimary, plan),
       );
       const conflicting = hasConflict(ordered);
       const hasPrimary = ordered.some((candidate) => candidate.sourceType === "primary");
@@ -2816,6 +2825,7 @@ export async function runResearchPipeline(
   return {
     ...(customSourceChecks.length ? { customSourceChecks } : {}),
     ...(observation.items.length ? { observation } : {}),
+    background,
     signals: presentation.signals,
     status: coverage.outcomes.map((outcome) => ({
       name: outcome.source,

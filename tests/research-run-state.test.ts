@@ -333,3 +333,13 @@ test("a later slice with a selected signal keeps its positive completion label",
   assert.equal(merged.signals.length, 1);
   assert.match(merged.progress.at(-1)?.label ?? "", /今天 1 条值得注意/);
 });
+
+
+test("round accumulation retains background metadata without duplicating or promoting it", () => {
+  const first={title:"old announcement",source:"Official",url:"https://example.com/old",publishedAt:"2026-09-01T00:00:00.000Z"};
+  const second={...first,url:"https://example.com/older",publishedAt:"2026-08-01T00:00:00.000Z"};
+  const merged=mergeRoundAttempts(response([], {background:[first]}),response([], {background:[second,second]}));
+  assert.deepEqual(merged.background,[first,second]);
+  assert.equal(merged.signals.length,0);
+  assert.equal(merged.evidenceRecords?.length,0);
+});

@@ -94,6 +94,7 @@ const row = {
   fetchedCount: result.coverage.outcomes.filter(item => item.searched)
     .reduce((total, item) => total + (item.rawResultCount ?? item.resultCount), 0),
   retrievedCount: summary.retrievedCount, deduplicatedCount: result.overview.deduplicated,
+  backgroundCount: (result.background ?? []).length,
   returnedCardCount: returnedCards.length, formalAttentionCount: formalItems.length, libraryCount: libraryItems.length, possibleRelatedCount: (summary.possibleRelated ?? []).length,
   mustReadMainCount: mustReadItems.length, relatedUpdateCount: relatedUpdates.length,
   worthWatchingCount: formalItems.length - mustReadItems.length,
@@ -109,7 +110,8 @@ const row = {
   entries: rawEntries.map((entry, index) => {
     const trace = summary.filteringDetails.find(detail => detail.sources.some(source => source.sourceUrl === entry.url));
     const timestamp = Date.parse(entry.publishedAt ?? '');
-    const destination = !trace ? 'NOT_RETAINED_BEFORE_CLUSTER'
+    const destination = (result.background ?? []).some(item => item.url === entry.url) ? 'BACKGROUND'
+      : !trace ? 'NOT_RETAINED_BEFORE_CLUSTER'
       : (summary.possibleRelated ?? []).some(item => item.id === trace.id) ? 'POSSIBLE_RELATED'
       : relatedUpdates.some(item => item.id === trace.id) ? 'RELATED_UPDATE'
       : formalItems.some(item => item.id === trace.id) ? 'FORMAL_ATTENTION'
@@ -119,6 +121,7 @@ const row = {
       clusterId: trace?.id ?? null, decision: trace?.topicRelevance?.decision ?? null,
       reason: trace?.topicRelevance?.reason ?? null, destination };
   }),
+  background: result.background ?? [],
   formalItems, libraryItems, possibleRelated: summary.possibleRelated ?? [],
   filteringDetails: summary.filteringDetails ?? [],
   sources: result.coverage.outcomes.filter(item => item.searched),
@@ -144,6 +147,6 @@ const report = {
 };
 mkdirSync(output, { recursive: true });
 writeFileSync(resolve(output, 'results.json'), `${JSON.stringify(report, null, 2)}\n`);
-const columns = cases.map(row => `| ${row.id} / ${row.planMode} | ${row.fetchedCount} | ${row.deduplicatedCount} | ${row.formalAttentionCount} | ${row.libraryCount} | ${row.possibleRelatedCount} | ${row.outsideWindowReturnedCardCount} | ${row.zeroDisplayReason ?? '—'} |`).join('\n');
-writeFileSync(resolve(output, 'results.md'), `# 冻结快照离线评测\n\n${report.limitations}\n\n冻结 plan 保留所有字段；重建 plan 复现旧脚本仅传查询词的路径，不等同历史线上计划。retrievedCount 为流水线检索计数，正式关注与资料库分开统计。\n\n| 案例 / plan | 抓取数 | 标题去重后 | 正式关注（MUST_READ/WORTH_WATCHING） | 资料库（LIBRARY_ONLY） | 可能相关 | 窗口外进入返回卡片数 | 零正式关注原因 |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n${columns}\n`);
+const columns = cases.map(row => `| ${row.id} / ${row.planMode} | ${row.fetchedCount} | ${row.deduplicatedCount} | ${row.formalAttentionCount} | ${row.libraryCount} | ${row.possibleRelatedCount} | ${row.backgroundCount} | ${row.outsideWindowReturnedCardCount} | ${row.zeroDisplayReason ?? '—'} |`).join('\n');
+writeFileSync(resolve(output, 'results.md'), `# 冻结快照离线评测\n\n${report.limitations}\n\n冻结 plan 保留所有字段；重建 plan 复现旧脚本仅传查询词的路径，不等同历史线上计划。retrievedCount 为流水线检索计数，正式关注与资料库分开统计。\n\n| 案例 / plan | 抓取数 | 标题去重后 | 正式关注（MUST_READ/WORTH_WATCHING） | 资料库（LIBRARY_ONLY） | 可能相关 | 背景数 | 窗口外进入返回卡片数 | 零正式关注原因 |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n${columns}\n`);
 console.log(`Frozen evaluation: ${fixture.id}; reports: ${output}`);

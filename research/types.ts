@@ -362,7 +362,16 @@ export type EvidenceAccounting = {
   rejectionReasons?: FilteringSummary["filteredReasons"];
 };
 
+/** Reference metadata only: never a judged signal or evidence record. */
+export type BackgroundMaterial = {
+  title: string;
+  source: string;
+  url: string;
+  publishedAt: string;
+};
+
 export type ResearchResponse = {
+  background?: BackgroundMaterial[];
   customSourceChecks?: import("../lib/custom-sources.ts").CustomSourceCheck[];
   observation?: import("../information/observation.ts").ObservationLayer;
   signals: ResearchSignal[];

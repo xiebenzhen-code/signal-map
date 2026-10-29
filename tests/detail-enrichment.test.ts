@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { describe, beforeEach } from "node:test";
 
 import { isSafeDetailUrl } from "../source-enrichment/safe-url.ts";
 import { shouldEnrichDetail } from "./fixtures/detail-read.ts";
 import { runResearchPipeline } from "./fixtures/detail-read.ts";
 import type { ResearchInput } from "../research/types.ts";
+
+// Fixed reference time: these contract fixtures must remain inside their requested window.
+describe("frozen detail-enrichment.test.ts", () => {
+ beforeEach(t => { if ("mock" in t) t.mock.timers.enable({apis: ["Date"], now: new Date("2026-08-15T12:00:00Z")}); });
 
 const LONG_QUERY =
   "过去 30 天内，AI 辅助视频剪辑与自动化领域有哪些真正值得我测试的新发布、模型、工具或工作流更新？" +
@@ -251,4 +255,5 @@ test("B2. bounded parallel enrichment attempts all eligible candidates and recor
   } finally {
     restore();
   }
+});
 });

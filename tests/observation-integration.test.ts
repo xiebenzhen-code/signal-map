@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { describe, beforeEach } from "node:test";
 
 import { runResearchPipeline } from "../research/research-pipeline.ts";
 import { readCustomSource } from "../source-enrichment/custom-source.ts";
 import type { ResearchInput } from "../research/types.ts";
+
+// Fixed reference time: these contract fixtures must remain inside their requested window.
+describe("frozen observation-integration.test.ts", () => {
+ beforeEach(t => { if ("mock" in t) t.mock.timers.enable({apis: ["Date"], now: new Date("2026-10-20T12:00:00Z")}); });
 
 // 集成回放（离线，无模型、无真实外呼）：
 // mock globalThis.fetch —— arXiv 返回与问题无关的真实形状 Atom 条目（候选在
@@ -51,7 +55,7 @@ test("集成回放：正式结果 0 条，待判断候选进入最终响应；�
   // P2-N3a: registered feeds read through the safe reader (node:https), which no
   // fetch mock can intercept. Inject a frozen kdenlive-shaped fixture via the
   // reader's options.request/options.lookup — no real network, fixed dates.
-  const FROZEN_KDENLIVE_FEED = `<rss><channel><title>Kdenlive News</title><item><title>PCB 测试方案发布会</title><link>https://kdenlive.org/news/pcb-fixture</link><pubDate>Sat, 01 Aug 2026 09:00:00 GMT</pubDate><description>冻结夹具：与问题无关的硬件条目，固定日期。</description></item></channel></rss>`;
+  const FROZEN_KDENLIVE_FEED = `<rss><channel><title>Kdenlive News</title><item><title>PCB 测试方案发布会</title><link>https://kdenlive.org/news/pcb-fixture</link><pubDate>Sun, 18 Oct 2026 09:00:00 GMT</pubDate><description>冻结夹具：与问题无关的硬件条目，固定日期。</description></item></channel></rss>`;
   const frozenReader: typeof readCustomSource = (url, options) => readCustomSource(url, {
     ...options,
     lookup: async () => [{ address: "93.184.216.34", family: 4 }],
@@ -94,4 +98,6 @@ test("集成回放：正式结果 0 条，待判断候选进入最终响应；�
   assert.ok(fixtureRow, "冻结夹具条目必须在筛选明细中留痕");
   assert.equal(fixtureRow.decision, "filtered");
   assert.equal(fixtureRow.topicRelevance?.decision, "TOPIC_MISMATCH", "明确原因：主题不匹配");
+});
+
 });

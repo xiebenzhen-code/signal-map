@@ -54,6 +54,7 @@ export type ActiveKnowledgeContext = {
 export type ProviderCoverage = SourceCoverage;
 
 export type InformationRunPayload = {
+  background?: import("../research/types.ts").BackgroundMaterial[];
   modelUsage?: ReturnType<ReturnType<typeof import("../agent/models/usage-observation.ts").createModelUsageCollector>["snapshot"]>;
   customSourceChecks?: import("../lib/custom-sources.ts").CustomSourceCheck[];
   status?: "completed" | "failed" | "needs_more_evidence";

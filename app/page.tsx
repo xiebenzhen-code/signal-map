@@ -1719,7 +1719,7 @@ function AccountHomePage({ currentUser }: { currentUser: CurrentUser }) {
         </section>
       )}
       {!loading && !error && response && <FilteringSummaryCard summary={response.filteringSummary} />}
-      {!loading && !error && response && <ResearchDiagnostics summary={response.filteringSummary} outcomes={response.coverage.outcomes} />}
+      {!loading && !error && response && <ResearchDiagnostics background={response.background} summary={response.filteringSummary} outcomes={response.coverage.outcomes} />}
       {!loading && !error && response && (
         <ObservationSection observation={response.observation} formalCount={response.signals.length} />
       )}

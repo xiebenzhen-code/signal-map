@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { describe, beforeEach } from "node:test";
 
 import { runResearchPipeline } from "./fixtures/detail-read.ts";
 import type { ResearchInput, ResearchResponse } from "../research/types.ts";
+
+// Fixed reference time: these contract fixtures must remain inside their requested window.
+describe("frozen budget-allocation.test.ts", () => {
+ beforeEach(t => { if ("mock" in t) t.mock.timers.enable({apis: ["Date"], now: new Date("2026-08-15T12:00:00Z")}); });
 
 const LONG_QUERY =
   "过去 30 天内，AI 辅助视频剪辑与自动化领域有哪些真正值得我测试的新发布、模型、工具或工作流更新？" +
@@ -130,4 +134,5 @@ test("D. a detail fetch failure is fail-soft and does not crash the pipeline", a
   } finally {
     restore();
   }
+});
 });

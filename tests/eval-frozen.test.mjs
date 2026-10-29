@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
+import { partitionBackground } from '../research/background.ts';
 
 test('frozen evaluation replays real fixtures deterministically without external requests', () => {
   const directory = mkdtempSync(join(tmpdir(), 'signal-map-eval-'));
@@ -58,4 +59,45 @@ test('D03 complete OBS control snapshot is actually replayed in both modes', () 
  for(const row of report.cases){assert.ok(row.fixtureReads>0);assert.equal(row.fetchedCount,10);assert.equal(row.outsideWindowReturnedCardCount,0,'OBS control dates must gate library cards too');}
  assert.equal(report.networkRequests,0);
  } finally {rmSync(directory,{recursive:true,force:true});}
+});
+
+
+test('D06 outside-window entries are metadata-only background, never judged or returned cards', () => {
+ const directory = mkdtempSync(join(tmpdir(), 'signal-background-'));
+ try {
+  const child = spawnSync(process.execPath, ['--experimental-strip-types','scripts/eval-frozen.mjs','--output-dir',directory], {encoding:'utf8',timeout:30000});
+  assert.equal(child.status,0,child.stderr);
+  const report=JSON.parse(readFileSync(join(directory,'results.json'),'utf8'));
+  for(const row of report.cases){
+   const outside=row.entries.filter(entry=>!entry.inWindow);
+   assert.equal(outside.length,9,'the real D06 snapshot must be consumed');
+   assert.equal(row.backgroundCount,9);
+   assert.equal(row.background.length,9);
+   for(const entry of outside){
+    const background=row.background.find(item=>item.url===entry.url);
+    assert.ok(background,'each old entry must survive as background metadata');
+    assert.equal(background.publishedAt,entry.publishedAt);
+    assert.ok(background.title && background.source && background.url);
+    assert.deepEqual(Object.keys(background).sort(),['publishedAt','source','title','url']);
+    assert.equal(entry.decision,null,'background must not reach relevance judgement');
+    assert.equal(entry.destination,'BACKGROUND');
+    assert.ok(!row.filteringDetails.some(item=>item.sources.some(source=>source.sourceUrl===entry.url)));
+   }
+   assert.equal(row.outsideWindowReturnedCardCount,0);
+  }
+  assert.match(readFileSync(join(directory,'results.md'),'utf8'),/背景数/);
+ } finally {rmSync(directory,{recursive:true,force:true});}
+});
+
+
+test('background partition does not launder invalid or future timestamps and deduplicates URLs', () => {
+ const old={title:'archived announcement',source:'Official',url:'https://example.org/old',publishedAt:'2000-01-01T00:00:00.000Z'};
+ const future={...old,url:'https://example.org/future',publishedAt:'2999-01-01T00:00:00.000Z'};
+ const invalid={...old,url:'https://example.org/invalid',publishedAt:'not a date'};
+ const missing={...old,url:'https://example.org/missing',publishedAt:undefined};
+ const metadataConflict={...old,url:'https://example.org/conflict',metadataPublishedAt:'2001-01-01T00:00:00.000Z'};
+ const result=partitionBackground([old,old,future,invalid,missing,metadataConflict],'7d');
+ assert.equal(result.background.length,1);
+ assert.deepEqual(result.current,[future,invalid,missing,metadataConflict]);
+ assert.deepEqual(Object.keys(result.background[0]).sort(),['publishedAt','source','title','url']);
 });

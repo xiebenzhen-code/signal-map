@@ -1,6 +1,6 @@
 import { explainZeroDisplay, type ZeroDisplayReason } from "../../research/filtering-summary.ts";
 import { formatCoverageNotice, type SourceExecutionOutcome } from "../../research/source-coverage.ts";
-import type { FilteringSummary } from "../../research/types.ts";
+import type { BackgroundMaterial, FilteringSummary } from "../../research/types.ts";
 
 const zeroDisplayCopy: Record<ZeroDisplayReason, string> = {
   SOURCE_FAILED: "来源读取失败",
@@ -11,8 +11,9 @@ const zeroDisplayCopy: Record<ZeroDisplayReason, string> = {
   MIXED_FILTERED: "材料被多种原因过滤",
 };
 
-export function ResearchDiagnostics({ summary, outcomes }: {
+export function ResearchDiagnostics({ summary, outcomes, background = [] }: {
   summary?: FilteringSummary;
+  background?: BackgroundMaterial[];
   outcomes: SourceExecutionOutcome[];
 }) {
   const reason = summary?.displayedCount === 0 ? explainZeroDisplay({
@@ -49,6 +50,17 @@ export function ResearchDiagnostics({ summary, outcomes }: {
               ? <a href={item.url} target="_blank" rel="noreferrer" className="text-[#1a4fd6] hover:underline">{item.title}</a>
               : <span>{item.title}</span>}
             <p className="mt-1 text-xs text-[#727b87]">未确认 · 相关性不确定{item.reason ? `（${item.reason}）` : ""}</p>
+          </li>)}
+        </ul>
+      </details> : null}
+      {background.length ? <details className="mt-4 rounded-xl border border-[#e4e7eb] p-3">
+        <summary className="cursor-pointer font-bold">背景 · {background.length} 条 <span className="ml-2 text-xs font-normal text-[#727b87]">窗口外，仅供参考</span></summary>
+        <ul className="mt-3 grid gap-3">
+          {background.map(item => <li key={item.url}>
+            {/^https?:\/\//i.test(item.url)
+              ? <a href={item.url} target="_blank" rel="noreferrer" className="text-[#1a4fd6] hover:underline">{item.title}</a>
+              : <span>{item.title}</span>}
+            <p className="mt-1 text-xs text-[#727b87]">{item.source} · <time dateTime={item.publishedAt}>{item.publishedAt}</time></p>
           </li>)}
         </ul>
       </details> : null}

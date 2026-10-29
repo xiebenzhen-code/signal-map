@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { describe, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { cleanContent, extractClaim } from "../content-processing/index.ts";
 import { createResearchPlan } from "../agent/query-planner.ts";
@@ -6,6 +6,10 @@ import { toRetrievalPlan } from "../agent/retrieval-plan.ts";
 import { enrichDetail, maxDetailFetchesPerRound, shouldEnrichDetail, sourceCapability } from "./fixtures/detail-read.ts";
 import { normalizeArxivResults, runResearchPipeline } from "./fixtures/detail-read.ts";
 import type { ResearchInput } from "../research/types.ts";
+
+// Fixed reference time: these contract fixtures must remain inside their requested window.
+describe("frozen source-enrichment.test.ts", () => {
+ beforeEach(t => { if ("mock" in t) t.mock.timers.enable({apis: ["Date"], now: new Date("2026-09-19T12:00:00Z")}); });
 
 const baseInput = (overrides: Partial<ResearchInput> = {}): ResearchInput => ({
   identity: "AI product builder",
@@ -477,4 +481,6 @@ test("failed external provider responses cancel unread bodies", async (t) => {
   // each of which also cancels its unread failed body, so the invariant is "at
   // least the failing provider's body was cancelled", not "exactly one".
   assert.ok(canceled >= 1);
+});
+
 });
