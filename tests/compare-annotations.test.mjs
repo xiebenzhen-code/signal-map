@@ -103,9 +103,45 @@ test('incomplete labels, duplicate IDs, unknown labels and unmapped clusters fai
  assert.throws(()=>compareAnnotations(annotations(),system),/UNMAPPED_CLUSTER/);
 });
 
+test('only unannotated BACKGROUND entries may be omitted from the annotation subset',()=>{
+ const system=fixture();system.cases[0].entries.push({entryId:'S-09',clusterId:null,destination:'BACKGROUND'});
+ system.cases[0].fetchedCount=9;
+ const report=compareAnnotations(annotations(),system);
+ assert.equal(report.public.cases[0].unannotatedBackgroundCount,1);
+ assert.equal(report.public.cases[0].annotatedCount,8);
+ assert.equal(report.public.cases[0].mustReadRecall.denominator,3);
+ assert.equal(report.private.cases[0].entries.at(-1).humanLabel,null);
+ for(const destination of ['FILTERED','NOT_RETAINED_BEFORE_CLUSTER','POSSIBLE_RELATED','LIBRARY_ONLY','FORMAL_ATTENTION','RELATED_UPDATE']){
+  system.cases[0].entries.at(-1).destination=destination;
+  assert.throws(()=>compareAnnotations(annotations(),system),/ANNOTATION_SET_MISMATCH/);
+ }
+ assert.throws(()=>compareAnnotations([...annotations(),human('S-10','必看')],fixture()),/ANNOTATION_SET_MISMATCH/);
+});
+
+test('must-read recall separates main, folded and WORTH_WATCHING membership',()=>{
+ const system=fixture();system.cases[0].entries[5]={entryId:'S-06',clusterId:'early',destination:'FORMAL_ATTENTION'};
+ system.cases[0].formalItems.push({id:'early',attentionDecision:'WORTH_WATCHING'});
+ const row=compareAnnotations(annotations(),system).public.cases[0];
+ assert.deepEqual(row.mustReadRecallMain,{numerator:2,denominator:3,value:2/3});
+ assert.deepEqual(row.mustReadRecallFolded,{numerator:0,denominator:3,value:0});
+ assert.deepEqual(row.mustReadRecallWorthWatching,{numerator:1,denominator:3,value:1/3});
+ assert.deepEqual(row.mustReadRecall,{numerator:3,denominator:3,value:1});
+ assert.equal(row.systemMainCount,1);
+ assert.equal(row.worthWatchingClusterCount,1);
+ assert.equal(row.falseKillCount,1);
+});
+
+test('blank background rows preserve the case choice and cannot hide choice conflicts',()=>{
+ const system=fixture();system.cases[0].entries.push({entryId:'S-09',clusterId:null,destination:'BACKGROUND'});system.cases[0].fetchedCount=9;
+ const rows=annotations().map(x=>({...x,choice:''}));rows.push(human('S-09','','都不用看'));
+ assert.equal(compareAnnotations(rows,system).public.cases[0].hardPushCount,1);
+ rows[0].choice='S-01';
+ assert.throws(()=>compareAnnotations(rows,system),/CONFLICTING_HUMAN_CHOICE/);
+});
+
 // Minimal synthetic XLSX ZIP (stored entries), using standard OOXML paths.
 function crc32(bytes){let c=0xffffffff;for(const byte of bytes){c^=byte;for(let n=0;n<8;n++)c=(c>>>1)^((c&1)?0xedb88320:0);}return (c^0xffffffff)>>>0;}
-function workbook(rows, shared=false, compressed=false, choices) {
+function workbook(rows, shared=false, compressed=false, choices, prefixed=false, formulaCell) {
  const escape=s=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;');
  const strings=[];
  const xml=rows.map((row,i)=>`<row r="${i+1}">${row.map((v,j)=>{
@@ -123,6 +159,11 @@ function workbook(rows, shared=false, compressed=false, choices) {
   files['xl/_rels/workbook.xml.rels']=files['xl/_rels/workbook.xml.rels'].replace('</Relationships>','<Relationship Id="rId2" Target="worksheets/sheet2.xml"/></Relationships>');
   files['xl/worksheets/sheet2.xml']=`<worksheet><sheetData>${choices.map((row,i)=>`<row r="${i+1}">${row.map((v,j)=>`<c r="${String.fromCharCode(65+j)}${i+1}" t="inlineStr"><is><t>${escape(v)}</t></is></c>`).join('')}</row>`).join('')}</sheetData></worksheet>`;
  }
+ if(prefixed)for(const name of ['xl/workbook.xml','xl/worksheets/sheet1.xml','xl/sharedStrings.xml']){
+  files[name]=files[name].replace(/<(\/?)([A-Za-z][\w]*)(?=[\s/>])/g,'<$1sml:$2')
+   .replace(/^(<sml:\w+)/,'$1 xmlns:sml="http://schemas.openxmlformats.org/spreadsheetml/2006/main"');
+ }
+ if(formulaCell){const [part,ref]=formulaCell;files[part]=files[part].replace(new RegExp(`<c r="${ref}"[^>]*>[\\s\\S]*?<\\/c>`),`<c r="${ref}"><f>1+1</f><v>2</v></c>`);}
  const local=[],central=[];let offset=0;
  for(const [name,text] of Object.entries(files)){
   const n=Buffer.from(name),b=Buffer.from(text),packed=compressed?deflateRawSync(b):b,h=Buffer.alloc(30),c=Buffer.alloc(46);
@@ -136,6 +177,31 @@ function workbook(rows, shared=false, compressed=false, choices) {
 function rows(){return [['条目ID','案例','标签','只能看一条'],...annotations().map(x=>[x.entryId,x.caseId,x.label,x.choice])];}
 test('XLSX inline and shared strings parse only synthetic label columns',()=>{
  for(const shared of [false,true])for(const compressed of [false,true])assert.deepEqual(readAnnotationWorkbook(workbook(rows(),shared,compressed)),annotations());
+});
+
+test('prefixed OOXML and legacy template labels parse without changing the workbook',()=>{
+ const input=[['条目ID','批次','问题或任务','标签'],
+  ['S-01','S-UNCERTAIN','invented question','必看'],
+  ['S-02','S-UNCERTAIN','invented question','可看'],
+  ['S-03','S-UNCERTAIN','invented question','可忽略'],
+  ['S-04','S-UNCERTAIN','invented question','材料不足']];
+ const bytes=workbook(input,true,true,undefined,true),before=Buffer.from(bytes);
+ const parsed=readAnnotationWorkbook(bytes);
+ assert.deepEqual(parsed.map(x=>x.label),['必看','值得看但可以折叠','不相关','材料不够，看不出']);
+ assert.ok(parsed.every(x=>x.caseId==='S'&&x.choice===''));
+ assert.deepEqual(bytes,before);
+});
+
+test('instruction-sheet formulas are ignored but formulas in label fields are rejected',()=>{
+ const sheets=[['说明','统计'],['total','placeholder']];
+ assert.deepEqual(readAnnotationWorkbook(workbook(rows(),false,true,sheets,false,['xl/worksheets/sheet2.xml','B2'])),annotations());
+ assert.throws(()=>readAnnotationWorkbook(workbook(rows(),false,true,undefined,false,['xl/worksheets/sheet1.xml','C2'])),/FORMULAS_NOT_SUPPORTED/);
+});
+
+test('legacy template example is not a human label and blank background rows remain blank',()=>{
+ const input=[['条目ID','批次','标签'],['示例-0','示例','必看'],['S-01','S-UNCERTAIN','必看'],['S-02','S-UNCERTAIN','']];
+ assert.deepEqual(readAnnotationWorkbook(workbook(input)),[
+  {entryId:'S-01',caseId:'S',label:'必看',choice:''},{entryId:'S-02',caseId:'S',label:'',choice:''}]);
 });
 test('XLSX batch suffix and row selection markers map without reading instruction text',()=>{
  const input=[['条目ID','批次','标签','只能看一条'],['S-01','S-UNCERTAIN','必看','是'],['S-02','S-UNCERTAIN','存档即可','']];
@@ -151,6 +217,14 @@ test('separate choice sheets recognize all case-column aliases and retain none-c
   assert.ok(parsed.every(x=>x.choice==='都不用看'));
   assert.equal(compareAnnotations(parsed,fixture()).public.cases[0].hardPushCount,1);
  }
+});
+
+test('a separate choice workbook joins by case without rewriting the annotation workbook',()=>{
+ const materials=workbook(rows().map(row=>row.slice(0,3)));
+ const choices=workbook([['案例','只能看一条'],['S','S-02']]);
+ assert.deepEqual(readAnnotationWorkbook(materials,choices),annotations());
+ const conflict=workbook([['案例','只能看一条'],['S','S-01']]);
+ assert.throws(()=>readAnnotationWorkbook(workbook(rows()),conflict),/CONFLICTING_HUMAN_CHOICE/);
 });
 test('CLI writes public aggregates and PRIVATE differences without modifying inputs',()=>{
  const dir=mkdtempSync(join(tmpdir(),'annotation-synthetic-'));
