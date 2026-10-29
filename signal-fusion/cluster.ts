@@ -1,3 +1,4 @@
+import { hasOppositeClaims } from "./claim-conflict.ts";
 import type { FusionEvidence, SignalCluster, SourceRole } from "./types.ts";
 
 export function normalizeClaim(value: string) {
@@ -50,10 +51,7 @@ function timeScope(evidence: FusionEvidence[]) {
 
 function conflictState(evidence: FusionEvidence[]) {
   if (evidence.some((item) => item.verificationStatus === "conflicting")) return "conflicting" as const;
-  const text = evidence.map((item) => item.claim).join(" \n ");
-  const negative = /not\s+(released|available|confirmed|true)|denies|denied|false|incorrect|disputes|否认|不实|反驳|澄清/.test(text);
-  const positive = /(released|available|confirmed|true|announced|发布|确认|上线|可用)/i.test(text);
-  return negative && positive ? "unresolved" as const : "none" as const;
+  return hasOppositeClaims(evidence.map(item => item.claim)) ? "unresolved" as const : "none" as const;
 }
 
 export function buildSignalCluster(evidence: FusionEvidence[]): SignalCluster {

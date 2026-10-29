@@ -1,3 +1,4 @@
+import { hasOppositeClaims } from "../signal-fusion/claim-conflict.ts";
 import { parseCustomSources, type CustomSourceCheck } from "../lib/custom-sources.ts";
 import { readCustomSource } from "../source-enrichment/custom-source.ts";
 import { retrieveRegisteredFeeds, type FeedReadCache } from "./registered-feeds.ts";
@@ -1235,13 +1236,7 @@ function clusterEvents(items: ResearchCandidate[]) {
 }
 
 function hasConflict(items: ResearchCandidate[]) {
-  if (items.length < 2) return false;
-  const opposing = items.filter((item) =>
-    /denies|denied|false|incorrect|disputes|否认|不实|反驳|澄清|冲突/i.test(
-      `${item.title} ${item.snippet}`,
-    ),
-  );
-  return opposing.length > 0 && opposing.length < items.length;
+  return hasOppositeClaims(items.map(item => [item.title, item.snippet].join('\n')));
 }
 
 function clamp(value: number) {
