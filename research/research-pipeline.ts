@@ -1206,6 +1206,20 @@ function titleTokens(title: string) {
   return new Set(tokens);
 }
 
+function releaseIdentity(item: ResearchCandidate) {
+  if (!/release|channel|update|发布|版本/iu.test(item.title)) return undefined;
+  const title = item.title.toLowerCase();
+  const platform = /chrome\s?os|chromeos/i.test(title) ? 'chromeos'
+    : /android|安卓/i.test(title) ? 'android' : /\bios\b/i.test(title) ? 'ios'
+    : /desktop|桌面/i.test(title) ? 'desktop' : undefined;
+  const channel = /extended\s+stable/i.test(title) ? 'extended-stable'
+    : /early\s+stable/i.test(title) ? 'early-stable'
+    : /\b(dev|beta|stable|lts|ltc)\b/i.exec(title)?.[1];
+  const version = /\bv?\d+(?:\.\d+){1,4}\b/i.exec(item.title)?.[0]
+    ?? /\bv?\d+(?:\.\d+){1,4}\b/i.exec(item.snippet)?.[0];
+  return { platform, channel, version: version?.replace(/^v/i, '') };
+}
+
 function sameEvent(a: ResearchCandidate, b: ResearchCandidate) {
   // Versioned release URLs of the same repo ("/releases/tag/vX.Y.Z") are
   // distinct events: token overlap on the repo name would otherwise collapse a
@@ -1217,6 +1231,10 @@ function sameEvent(a: ResearchCandidate, b: ResearchCandidate) {
     const sameBase = a.url.slice(0, a.url.indexOf("/tag/")) === b.url.slice(0, b.url.indexOf("/tag/"));
     if (sameBase) return leftTag.toLowerCase() === rightTag.toLowerCase();
   }
+  const leftRelease = releaseIdentity(a);
+  const rightRelease = releaseIdentity(b);
+  if (leftRelease && rightRelease && (['platform', 'channel', 'version'] as const).some(key =>
+    (leftRelease[key] || rightRelease[key]) && leftRelease[key] !== rightRelease[key])) return false;
   const left = titleTokens(a.title);
   const right = titleTokens(b.title);
   if (!left.size || !right.size) return false;
@@ -1228,7 +1246,7 @@ function sameEvent(a: ResearchCandidate, b: ResearchCandidate) {
 function clusterEvents(items: ResearchCandidate[]) {
   const clusters: ResearchCandidate[][] = [];
   for (const item of items) {
-    const cluster = clusters.find((candidate) => sameEvent(candidate[0], item));
+    const cluster = clusters.find((candidate) => candidate.every(member => sameEvent(member, item)));
     if (cluster) cluster.push(item);
     else clusters.push([item]);
   }
@@ -2214,6 +2232,7 @@ export async function runResearchPipeline(
         novelty: { actual: noveltyScore, threshold: 65, pass: noveltyScore >= 65 },
       };
       const canEnterLibrary =
+        withinWindow &&
         validContent &&
         topicRelevance.decision === "MATCH" &&
         ((libraryBranch.reliability.pass &&

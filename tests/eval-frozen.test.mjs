@@ -33,6 +33,7 @@ test('frozen evaluation replays real fixtures deterministically without external
       assert.equal(item.returnedCardCount, item.formalAttentionCount + item.libraryCount);
       assert.equal(item.possibleRelatedCount, item.possibleRelated.length);
       assert.equal(item.outsideWindowReturnedCardCount, item.outsideWindowReturnedCardIds.length);
+      assert.equal(item.outsideWindowReturnedCardCount, 0, 'D06 dates must gate library cards too');
       assert.ok(Number.isInteger(item.retrievedCount));
       assert.equal(item.entries.length, 25);
       assert.equal(new Set(item.entries.map(entry => entry.entryId)).size, 25);
@@ -54,7 +55,7 @@ test('D03 complete OBS control snapshot is actually replayed in both modes', () 
  assert.equal(child.status,0,child.stderr);
  const report=JSON.parse(readFileSync(join(directory,'results.json'),'utf8'));
  assert.deepEqual(report.cases.map(row=>row.id),['D03','D03']);
- for(const row of report.cases){assert.ok(row.fixtureReads>0);assert.equal(row.fetchedCount,10);}
+ for(const row of report.cases){assert.ok(row.fixtureReads>0);assert.equal(row.fetchedCount,10);assert.equal(row.outsideWindowReturnedCardCount,0,'OBS control dates must gate library cards too');}
  assert.equal(report.networkRequests,0);
  } finally {rmSync(directory,{recursive:true,force:true});}
 });
