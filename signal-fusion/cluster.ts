@@ -56,6 +56,23 @@ function conflictState(evidence: FusionEvidence[]) {
 
 export function buildSignalCluster(evidence: FusionEvidence[]): SignalCluster {
   const first = evidence[0];
+  const seenUrls = new Set<string>();
+  const seenContent = new Set<string>();
+  const independentSources = new Set<string>();
+  let duplicateCount = 0;
+  for (const item of evidence) {
+    let url = item.sourceUrl;
+    try { const parsed = new URL(url); parsed.hash = ''; url = parsed.href; } catch { /* retain original identity */ }
+    const fullText = item.contentText?.toLowerCase().replace(/\s+/gu, ' ').trim();
+    // A title alone cannot establish that two official announcements are copies.
+    const content = fullText ? `body:${fullText}` : (sourceRoleForEvidence(item) !== 'PRIMARY' ? `claim:${canonicalSource(item)}:${normalizeClaim(item.claim)}` : undefined);
+    const repeated = seenUrls.has(url) || Boolean(content && seenContent.has(content));
+    if (repeated) duplicateCount++;
+    else independentSources.add(canonicalSource(item));
+    seenUrls.add(url);
+    if (content) seenContent.add(content);
+  }
+
   const canonicalSources = Array.from(new Set(evidence.map(canonicalSource).filter(Boolean)));
   const sourceRoles = Array.from(new Set(evidence.map(sourceRoleForEvidence)));
   const normalizedClaim = normalizeClaim(first?.claim || "");
@@ -67,8 +84,8 @@ export function buildSignalCluster(evidence: FusionEvidence[]): SignalCluster {
     timeScope: timeScope(evidence),
     evidenceIds: evidence.map((item) => item.evidenceId),
     sourceRoles,
-    independentSourceCount: canonicalSources.length,
-    duplicateCount: Math.max(0, evidence.length - canonicalSources.length),
+    independentSourceCount: independentSources.size,
+    duplicateCount,
     conflictState: conflictState(evidence),
     canonicalSources,
   };

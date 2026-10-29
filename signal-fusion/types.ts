@@ -34,6 +34,8 @@ export type FusionEvidence = {
   entity?: string;
   topic?: string;
   claim: string;
+  /** Full available source text for exact-copy comparison, never inferred from the publisher. */
+  contentText?: string;
   sourceUrl: string;
   publisher: string;
   publishedAt?: string;

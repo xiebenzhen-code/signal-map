@@ -2064,6 +2064,7 @@ export async function runResearchPipeline(
         entity: plan.entities[0],
         topic: plan.coreKeywords[0] || plan.originalNeed,
         claim: candidate.title,
+        contentText: candidate.snippet,
         sourceUrl: candidate.url,
         publisher: candidate.source,
         publishedAt: isoDate(candidate.publishedAt),
