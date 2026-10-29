@@ -77,6 +77,8 @@ import type {
 type ProgressHandler = (progress: PipelineProgress) => void | Promise<void>;
 
 export type ResearchPipelineDebug = {
+  /** Offline replay only; internal parameter, never read from HTTP input or configuration. */
+  frozenQueryPlan?: QueryPlan;
   onDetailRead?: (result: import("../source-enrichment/types.ts").DetailEnrichmentResult) => void;
   /** Internal-only transport dependency, never accepted by an HTTP handler. */
   detailReadOptions?: import("../source-enrichment/detail-enricher.ts").DetailReadOptions;
@@ -1420,15 +1422,15 @@ export async function runResearchPipeline(
   };
 
   const planResolution = resolvePipelinePlan(input, retrievalPlanOrSourceSelection);
-  const plan = planResolution.plan;
+  const plan = debug?.frozenQueryPlan ? structuredClone(debug.frozenQueryPlan) : planResolution.plan;
   // Retrieval and eligibility use the same disclosed canonical window.
   input = { ...input, freshnessWindow: plan.requestedFreshnessWindow };
   const windowDays = freshnessDays(plan.requestedFreshnessWindow);
-  const allowedProviderIds = plan.allowedProviderIds?.length
-    ? plan.allowedProviderIds
+  const allowedProviderIds = planResolution.plan.allowedProviderIds?.length
+    ? planResolution.plan.allowedProviderIds
     : undefined;
   const canExecute = (providerId: string) => !allowedProviderIds || allowedProviderIds.includes(providerId);
-  const sourceConstrained = Boolean(plan.selectedSourceType || plan.allowedProviderIds?.length);
+  const sourceConstrained = Boolean(plan.selectedSourceType || allowedProviderIds?.length);
   const providerPlan = (providerId: string, providerName: string, configured: boolean | "runtime_status") => ({
     providerId,
     providerName,
