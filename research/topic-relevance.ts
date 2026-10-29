@@ -180,6 +180,7 @@ const CONSTRAINT_STOP_TERMS = new Set([
   "版本", "升级", "哪些", "有哪", "有哪些", "什么", "为什么", "如何", "怎么", "值得", "安排", "动态",
   "变化", "变更", "更新", "发布", "推出", "上线", "最近", "过去", "未来", "当前",
   "现在", "今天", "昨天", "本周", "本月", "一个", "个月", "新闻", "公告",
+  "浏览器", "browser", "browsers", "week", "weeks", "month", "months", "day", "days", "year", "years",
   // broad domain register
   "模型", "生成", "成式", "基础", "开源", "开发", "工具", "功能", "特性",
   "改版", "版本号", "个版",
@@ -276,6 +277,18 @@ function constraintTermsFrom(values: string[], entities: Set<string>): string[] 
       if (!trimmed) continue;
       const fragments = trimmed.split(new RegExp(`[${CJK_CONNECTIVES}]`, "u")).filter(Boolean);
       for (const fragment of fragments) {
+        // Reuse the existing task-concept vocabulary inside compounds, but
+        // only when the remainder consists of domain/change wording.
+        const concepts = TASK_CONCEPT_GROUPS.flat().filter(member =>
+          hasCjk(member) && fragment.includes(member));
+        let remainder = fragment;
+        for (const term of [...concepts, ...CONSTRAINT_STOP_TERMS].sort((a,b) => b.length-a.length)) {
+          remainder = remainder.replaceAll(term, '');
+        }
+        if (concepts.length && !remainder) {
+          for (const concept of concepts) terms.add(concept);
+          continue;
+        }
         if (fragment.length < 2 || fragment.length > 3) continue;
         if (CONSTRAINT_STOP_TERMS.has(fragment)) continue;
         // Drop fragments carrying a register stop word ("生成式" contains
@@ -292,7 +305,7 @@ function constraintTermsFrom(values: string[], entities: Set<string>): string[] 
     if (latinTokens.length > 0 && latinTokens.length <= 3 &&
       latinTokens.every((token) =>
         !GENERIC_TERMS.has(token) && !entities.has(token) &&
-        !CONSTRAINT_STOP_TERMS.has(token) && !CONSTRAINT_TIME_PATTERN.test(token))) {
+        !CONSTRAINT_STOP_TERMS.has(token) && !NON_TASK_FUNCTION_WORDS.has(token) && !CONSTRAINT_TIME_PATTERN.test(token))) {
       terms.add(latinTokens.join(" "));
     }
   }
