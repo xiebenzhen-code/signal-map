@@ -15,16 +15,17 @@ import { selectRegisteredFeeds } from '../source-registry/feed-catalog.ts';
 import { freshnessWindowHours } from '../information/freshness.ts';
 
 const args = process.argv.slice(2);
-if (args.length && (args.length !== 2 || args[0] !== '--output-dir')) {
-  throw new Error('Usage: node scripts/eval-frozen.mjs [--output-dir DIRECTORY]');
+if (args.length % 2 || args.some((value,index) => index % 2 === 0 && !['--output-dir','--fixture'].includes(value))) {
+  throw new Error('Usage: node scripts/eval-frozen.mjs [--output-dir DIRECTORY] [--fixture METADATA]');
 }
-const output = resolve(args[1] ?? 'outputs/eval-frozen');
-const metadataUrl = new URL('../tests/fixtures/d06-plan.json', import.meta.url);
-const feedUrl = new URL('../tests/fixtures/d06-chrome.xml', import.meta.url);
+const options = Object.fromEntries(Array.from({length:args.length/2},(_,i)=>[args[i*2],args[i*2+1]]));
+const output = resolve(options['--output-dir'] ?? 'outputs/eval-frozen');
+const metadataUrl = options['--fixture'] ? new URL(`file:///${resolve(options['--fixture']).replaceAll('\\','/')}`) : new URL('../tests/fixtures/d06-plan.json', import.meta.url);
+const feedUrl = new URL(metadataUrl.href.replace(/-plan\.json$/, metadataUrl.href.includes('d03-') ? '-obs.xml' : '-chrome.xml'));
 const metadataBytes = readFileSync(metadataUrl);
 const feedBytes = readFileSync(feedUrl);
 const fixture = JSON.parse(metadataBytes);
-const chromeFeed = selectRegisteredFeeds({entities: ['Chrome'], query: ''}).find(feed => feed.id === 'chrome');
+const chromeFeed = selectRegisteredFeeds({entities: fixture.plan.entities, query: ''}).find(feed => feed.id === fixture.sourceIds[0]);
 if (!chromeFeed) throw new Error('Missing Chrome catalog entry');
 const rawEntries = parseRegisteredFeed(feedBytes.toString('utf8'), chromeFeed).entries;
 const now = Date.parse(fixture.asOf);
@@ -58,7 +59,7 @@ try {
       ...options,
       lookup: async () => [{ address: '93.184.216.34', family: 4 }],
       request: async target => {
-        if (target.href !== 'https://chromereleases.googleblog.com/feeds/posts/default') {
+        if (target.href !== chromeFeed.url) {
           throw new Error('NO_FROZEN_FIXTURE_FOR_SOURCE');
         }
         fixtureReads++;
@@ -106,7 +107,7 @@ const row = {
       : (summary.possibleRelated ?? []).some(item => item.id === trace.id) ? 'POSSIBLE_RELATED'
       : formalItems.some(item => item.id === trace.id) ? 'FORMAL_ATTENTION'
       : libraryItems.some(item => item.id === trace.id) ? 'LIBRARY_ONLY' : 'FILTERED';
-    return { entryId: `D06-${String(index + 1).padStart(2, '0')}`, ...entry,
+    return { entryId: `${fixture.id}-${String(index + 1).padStart(2, '0')}`, ...entry,
       inWindow: Number.isFinite(timestamp) && timestamp >= start && timestamp <= now,
       clusterId: trace?.id ?? null, decision: trace?.topicRelevance?.decision ?? null,
       reason: trace?.topicRelevance?.reason ?? null, destination };
@@ -127,7 +128,7 @@ if (networkRequests) throw new Error(`OFFLINE_VIOLATION: ${networkRequests} netw
 if (!fixtureReads) throw new Error('FIXTURE_NOT_EFFECTIVE: no frozen feed was read');
 const report = {
   schemaVersion: 2, networkRequests, modelCalls: 0,
-  limitations: '只有 D06 一组完整冻结题面与 RSS；没有冻结详情 HTML，详情明确标为不可读取，保留 RSS 摘要。翻译关闭。没有人工金标或历史完整轨迹。不计算误零率、精度，不代表线上效果。',
+  limitations: '当前指定案例有完整冻结题面与 RSS；没有冻结详情 HTML，详情明确标为不可读取，保留 RSS 摘要。翻译关闭。没有人工金标或历史完整轨迹。不计算误零率、精度，不代表线上效果。',
   fixtures: [metadataUrl, feedUrl].map((url, index) => ({
     path: `tests/fixtures/${url.pathname.split('/').at(-1)}`,
     sha256: createHash('sha256').update(index ? feedBytes : metadataBytes).digest('hex'),

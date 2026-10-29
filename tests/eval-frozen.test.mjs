@@ -46,3 +46,15 @@ test('frozen evaluation replays real fixtures deterministically without external
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('D03 complete OBS control snapshot is actually replayed in both modes', () => {
+ const directory=mkdtempSync(join(tmpdir(),'signal-map-control-'));
+ try {
+ const child=spawnSync(process.execPath,['--experimental-strip-types','scripts/eval-frozen.mjs','--output-dir',directory,'--fixture','tests/fixtures/d03-plan.json'],{encoding:'utf8',timeout:30000});
+ assert.equal(child.status,0,child.stderr);
+ const report=JSON.parse(readFileSync(join(directory,'results.json'),'utf8'));
+ assert.deepEqual(report.cases.map(row=>row.id),['D03','D03']);
+ for(const row of report.cases){assert.ok(row.fixtureReads>0);assert.equal(row.fetchedCount,10);}
+ assert.equal(report.networkRequests,0);
+ } finally {rmSync(directory,{recursive:true,force:true});}
+});

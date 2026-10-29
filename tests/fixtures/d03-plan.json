@@ -1,0 +1,160 @@
+{
+  "id": "D03",
+  "sourceIds": [
+    "obs"
+  ],
+  "question": "过去30天 OBS Studio 的视频录制有哪些更新？",
+  "questionOrigin": "diagnostic authored question over existing real snapshots",
+  "planOrigin": "regenerated offline at 5142a67; not historical runtime plan",
+  "input": {
+    "identity": "离线诊断",
+    "industry": "视频制作",
+    "focusAreas": "视频录制",
+    "currentQuestions": "过去30天 OBS Studio 的视频录制有哪些更新？",
+    "knownInformation": "",
+    "informationGaps": "",
+    "trackedEntities": "OBS Studio",
+    "trackedEvents": "",
+    "userJudgements": "",
+    "evidenceHistory": "",
+    "freshnessWindow": "30d"
+  },
+  "plan": {
+    "originalNeed": "视频制作；视频录制；过去30天 OBS Studio 的视频录制有哪些更新？；OBS Studio；30d",
+    "requestedQuestion": "过去30天 OBS Studio 的视频录制有哪些更新？",
+    "coreKeywords": [
+      "视频制作",
+      "视频录制",
+      "过去30天 OBS Studio 的视频录制有哪些更新？",
+      "OBS Studio"
+    ],
+    "topicAnchors": [],
+    "topicKeywords": [
+      "视频制作",
+      "视频录制",
+      "OBS Studio",
+      "OBS",
+      "Studio"
+    ],
+    "englishKeywords": [
+      "OBS",
+      "Studio"
+    ],
+    "synonyms": [],
+    "entities": [
+      "OBS Studio",
+      "OBS",
+      "Studio"
+    ],
+    "industryKeywords": [
+      "视频制作"
+    ],
+    "changeKeywords": [
+      "latest",
+      "today",
+      "update",
+      "new",
+      "release",
+      "announcement",
+      "release notes",
+      "changelog",
+      "GitHub",
+      "new feature",
+      "new limitation",
+      "pricing",
+      "API",
+      "policy",
+      "hiring",
+      "this week"
+    ],
+    "knowledgeAwareQueries": [],
+    "searchCombinations": [
+      "OBS Studio latest update",
+      "OBS latest update",
+      "Studio latest update",
+      "OBS Studio today announcement",
+      "OBS Studio release notes changelog",
+      "OBS Studio GitHub release this week",
+      "OBS Studio new feature new limitation pricing API policy hiring",
+      "OBS today announcement",
+      "OBS release notes changelog",
+      "OBS GitHub release this week",
+      "OBS new feature new limitation pricing API policy hiring",
+      "Studio today announcement",
+      "Studio release notes changelog",
+      "Studio GitHub release this week",
+      "Studio new feature new limitation pricing API policy hiring",
+      "OBS Studio Investor Relations",
+      "OBS Studio official announcement",
+      "OBS Investor Relations",
+      "OBS official announcement",
+      "Studio Investor Relations",
+      "Studio official announcement",
+      "视频制作 product launch release",
+      "视频录制 OBS Studio workflow tool",
+      "OBS Studio research model"
+    ],
+    "retrievalWindows": [
+      "24h",
+      "3d",
+      "7d",
+      "30d"
+    ],
+    "requestedFreshnessWindow": "30d",
+    "resolvedEntities": [
+      {
+        "canonicalEntity": "OBS Studio",
+        "aliasesConsidered": [
+          "OBS Studio"
+        ]
+      },
+      {
+        "canonicalEntity": "OBS",
+        "aliasesConsidered": [
+          "OBS"
+        ]
+      },
+      {
+        "canonicalEntity": "Studio",
+        "aliasesConsidered": [
+          "Studio"
+        ]
+      }
+    ],
+    "aliasesConsidered": [
+      "OBS Studio",
+      "OBS",
+      "Studio"
+    ],
+    "excludedEntities": [],
+    "excludedContentTypes": [],
+    "queryBudget": 24,
+    "deduplicatedQueryCount": 24
+  },
+  "asOf": "2026-10-20T08:33:33.035Z",
+  "asOfOrigin": "capture metadata",
+  "windowStart": "2026-09-20T08:33:33.035Z",
+  "rawCount": 10,
+  "normalizedCount": 10,
+  "reasonDistribution": {
+    "LEGACY_QUERY_TERM_MATCH": 10
+  },
+  "decisionDistribution": {
+    "MATCH": 10
+  },
+  "dateDistribution": {
+    "OUTSIDE_WINDOW": 10
+  },
+  "inWindowDecisionDistribution": {},
+  "profilePresent": false,
+  "profileTaskAnchorsEmpty": null,
+  "productionDisplayCount": null,
+  "humanGoldCount": 0,
+  "falseZeroRate": null,
+  "displayPrecision": null,
+  "snapshotProvenance": {
+    "originalPath": "outputs/source-expansion-evidence-20261020/obs.xml",
+    "sha256": "b195c95b3aba4257ca01d726457aad7428e59754816b7406369bd8639c1489bb",
+    "captureTime": "2026-10-20T08:33:33.035Z"
+  }
+}
