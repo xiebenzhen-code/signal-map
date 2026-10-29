@@ -41,7 +41,7 @@ This is a bounded research workflow, not an autonomous agent. Deterministic code
 | Capability | Evidence | Not yet done |
 |---|---|---|
 | Source reading and filtering | Limited real reads, deterministic tests, execution logs | Cross-industry coverage, sustained availability, answer quality |
-| Uncertain-material routing | Gate unit test: a frozen D06 Chrome RSS body yields 25 UNCERTAIN items, 0 formal results and 25 possibly related; static render snapshots ([n4-closeout](docs/verification/n4-closeout-20261026.md)) | Live-page verification; human labels to check whether the folded group hides must-read items |
+| Uncertain-material routing | D06 full frozen-plan offline replay: 25 fetched / 25 after URL deduplication, 0 formal-attention cards, 0 library cards, 5 possibly-related clusters. N4's 25 possibly-related items belong only to its controlled display-gate unit test ([recheck and item destinations](docs/verification/d06-eval-dedup-repair-20261029.md), [N4](docs/verification/n4-closeout-20261026.md)) | Live-page verification; human labels to check whether the folded group hides must-read items |
 | Zero-result reasons and coverage notices | Per-source read notices and six zero-result reasons, with unit tests and render snapshots | Live-page verification |
 | Diagnostic-endpoint token gate | Live API028 has no diagnostic token; anonymous POST to both endpoints returns 404 ([release evidence](docs/verification/api028-source-deployment-report.md)) | Live; this does not validate login or research quality |
 | Account record persistence | Test-account save, sign-out and sign-in read-back, new record visible in the browser | More accounts and devices |
@@ -83,7 +83,7 @@ Web: React / vinext. API: a separate Node.js process. Authentication: Supabase A
 
 For the file contents of `develop` commit `e7d1b2b`, `quality`, `build` and `api:build` each exited 0 on Node.js 24.21.0: **1035 tests, 1029 passed, 0 failed, 6 skipped because the database test environment is absent**. Evidence: [develop gate record](docs/verification/develop-e7d1b2b-gates-20261028.md). Lint reports no errors but still has existing warnings. Skips do not count as passes; these figures are neither coverage nor production success rates.
 
-The D06 check uses a frozen Chrome RSS body; the remaining scores are controlled so that the real display gates can be isolated. It shows the display contract, not a production end-to-end run or a quality benchmark.
+D06 compares the complete frozen plan with the legacy queries-only rebuilt plan. The latter returns 0 formal-attention cards, 1 library card and 0 possibly-related clusters; that library card is not formal attention. N4's controlled display-gate test still yields 0/25 and does not replace a full replay. Nine out-of-window source items still participate in aggregation; in-window card dates do not prove that all underlying evidence is in-window. No human gold labels or live end-to-end validation are claimed.
 
 A historical domestic AI run retrieved 30 GeekPark and 5 36Kr items, deduplicated them to 34 and returned 2 signals. A single run establishes neither sustained reliability nor answer correctness.
 
